@@ -1,0 +1,314 @@
+"""Unit tests for MemoryService."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+from unittest.mock import MagicMock
+
+import chromadb
+import pytest
+
+from memkernel.config import MemKernelSettings
+from memkernel.core.models import MemoryType
+from memkernel.core.services import MemoryService
+from memkernel.retrieval.search import HybridSearchService
+from memkernel.retrieval.sparse import BM25Index
+from memkernel.storage.chroma import ChromaVectorStore
+from tests.conftest import MockEmbedding
+
+# ---------------------------------------------------------------------------
+# Fixture helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_settings(**overrides: Any) -> MemKernelSettings:
+    # Use a unique project_id per call so each test gets its own ChromaDB
+    # collection; EphemeralClient shares in-process state by collection name.
+    base: dict[str, Any] = {
+        "project_id": f"test-{uuid.uuid4().hex[:8]}",
+        "default_session_id": "default",
+        "rrf_k": 60,
+        "search_top_k": 5,
+        "preview_length": 200,
+        "episode_ttl_days": 30,
+    }
+    base.update(overrides)
+    return MemKernelSettings(**base)
+
+
+def _make_service(
+    settings: MemKernelSettings | None = None,
+    sparse: BM25Index | None = None,
+) -> tuple[MemoryService, ChromaVectorStore, BM25Index]:
+    if settings is None:
+        settings = _make_settings()
+    if sparse is None:
+        sparse = BM25Index()
+    store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
+    embedding = MockEmbedding()
+    search_svc = HybridSearchService(store, embedding, sparse, settings)
+    svc = MemoryService(store, embedding, sparse, search_svc, settings)
+    return svc, store, sparse
+
+
+# ---------------------------------------------------------------------------
+# retain — basic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retain_new_content_returns_ref_id() -> None:
+    svc, store, _ = _make_service()
+    ref_id = svc.retain("Use ruff for linting.", MemoryType.CONVENTION)
+    assert isinstance(ref_id, str)
+    assert len(ref_id) > 0
+
+
+@pytest.mark.unit
+def test_retain_new_content_get_returns_memory() -> None:
+    svc, store, _ = _make_service()
+    ref_id = svc.retain("Use ruff for linting.", MemoryType.CONVENTION, session_id="sess-1")
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.ref_id == ref_id
+    assert memory.content == "Use ruff for linting."
+    assert memory.type == MemoryType.CONVENTION
+    assert memory.session_id == "sess-1"
+
+
+# ---------------------------------------------------------------------------
+# retain — dedup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retain_duplicate_same_type_returns_same_ref_id() -> None:
+    """Retaining identical content + type returns the existing ref_id."""
+    svc, _, _ = _make_service()
+    content = "Always write type annotations."
+    ref1 = svc.retain(content, MemoryType.CONVENTION)
+    ref2 = svc.retain(content, MemoryType.CONVENTION)
+    assert ref1 == ref2
+
+
+@pytest.mark.unit
+def test_retain_duplicate_updates_session_and_timestamp() -> None:
+    """Dedup path updates session_id and timestamp on the existing memory."""
+    svc, _, _ = _make_service()
+    content = "Use PostgreSQL."
+    ref1 = svc.retain(content, MemoryType.DECISION, session_id="session-A")
+    memory_before = svc.get(ref1)
+    assert memory_before is not None
+    ts_before = memory_before.timestamp
+
+    ref2 = svc.retain(content, MemoryType.DECISION, session_id="session-B")
+    assert ref1 == ref2
+
+    memory_after = svc.get(ref2)
+    assert memory_after is not None
+    assert memory_after.session_id == "session-B"
+    assert memory_after.timestamp >= ts_before
+
+
+@pytest.mark.unit
+def test_retain_same_content_different_type_returns_different_ref_id() -> None:
+    """Same content + different type is a separate memory (ADR-5 widened key)."""
+    svc, _, _ = _make_service()
+    content = "Use async/await everywhere."
+    ref_decision = svc.retain(content, MemoryType.DECISION)
+    ref_convention = svc.retain(content, MemoryType.CONVENTION)
+    assert ref_decision != ref_convention
+
+
+# ---------------------------------------------------------------------------
+# recall
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_recall_returns_artifact_refs_not_memory() -> None:
+    """recall() returns ArtifactRef objects, not full Memory objects."""
+    from memkernel.core.models import ArtifactRef
+
+    svc, _, _ = _make_service()
+    svc.retain("Use Python 3.11 features.", MemoryType.CONVENTION)
+    results = svc.recall("Python features")
+    for r in results:
+        assert isinstance(r, ArtifactRef)
+        # ArtifactRef has no `content` attribute
+        assert not hasattr(r, "content")
+
+
+@pytest.mark.unit
+def test_recall_type_filter_returns_only_matching_type() -> None:
+    svc, _, _ = _make_service()
+    svc.retain("convention text about ruff", MemoryType.CONVENTION)
+    svc.retain("decision text about ruff linting choices", MemoryType.DECISION)
+
+    results = svc.recall("ruff", type=MemoryType.CONVENTION)
+    for r in results:
+        assert r.type == MemoryType.CONVENTION
+
+
+@pytest.mark.unit
+def test_recall_session_filter_returns_only_matching_session() -> None:
+    svc, _, _ = _make_service()
+    svc.retain("session A memory content", MemoryType.EPISODE, session_id="sess-A")
+    svc.retain("session B memory content", MemoryType.EPISODE, session_id="sess-B")
+
+    results = svc.recall("memory content", session_id="sess-A")
+    for r in results:
+        # Each ArtifactRef must correspond to a memory from sess-A
+        full = svc.get(r.ref_id)
+        assert full is not None
+        assert full.session_id == "sess-A"
+
+
+@pytest.mark.unit
+def test_recall_expired_episodes_do_not_crowd_out_live_results() -> None:
+    """Expired episodes must not suppress live results regardless of corpus size.
+
+    Regression for the bounded fetch-window bug: a fixed max_fetch cap
+    (desired_k * 20) caused recall(top_k=1) to return an empty list when 20+
+    expired episodes all ranked above the single live result.  The fix drops
+    the cap and relies on store_exhausted alone for loop termination.
+    """
+    from datetime import timedelta
+    from uuid import uuid4 as _uuid4
+
+    # 20 expired episodes + 1 live decision — matches the exact reproducer
+    N_EXPIRED = 20
+    settings = _make_settings(episode_ttl_days=30, search_top_k=1)
+    svc, store, sparse = _make_service(settings=settings)
+
+    embedding = MockEmbedding()
+    old_ts = (datetime.now(UTC) - timedelta(days=60)).isoformat()
+
+    for i in range(N_EXPIRED):
+        ref_id = str(_uuid4())
+        content = f"postgres expired episode content {i}"
+        vec = embedding.embed([content])[0]
+        store.upsert(
+            ref_id=ref_id,
+            content=content,
+            embedding=vec,
+            metadata={
+                "project_id": settings.project_id,
+                "session_id": "default",
+                "timestamp": old_ts,
+                "type": MemoryType.EPISODE.value,
+                "source": "test",
+                "hash": f"deadbeef{i:04x}",
+                "token_count": 5,
+                "checkpoint": False,
+            },
+        )
+        # Mirror into sparse index so the full hybrid ranking path is exercised
+        sparse.add(ref_id, content)
+
+    # Insert one live decision (never expires)
+    live_ref = svc.retain("use postgres as the primary database", MemoryType.DECISION)
+
+    # With top_k=1, the live decision must be returned even though 20 expired
+    # episodes fill the initial fetch windows.
+    results = svc.recall("postgres", top_k=1)
+    assert len(results) == 1
+    assert results[0].ref_id == live_ref
+
+
+# ---------------------------------------------------------------------------
+# get
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_get_returns_full_memory() -> None:
+    svc, _, _ = _make_service()
+    ref_id = svc.retain("Full content here.", MemoryType.CODE)
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.content == "Full content here."
+    assert memory.ref_id == ref_id
+
+
+@pytest.mark.unit
+def test_get_returns_none_for_missing_ref_id() -> None:
+    svc, _, _ = _make_service()
+    assert svc.get("nonexistent-ref-id") is None
+
+
+# ---------------------------------------------------------------------------
+# forget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_forget_removes_from_both_stores() -> None:
+    svc, store, sparse = _make_service()
+    ref_id = svc.retain("Forget me please.", MemoryType.EPISODE)
+
+    deleted = svc.forget(ref_id)
+    assert deleted is True
+
+    # Vector store reports None
+    assert svc.get(ref_id) is None
+
+    # BM25 index no longer contains the doc
+    assert len(sparse) == 0
+
+
+@pytest.mark.unit
+def test_forget_returns_false_for_nonexistent_ref_id() -> None:
+    svc, _, _ = _make_service()
+    assert svc.forget("does-not-exist") is False
+
+
+# ---------------------------------------------------------------------------
+# BM25 failure during retain sets needs_rebuild
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_bm25_failure_on_retain_sets_needs_rebuild() -> None:
+    """If BM25 add() raises, MemoryService marks the index for rebuild."""
+    settings = _make_settings()
+    store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
+    embedding = MockEmbedding()
+
+    # Mock sparse index whose add() always raises
+    mock_sparse = MagicMock(spec=BM25Index)
+    mock_sparse.add.side_effect = RuntimeError("simulated BM25 failure")
+    mock_sparse.needs_rebuild = False  # initial state
+
+    search_svc = HybridSearchService(store, embedding, mock_sparse, settings)
+    svc = MemoryService(store, embedding, mock_sparse, search_svc, settings)
+
+    # Should not raise — BM25 failure is non-fatal
+    ref_id = svc.retain("Test BM25 failure resilience.", MemoryType.CONVENTION)
+    assert isinstance(ref_id, str)
+
+    # mark_needs_rebuild should have been called
+    mock_sparse.mark_needs_rebuild.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# rebuild_sparse_index
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rebuild_sparse_index_repopulates_from_vector_store() -> None:
+    """rebuild_sparse_index() re-adds all docs from ChromaDB into BM25."""
+    svc, store, sparse = _make_service()
+
+    svc.retain("First document content.", MemoryType.DECISION)
+    svc.retain("Second document content.", MemoryType.CONVENTION)
+
+    # Clear BM25 manually to simulate loss
+    sparse.rebuild([])
+    assert len(sparse) == 0
+
+    svc.rebuild_sparse_index()
+    assert len(sparse) == 2
