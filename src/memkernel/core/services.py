@@ -128,7 +128,7 @@ class MemoryService:
         if self._sparse_index.needs_rebuild:
             self.rebuild_sparse_index()
 
-        desired_k = top_k or self._settings.search_top_k
+        desired_k = top_k if top_k is not None else self._settings.search_top_k
 
         # Iteratively widen the fetch window until we have enough live results
         # or the store is fully exhausted. No fixed ceiling: the store_exhausted

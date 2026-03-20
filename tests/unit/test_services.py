@@ -167,6 +167,20 @@ def test_recall_session_filter_returns_only_matching_session() -> None:
 
 
 @pytest.mark.unit
+def test_recall_top_k_zero_returns_empty_list() -> None:
+    """recall(top_k=0) must return [] not fall back to the settings default.
+
+    `top_k or default` treats 0 as falsy and silently returns `default` results.
+    The fix uses an explicit None check so zero is honoured as a literal request
+    for no results.
+    """
+    svc, _, _ = _make_service()
+    svc.retain("some convention content", MemoryType.CONVENTION)
+    results = svc.recall("convention content", top_k=0)
+    assert results == []
+
+
+@pytest.mark.unit
 def test_recall_expired_episodes_do_not_crowd_out_live_results() -> None:
     """Expired episodes must not suppress live results regardless of corpus size.
 

@@ -45,7 +45,7 @@ class HybridSearchService:
     def search(self, query: SearchQuery) -> list[ArtifactRef]:
         """Run hybrid search and return up to query.top_k ArtifactRefs."""
         where = _build_where_filter(query)
-        over_fetch = query.top_k * 3
+        over_fetch = max(1, query.top_k * 3)
 
         # Dense pass
         query_embedding = self._embedding.embed([query.query_text])[0]

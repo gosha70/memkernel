@@ -261,3 +261,19 @@ def test_filtered_sparse_with_type_filter() -> None:
     assert len(filtered) == 1
     assert filtered[0].ref_id == "dec-1"
     assert filtered[0].rank == 1  # re-ranked from 1
+
+
+@pytest.mark.unit
+def test_search_top_k_zero_does_not_crash() -> None:
+    """search() with top_k=0 must not pass n_results=0 to ChromaDB."""
+    settings = _make_settings()
+    store = _make_store(settings)
+    sparse = BM25Index()
+    embedding = MockEmbedding()
+
+    _insert(store, sparse, embedding, "id-1", "some content")
+
+    service = HybridSearchService(store, embedding, sparse, settings)
+    # top_k=0 previously caused over_fetch=0 → ChromaDB raised an exception
+    results = service.search(SearchQuery(query_text="some content", top_k=0))
+    assert results == []
