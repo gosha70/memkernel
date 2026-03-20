@@ -53,3 +53,6 @@ markers = [
     "slow: Tests that are slow (model loading, etc.)",
 ]
 asyncio_mode = "auto"
+
+[tool.coverage.report]
+omit = ["src/memkernel/core/ports.py"]

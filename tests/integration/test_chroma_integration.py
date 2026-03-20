@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import chromadb
 import pytest
@@ -13,7 +14,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from memkernel.config import MemKernelSettings
+from memkernel.core.models import MemoryType
+from memkernel.core.services import MemoryService
+from memkernel.retrieval.search import HybridSearchService
+from memkernel.retrieval.sparse import BM25Index
 from memkernel.storage.chroma import ChromaVectorStore
+from tests.conftest import MockEmbedding
 
 
 def _unit_embedding(text: str, dim: int = 8) -> list[float]:
@@ -22,8 +28,18 @@ def _unit_embedding(text: str, dim: int = 8) -> list[float]:
     return [x / norm if norm > 0 else 0.0 for x in raw]
 
 
-def _make_settings(project_id: str = "integ-project") -> MemKernelSettings:
-    return MemKernelSettings(project_id=project_id)
+def _make_settings(project_id: str | None = None, **overrides: Any) -> MemKernelSettings:
+    base: dict[str, Any] = {"project_id": project_id or f"integ-{uuid.uuid4().hex[:8]}"}
+    base.update(overrides)
+    return MemKernelSettings(**base)
+
+
+def _make_service(settings: MemKernelSettings) -> MemoryService:
+    store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
+    embedding = MockEmbedding()
+    sparse = BM25Index()
+    search_svc = HybridSearchService(store, embedding, sparse, settings)
+    return MemoryService(store, embedding, sparse, search_svc, settings)
 
 
 @pytest.mark.integration
@@ -65,3 +81,34 @@ def test_data_persists_across_client_restarts(tmp_path: Path) -> None:
     assert recovered.content == content
     assert recovered.content_hash == content_hash
     assert recovered.project_id == settings.project_id
+
+
+@pytest.mark.integration
+def test_retain_identical_content_returns_same_ref_id() -> None:
+    """Retaining identical content+type twice returns the same ref_id (dedup).
+
+    Exercises the full MemoryService → ChromaVectorStore path: the service
+    calls find_by_hash on the real adapter and must get back the existing
+    ref_id on the second retain rather than creating a new record.
+    """
+    svc = _make_service(_make_settings())
+    content = "Use PostgreSQL as the primary database."
+
+    ref_a = svc.retain(content, MemoryType.DECISION, session_id="sess-1")
+    ref_b = svc.retain(content, MemoryType.DECISION, session_id="sess-2")
+
+    assert ref_a == ref_b
+    assert svc.count() == 1
+
+
+@pytest.mark.integration
+def test_retain_same_content_different_type_creates_separate_records() -> None:
+    """Same content + different type must produce distinct ref_ids."""
+    svc = _make_service(_make_settings())
+    content = "Use async/await throughout."
+
+    ref_decision = svc.retain(content, MemoryType.DECISION)
+    ref_convention = svc.retain(content, MemoryType.CONVENTION)
+
+    assert ref_decision != ref_convention
+    assert svc.count() == 2
