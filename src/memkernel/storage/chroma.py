@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from memkernel.config import MemKernelSettings
 
 
+_REQUIRED_METADATA_KEYS: frozenset[str] = frozenset(
+    {"project_id", "session_id", "timestamp", "type", "source", "hash", "token_count"}
+)
+
+
 def _to_chroma_metadata(metadata: dict[str, Any]) -> dict[str, str | int | float | bool]:
     """Normalise a metadata dict to ChromaDB-acceptable scalar types."""
     result: dict[str, str | int | float | bool] = {}
@@ -97,6 +102,9 @@ class ChromaVectorStore:
         metadata: dict[str, Any],
     ) -> None:
         """Insert or update a memory in the collection."""
+        missing = _REQUIRED_METADATA_KEYS - metadata.keys()
+        if missing:
+            raise ValueError(f"upsert missing required metadata keys: {sorted(missing)}")
         embeddings: list[Sequence[float]] = [embedding]
         self._collection.upsert(
             ids=[ref_id],

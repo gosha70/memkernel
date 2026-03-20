@@ -92,7 +92,7 @@ def _register_health_resource(server: FastMCP[MemKernelContext]) -> None:
     async def status(ctx: Context[Any, MemKernelContext]) -> str:
         """Server health and memory statistics."""
         app_ctx: MemKernelContext = ctx.request_context.lifespan_context
-        count = app_ctx.memory_service._vector_store.count()  # noqa: SLF001
+        count = app_ctx.memory_service.count()
         return json.dumps(
             {
                 "status": "ok",

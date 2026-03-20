@@ -155,6 +155,10 @@ class MemoryService:
 
         return live[:desired_k]
 
+    def count(self) -> int:
+        """Return the total number of memories stored in this project."""
+        return self._vector_store.count()
+
     def get(self, ref_id: str) -> Memory | None:
         """Fetch full memory content by ref_id. Returns None if not found."""
         return self._vector_store.get_by_id(ref_id)

@@ -311,3 +311,20 @@ def test_list_all_with_where_filter_returns_subset(store: ChromaVectorStore) -> 
 
     assert len(results) == 1
     assert results[0].ref_id == "ref-keep"
+
+
+@pytest.mark.unit
+def test_upsert_raises_on_missing_required_metadata_key(store: ChromaVectorStore) -> None:
+    """upsert() must raise ValueError when a required metadata key is absent."""
+    incomplete = _base_metadata()
+    del incomplete["token_count"]
+
+    with pytest.raises(ValueError, match="token_count"):
+        store.upsert("ref-bad", "content", _unit_embedding("content"), incomplete)
+
+
+@pytest.mark.unit
+def test_upsert_accepts_complete_metadata(store: ChromaVectorStore) -> None:
+    """upsert() must not raise when all required metadata keys are present."""
+    store.upsert("ref-ok", "content", _unit_embedding("content"), _base_metadata())
+    assert store.get_by_id("ref-ok") is not None
