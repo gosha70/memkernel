@@ -142,6 +142,42 @@ class MyClass:
 
 
 @pytest.mark.slow
+def test_ast_chunker_oversized_class_recurses_into_methods() -> None:
+    """A class larger than chunk_size is not emitted as one chunk.
+
+    _walk must recurse into the oversized class_definition node and emit each
+    method (function_definition child) as a separate chunk.  This exercises
+    the lines 163-165 branch in _walk that was previously uncovered.
+
+    Each method body uses 8-space indentation so the source is valid Python.
+    compile() is called to assert this before the chunker is invoked.
+    """
+    # 8-space indented body lines — valid inside a class method
+    method_body = "        x = 1\n" * 8  # 14 chars * 8 = 112 chars per method body
+    code = (
+        "class Big:\n"
+        "    def alpha(self):\n"
+        + method_body
+        + "    def beta(self):\n"
+        + method_body
+        + "    def gamma(self):\n"
+        + method_body
+    )
+    # Sanity: the generated source must be valid Python before we test the chunker
+    compile(code, "<test>", "exec")
+
+    # chunk_size=200: each method (~132 chars) fits; the class (~406 chars) does not
+    chunker = ASTChunker(_make_settings(chunk_size=200, chunk_overlap=0))
+    result = chunker.chunk(code, {"source": "big.py"})
+    # The oversized class must NOT be emitted as a single chunk
+    assert not any("class Big" in c and "def alpha" in c and "def beta" in c for c in result)
+    # Each method must appear in its own chunk
+    assert any("def alpha" in c for c in result)
+    assert any("def beta" in c for c in result)
+    assert any("def gamma" in c for c in result)
+
+
+@pytest.mark.slow
 def test_ast_chunker_non_ascii_source_chunks_correctly() -> None:
     """Non-ASCII characters before a function must not corrupt the chunk text.
 
