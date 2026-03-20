@@ -49,6 +49,10 @@ class VectorStorePort(Protocol):
 
     def count(self) -> int: ...
 
+    def list_collections(self) -> list[dict[str, Any]]:
+        """List all collections visible to this adapter with their record counts."""
+        ...
+
 
 @runtime_checkable
 class EmbeddingPort(Protocol):

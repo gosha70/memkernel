@@ -228,3 +228,7 @@ class ChromaVectorStore:
     def count(self) -> int:
         """Return the total number of memories in the collection."""
         return self._collection.count()
+
+    def list_collections(self) -> list[dict[str, Any]]:
+        """List all collections accessible via this client with their record counts."""
+        return [{"name": coll.name, "count": coll.count()} for coll in self._client.list_collections()]

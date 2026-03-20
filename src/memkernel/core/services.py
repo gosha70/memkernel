@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -47,6 +48,7 @@ class MemoryService:
         self._search_service = search_service
         self._settings = settings
         self._chunker = chunker
+        self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
     # Core operations
@@ -160,6 +162,8 @@ class MemoryService:
         Expired memories are filtered out from the results.
         BM25 index is self-healed (rebuilt from vector store) if needs_rebuild is set.
         """
+        _start = time.perf_counter()
+
         if self._sparse_index.needs_rebuild:
             self.rebuild_sparse_index()
 
@@ -188,11 +192,45 @@ class MemoryService:
 
             fetch_k *= 2
 
-        return live[:desired_k]
+        live = live[:desired_k]
+        self._last_recall_ms = (time.perf_counter() - _start) * 1000
+        return live
 
     def count(self) -> int:
         """Return the total number of memories stored in this project."""
         return self._vector_store.count()
+
+    @property
+    def project_id(self) -> str:
+        """Return the project_id for this service instance."""
+        return self._settings.project_id
+
+    def stats(self) -> dict[str, object]:
+        """Return total count, per-type breakdown, memory growth, and last recall timing."""
+        all_memories = self._vector_store.list_all()
+        now = datetime.now(UTC)
+        by_type: dict[str, int] = {}
+        for m in all_memories:
+            by_type[m.type.value] = by_type.get(m.type.value, 0) + 1
+        growth = {
+            "last_24h": sum(1 for m in all_memories if m.timestamp >= now - timedelta(hours=24)),
+            "last_7d": sum(1 for m in all_memories if m.timestamp >= now - timedelta(days=7)),
+            "last_30d": sum(1 for m in all_memories if m.timestamp >= now - timedelta(days=30)),
+        }
+        return {
+            "total": len(all_memories),
+            "by_type": by_type,
+            "growth": growth,
+            "last_recall_ms": self._last_recall_ms,
+        }
+
+    def collection_count(self) -> int:
+        """Return the number of collections visible to this server's storage backend."""
+        return len(self._vector_store.list_collections())
+
+    def list_collections(self) -> list[dict[str, object]]:
+        """Return all collections visible to the storage backend with their record counts."""
+        return self._vector_store.list_collections()
 
     def get(self, ref_id: str) -> Memory | None:
         """Fetch full memory content by ref_id. Returns None if not found."""
