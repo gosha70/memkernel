@@ -394,6 +394,99 @@ def test_bm25_failure_on_retain_sets_needs_rebuild() -> None:
 
 
 # ---------------------------------------------------------------------------
+# BM25 failure during forget sets needs_rebuild
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_bm25_failure_on_forget_canonical_sets_needs_rebuild() -> None:
+    """If BM25 remove() raises during forget(), the service marks the index for rebuild.
+
+    The vector-store deletion must still succeed — BM25 failure is non-fatal.
+    """
+    settings = _make_settings()
+    store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
+    embedding = MockEmbedding()
+
+    mock_sparse = MagicMock(spec=BM25Index)
+    mock_sparse.add.return_value = None  # retain succeeds
+    mock_sparse.remove.side_effect = RuntimeError("simulated BM25 remove failure")
+    mock_sparse.needs_rebuild = False
+
+    search_svc = HybridSearchService(store, embedding, mock_sparse, settings)
+    svc = MemoryService(store, embedding, mock_sparse, search_svc, settings)
+
+    ref_id = svc.retain("Content to forget.", MemoryType.CONVENTION)
+
+    # Should not raise — BM25 failure is non-fatal
+    deleted = svc.forget(ref_id)
+    assert deleted is True
+    assert svc.get(ref_id) is None
+    mock_sparse.mark_needs_rebuild.assert_called()
+
+
+@pytest.mark.unit
+def test_bm25_failure_on_forget_chunk_sets_needs_rebuild() -> None:
+    """If BM25 remove() raises for a chunk ref during forget(), service marks rebuild.
+
+    Covers the chunk-deletion loop in forget() (services.py lines 214-216).
+    Vector-store deletions for both chunks and canonical must still succeed.
+    """
+    stub_chunker = MagicMock()
+    stub_chunker.chunk.return_value = ["chunk one content", "chunk two content"]
+
+    settings = _make_settings()
+    store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
+    embedding = MockEmbedding()
+
+    mock_sparse = MagicMock(spec=BM25Index)
+    mock_sparse.add.return_value = None  # retain succeeds
+    mock_sparse.remove.side_effect = RuntimeError("simulated BM25 remove failure")
+    mock_sparse.needs_rebuild = False
+
+    search_svc = HybridSearchService(store, embedding, mock_sparse, settings)
+    svc = MemoryService(store, embedding, mock_sparse, search_svc, settings, chunker=stub_chunker)
+
+    ref_id = svc.retain("original code content", MemoryType.CODE, source="foo.py")
+    # canonical + 2 chunks stored in vector store
+    assert store.count() == 3
+
+    deleted = svc.forget(ref_id)
+    assert deleted is True
+    assert svc.get(ref_id) is None
+    assert store.count() == 0  # all records removed from vector store
+    mock_sparse.mark_needs_rebuild.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# recall() self-heals BM25 when needs_rebuild is set
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_recall_triggers_rebuild_when_needs_rebuild_set() -> None:
+    """recall() calls rebuild_sparse_index() when needs_rebuild is True.
+
+    Covers services.py line 164 — the self-heal path that was previously
+    unreachable in tests.
+    """
+    svc, store, sparse = _make_service()
+    svc.retain("rebuild trigger content", MemoryType.DECISION)
+
+    # Simulate index loss and set the rebuild flag
+    sparse.rebuild([])
+    sparse.mark_needs_rebuild()
+    assert len(sparse) == 0
+    assert sparse.needs_rebuild is True
+
+    # recall() must self-heal before searching
+    svc.recall("rebuild trigger content")
+
+    assert sparse.needs_rebuild is False
+    assert len(sparse) == 1  # repopulated from vector store
+
+
+# ---------------------------------------------------------------------------
 # rebuild_sparse_index
 # ---------------------------------------------------------------------------
 
