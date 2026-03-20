@@ -26,7 +26,8 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Store a memory. Returns ref_id. Idempotent for identical content+type."""
-        assert ctx is not None
+        if ctx is None:
+            raise RuntimeError("Tool called outside of MCP request context")
         svc = ctx.request_context.lifespan_context.memory_service
         memory_type = MemoryType(type)
         ref_id = svc.retain(
@@ -48,7 +49,8 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Search memories by query. Returns ref_id + preview pairs. Use get(ref_id) for full content."""
-        assert ctx is not None
+        if ctx is None:
+            raise RuntimeError("Tool called outside of MCP request context")
         svc = ctx.request_context.lifespan_context.memory_service
         type_filter = MemoryType(type) if type else None
         results = svc.recall(
@@ -66,7 +68,8 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Retrieve full content of a memory by ref_id."""
-        assert ctx is not None
+        if ctx is None:
+            raise RuntimeError("Tool called outside of MCP request context")
         svc = ctx.request_context.lifespan_context.memory_service
         memory = svc.get(ref_id)
         if memory is None:
@@ -79,7 +82,8 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Delete a memory by ref_id. Removes from all indexes."""
-        assert ctx is not None
+        if ctx is None:
+            raise RuntimeError("Tool called outside of MCP request context")
         svc = ctx.request_context.lifespan_context.memory_service
         deleted = svc.forget(ref_id)
         return json.dumps({"ref_id": ref_id, "deleted": deleted})
