@@ -129,47 +129,51 @@ def test_retain_same_content_different_type_returns_different_ref_id() -> None:
 
 
 @pytest.mark.unit
-def test_retain_code_with_chunker_stores_multiple_records() -> None:
-    """retain(CODE) with a multi-chunk chunker stores one record per chunk.
+def test_retain_code_with_chunker_preserves_get_round_trip() -> None:
+    """get(retain(code)) must return the full original file, not just one chunk.
 
-    Uses a stub chunker that always returns two chunks regardless of content.
+    retain(CODE) stores the original content as the canonical record and also
+    indexes each chunk for recall() granularity.  The returned ref_id points
+    to the original so callers can always retrieve what they submitted.
     """
     from unittest.mock import MagicMock
 
     stub_chunker = MagicMock()
     stub_chunker.chunk.return_value = ["chunk one content", "chunk two content"]
 
+    original = "original code content"
     svc, _, _ = _make_service(chunker=stub_chunker)
-    ref_id = svc.retain("original code content", MemoryType.CODE, source="foo.py")
+    ref_id = svc.retain(original, MemoryType.CODE, source="foo.py")
 
-    # Chunker must have been called with source in metadata
-    stub_chunker.chunk.assert_called_once_with("original code content", {"source": "foo.py"})
-    # Returns first chunk's ref_id (a valid non-empty string)
-    assert isinstance(ref_id, str) and len(ref_id) > 0
-    # Both chunks are stored
-    assert svc.count() == 2
+    stub_chunker.chunk.assert_called_once_with(original, {"source": "foo.py"})
+    # get(ref_id) must return the original, not a chunk
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.content == original
+    # original + 2 distinct chunks = 3 records total
+    assert svc.count() == 3
 
 
 @pytest.mark.unit
-def test_retain_code_single_chunk_stores_chunk_not_original() -> None:
-    """retain(CODE) with a one-chunk result must store the chunk, not the raw source.
+def test_retain_code_single_chunk_also_preserves_get_round_trip() -> None:
+    """Single-chunk code: get(retain(code)) still returns the original file.
 
-    Regression: the old `len(chunks) > 1` gate caused single-function files to
-    bypass AST chunking entirely and store the original content (including
-    module-level comments stripped by the chunker).
+    The chunk is indexed separately for recall(); the canonical ref_id points
+    to the full original source.
     """
     from unittest.mock import MagicMock
 
     stub_chunker = MagicMock()
-    stub_chunker.chunk.return_value = ["def foo(): pass"]  # one AST chunk, no header
+    stub_chunker.chunk.return_value = ["def foo(): pass"]  # stripped of header
 
+    original = "# module comment\ndef foo(): pass"
     svc, _, _ = _make_service(chunker=stub_chunker)
-    ref_id = svc.retain("# module comment\ndef foo(): pass", MemoryType.CODE, source="foo.py")
+    ref_id = svc.retain(original, MemoryType.CODE, source="foo.py")
 
     memory = svc.get(ref_id)
     assert memory is not None
-    assert memory.content == "def foo(): pass"
-    assert "# module comment" not in memory.content
+    assert memory.content == original  # full original, not the stripped chunk
+    assert svc.count() == 2  # original + one distinct chunk
 
 
 @pytest.mark.unit
@@ -179,6 +183,29 @@ def test_retain_code_without_chunker_stores_single_record() -> None:
     ref_id = svc.retain("def foo(): pass", MemoryType.CODE, source="foo.py")
     assert isinstance(ref_id, str)
     assert svc.count() == 1
+
+
+@pytest.mark.unit
+def test_forget_code_deletes_canonical_and_all_chunks() -> None:
+    """forget(retain(CODE)) must remove the canonical record AND every chunk record.
+
+    Regression: retain(CODE) with a chunker stores original + N chunks.
+    forget() previously only deleted the canonical ref_id, leaving N orphaned
+    chunk records that still surfaced in recall().
+    """
+    stub_chunker = MagicMock()
+    stub_chunker.chunk.return_value = ["def foo(): pass", "def bar(): pass"]
+
+    svc, _, _ = _make_service(chunker=stub_chunker)
+    ref_id = svc.retain("def foo(): pass\ndef bar(): pass", MemoryType.CODE, source="ab.py")
+
+    # canonical + 2 chunks = 3 records
+    assert svc.count() == 3
+
+    deleted = svc.forget(ref_id)
+    assert deleted is True
+    assert svc.count() == 0
+    assert svc.get(ref_id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -252,14 +279,14 @@ def test_recall_expired_episodes_do_not_crowd_out_live_results() -> None:
     from uuid import uuid4 as _uuid4
 
     # 20 expired episodes + 1 live decision — matches the exact reproducer
-    N_EXPIRED = 20
+    n_expired = 20
     settings = _make_settings(episode_ttl_days=30, search_top_k=1)
     svc, store, sparse = _make_service(settings=settings)
 
     embedding = MockEmbedding()
     old_ts = (datetime.now(UTC) - timedelta(days=60)).isoformat()
 
-    for i in range(N_EXPIRED):
+    for i in range(n_expired):
         ref_id = str(_uuid4())
         content = f"postgres expired episode content {i}"
         vec = embedding.embed([content])[0]

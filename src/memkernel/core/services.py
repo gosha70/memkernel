@@ -62,19 +62,28 @@ class MemoryService:
     ) -> str:
         """Store content and return its ref_id.
 
-        For MemoryType.CODE with a chunker injected: splits content at AST
-        boundaries, stores each chunk individually, and returns the first
-        chunk's ref_id.  For all other types (or when no chunker is set):
-        stores content as a single record.
+        For MemoryType.CODE with a chunker injected: stores the original
+        content as the canonical record (so get(retain(code)) always returns
+        the full file), then also indexes each AST chunk so recall() can
+        match at function/class granularity.  For all other types (or when
+        no chunker is set): stores content as a single record.
 
-        Idempotent per chunk: identical content + type returns the existing
-        ref_id and updates session_id / timestamp / checkpoint.
+        Idempotent: identical content + type returns the existing ref_id.
         """
         if type == MemoryType.CODE and self._chunker is not None:
             chunks = self._chunker.chunk(content, {"source": source})
             if chunks:
-                ref_ids = [self._retain_single(chunk, type, session_id, checkpoint, source) for chunk in chunks]
-                return ref_ids[0]
+                # Canonical record: original file — preserves get(retain(code)) == code
+                ref_id = self._retain_single(content, type, session_id, checkpoint, source)
+                # Fine-grained index: each chunk stored for recall() granularity
+                chunk_ref_ids: list[str] = []
+                for chunk in chunks:
+                    chunk_ref_ids.append(self._retain_single(chunk, type, session_id, checkpoint, source))
+                # Link chunk ref_ids to canonical so forget() can clean them up
+                unique_chunk_refs = list(dict.fromkeys(r for r in chunk_ref_ids if r != ref_id))
+                if unique_chunk_refs:
+                    self._vector_store.update_metadata(ref_id, {"chunk_refs": ",".join(unique_chunk_refs)})
+                return ref_id
 
         return self._retain_single(content, type, session_id, checkpoint, source)
 
@@ -195,6 +204,17 @@ class MemoryService:
         Returns True if the memory existed and was deleted, False otherwise.
         BM25 removal failure is non-fatal — the index is marked for rebuild.
         """
+        # For CODE canonical records, delete linked chunk records first
+        canonical = self._vector_store.get_by_id(ref_id)
+        if canonical is not None:
+            for chunk_ref in canonical.chunk_refs:
+                self._vector_store.delete(chunk_ref)
+                try:
+                    self._sparse_index.remove(chunk_ref)
+                except Exception:
+                    logger.warning("BM25 remove failed for chunk %s", chunk_ref)
+                    self._sparse_index.mark_needs_rebuild()
+
         deleted = self._vector_store.delete(ref_id)
         try:
             self._sparse_index.remove(ref_id)

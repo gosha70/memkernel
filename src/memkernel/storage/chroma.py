@@ -48,6 +48,8 @@ def _memory_from_chroma(
     meta = metadatas[index]
     raw_ts = meta.get("timestamp", "")
     timestamp = datetime.fromisoformat(str(raw_ts)) if raw_ts else datetime.now(tz=UTC)
+    raw_chunk_refs = str(meta.get("chunk_refs", ""))
+    chunk_refs = [r for r in raw_chunk_refs.split(",") if r] if raw_chunk_refs else []
     return Memory(
         ref_id=ids[index],
         content=documents[index],
@@ -59,6 +61,7 @@ def _memory_from_chroma(
         content_hash=str(meta.get("hash", "")),
         token_count=int(meta.get("token_count", 0)),
         checkpoint=bool(meta.get("checkpoint", False)),
+        chunk_refs=chunk_refs,
     )
 
 

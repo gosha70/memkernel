@@ -9,7 +9,6 @@ import pytest
 from memkernel.config import MemKernelSettings
 from memkernel.retrieval.chunking import ASTChunker, _token_chunks
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

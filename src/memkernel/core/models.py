@@ -32,6 +32,7 @@ class Memory(BaseModel):
     content_hash: str
     token_count: int
     checkpoint: bool = False
+    chunk_refs: list[str] = []
 
 
 class ArtifactRef(BaseModel):

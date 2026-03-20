@@ -71,7 +71,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         memory = svc.get(ref_id)
         if memory is None:
             return json.dumps({"error": "not_found", "ref_id": ref_id})
-        return json.dumps(memory.model_dump(mode="json"))
+        return json.dumps(memory.model_dump(mode="json", exclude={"chunk_refs"}))
 
     @server.tool()
     async def forget(
