@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """Content-hash deduplication helpers."""
 
 from __future__ import annotations

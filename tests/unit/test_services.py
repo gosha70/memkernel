@@ -41,6 +41,7 @@ def _make_settings(**overrides: Any) -> MemKernelSettings:
 def _make_service(
     settings: MemKernelSettings | None = None,
     sparse: BM25Index | None = None,
+    chunker: Any = None,
 ) -> tuple[MemoryService, ChromaVectorStore, BM25Index]:
     if settings is None:
         settings = _make_settings()
@@ -49,7 +50,7 @@ def _make_service(
     store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
     embedding = MockEmbedding()
     search_svc = HybridSearchService(store, embedding, sparse, settings)
-    svc = MemoryService(store, embedding, sparse, search_svc, settings)
+    svc = MemoryService(store, embedding, sparse, search_svc, settings, chunker=chunker)
     return svc, store, sparse
 
 
@@ -120,6 +121,64 @@ def test_retain_same_content_different_type_returns_different_ref_id() -> None:
     ref_decision = svc.retain(content, MemoryType.DECISION)
     ref_convention = svc.retain(content, MemoryType.CONVENTION)
     assert ref_decision != ref_convention
+
+
+# ---------------------------------------------------------------------------
+# retain — CODE chunking
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retain_code_with_chunker_stores_multiple_records() -> None:
+    """retain(CODE) with a multi-chunk chunker stores one record per chunk.
+
+    Uses a stub chunker that always returns two chunks regardless of content.
+    """
+    from unittest.mock import MagicMock
+
+    stub_chunker = MagicMock()
+    stub_chunker.chunk.return_value = ["chunk one content", "chunk two content"]
+
+    svc, _, _ = _make_service(chunker=stub_chunker)
+    ref_id = svc.retain("original code content", MemoryType.CODE, source="foo.py")
+
+    # Chunker must have been called with source in metadata
+    stub_chunker.chunk.assert_called_once_with("original code content", {"source": "foo.py"})
+    # Returns first chunk's ref_id (a valid non-empty string)
+    assert isinstance(ref_id, str) and len(ref_id) > 0
+    # Both chunks are stored
+    assert svc.count() == 2
+
+
+@pytest.mark.unit
+def test_retain_code_single_chunk_stores_chunk_not_original() -> None:
+    """retain(CODE) with a one-chunk result must store the chunk, not the raw source.
+
+    Regression: the old `len(chunks) > 1` gate caused single-function files to
+    bypass AST chunking entirely and store the original content (including
+    module-level comments stripped by the chunker).
+    """
+    from unittest.mock import MagicMock
+
+    stub_chunker = MagicMock()
+    stub_chunker.chunk.return_value = ["def foo(): pass"]  # one AST chunk, no header
+
+    svc, _, _ = _make_service(chunker=stub_chunker)
+    ref_id = svc.retain("# module comment\ndef foo(): pass", MemoryType.CODE, source="foo.py")
+
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.content == "def foo(): pass"
+    assert "# module comment" not in memory.content
+
+
+@pytest.mark.unit
+def test_retain_code_without_chunker_stores_single_record() -> None:
+    """retain(CODE) with no chunker injected behaves like any other type."""
+    svc, _, _ = _make_service()  # no chunker
+    ref_id = svc.retain("def foo(): pass", MemoryType.CODE, source="foo.py")
+    assert isinstance(ref_id, str)
+    assert svc.count() == 1
 
 
 # ---------------------------------------------------------------------------

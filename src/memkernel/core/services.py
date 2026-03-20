@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """MemoryService — primary domain service for retain/recall/get/forget."""
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from memkernel.memory.lifecycle import is_expired
 
 if TYPE_CHECKING:
     from memkernel.config import MemKernelSettings
-    from memkernel.core.ports import EmbeddingPort, SparseIndexPort, VectorStorePort
+    from memkernel.core.ports import ChunkerPort, EmbeddingPort, SparseIndexPort, VectorStorePort
     from memkernel.retrieval.search import HybridSearchService
 
 logger = logging.getLogger(__name__)
@@ -37,12 +39,14 @@ class MemoryService:
         sparse_index: SparseIndexPort,
         search_service: HybridSearchService,
         settings: MemKernelSettings,
+        chunker: ChunkerPort | None = None,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
         self._sparse_index = sparse_index
         self._search_service = search_service
         self._settings = settings
+        self._chunker = chunker
 
     # ------------------------------------------------------------------
     # Core operations
@@ -58,9 +62,31 @@ class MemoryService:
     ) -> str:
         """Store content and return its ref_id.
 
-        Idempotent for identical content + type within a project: returns the
-        existing ref_id and updates session_id / timestamp / checkpoint.
+        For MemoryType.CODE with a chunker injected: splits content at AST
+        boundaries, stores each chunk individually, and returns the first
+        chunk's ref_id.  For all other types (or when no chunker is set):
+        stores content as a single record.
+
+        Idempotent per chunk: identical content + type returns the existing
+        ref_id and updates session_id / timestamp / checkpoint.
         """
+        if type == MemoryType.CODE and self._chunker is not None:
+            chunks = self._chunker.chunk(content, {"source": source})
+            if chunks:
+                ref_ids = [self._retain_single(chunk, type, session_id, checkpoint, source) for chunk in chunks]
+                return ref_ids[0]
+
+        return self._retain_single(content, type, session_id, checkpoint, source)
+
+    def _retain_single(
+        self,
+        content: str,
+        type: MemoryType,  # noqa: A002
+        session_id: str | None,
+        checkpoint: bool,
+        source: str,
+    ) -> str:
+        """Store a single content string and return its ref_id."""
         resolved_session = session_id or self._settings.default_session_id
         content_hash = compute_content_hash(content)
 

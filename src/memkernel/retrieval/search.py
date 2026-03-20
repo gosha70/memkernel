@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """Hybrid search engine: dense (ChromaDB) + sparse (BM25) fused via RRF."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """MCP server factory and entry point."""
 
 from __future__ import annotations
@@ -58,6 +60,8 @@ def create_server(
 
             emb = SentenceTransformerEmbedding(resolved_settings)
 
+        from memkernel.retrieval.chunking import ASTChunker
+
         vector_store = ChromaVectorStore(resolved_settings)
         sparse_index = BM25Index()
         search_service = HybridSearchService(
@@ -72,6 +76,7 @@ def create_server(
             sparse_index=sparse_index,
             search_service=search_service,
             settings=resolved_settings,
+            chunker=ASTChunker(resolved_settings),
         )
         memory_service.rebuild_sparse_index()
         yield MemKernelContext(memory_service=memory_service, settings=resolved_settings)

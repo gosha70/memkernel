@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """BM25 sparse search index implementing SparseIndexPort."""
 
 from __future__ import annotations

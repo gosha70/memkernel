@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """MemKernel configuration via environment variables."""
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ class MemKernelSettings(BaseSettings):
     search_top_k: int = 5
     rrf_k: int = 60
     preview_length: int = 200
+
+    # Chunking
+    chunk_size: int = 1500  # max chars per chunk
+    chunk_overlap: int = 200  # char overlap between token chunks (fallback only)
 
     # TTL
     episode_ttl_days: int = 30

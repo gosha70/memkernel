@@ -1,3 +1,5 @@
+# Copyright (c) EGOGE - All Rights Reserved.
+# This software may be used and distributed according to the terms of the MIT license.
 """Protocol definitions for MemKernel adapters.
 
 Domain logic in core/ depends ONLY on these protocols.
