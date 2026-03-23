@@ -505,3 +505,63 @@ def test_rebuild_sparse_index_repopulates_from_vector_store() -> None:
 
     svc.rebuild_sparse_index()
     assert len(sparse) == 2
+
+
+# ---------------------------------------------------------------------------
+# checkpoint flag — 10a/10b
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retain_checkpoint_flag_stored_in_memory() -> None:
+    """retain(checkpoint=True) must persist checkpoint=True on the Memory record."""
+    svc, _, _ = _make_service()
+    ref_id = svc.retain(
+        "SESSION CHECKPOINT — decisions so far",
+        MemoryType.EPISODE,
+        checkpoint=True,
+    )
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.checkpoint is True
+
+
+@pytest.mark.unit
+def test_retain_checkpoint_defaults_to_false() -> None:
+    """retain() without checkpoint flag stores checkpoint=False."""
+    svc, _, _ = _make_service()
+    ref_id = svc.retain("Regular episode content", MemoryType.EPISODE)
+    memory = svc.get(ref_id)
+    assert memory is not None
+    assert memory.checkpoint is False
+
+
+@pytest.mark.unit
+def test_recall_checkpoint_only_filters_to_checkpoints() -> None:
+    """recall(checkpoint_only=True) must return only checkpoint memories."""
+    svc, _, _ = _make_service()
+    cp_ref = svc.retain("SESSION CHECKPOINT content", MemoryType.EPISODE, checkpoint=True)
+    svc.retain("Regular decision content", MemoryType.DECISION, checkpoint=False)
+    svc.retain("Another episode not a checkpoint", MemoryType.EPISODE, checkpoint=False)
+
+    results = svc.recall("content", checkpoint_only=True, top_k=10)
+    ref_ids = {r.ref_id for r in results}
+    assert cp_ref in ref_ids, "checkpoint memory must be returned"
+    # Every returned memory must be a checkpoint
+    for r in results:
+        full = svc.get(r.ref_id)
+        assert full is not None
+        assert full.checkpoint is True, f"non-checkpoint memory {r.ref_id} leaked into checkpoint_only results"
+
+
+@pytest.mark.unit
+def test_recall_without_checkpoint_only_returns_all() -> None:
+    """recall() without checkpoint_only=True returns checkpoints and regular memories."""
+    svc, _, _ = _make_service()
+    cp_ref = svc.retain("SESSION CHECKPOINT content", MemoryType.EPISODE, checkpoint=True)
+    reg_ref = svc.retain("Regular decision content", MemoryType.DECISION, checkpoint=False)
+
+    results = svc.recall("content", top_k=10)
+    ref_ids = {r.ref_id for r in results}
+    assert cp_ref in ref_ids
+    assert reg_ref in ref_ids
