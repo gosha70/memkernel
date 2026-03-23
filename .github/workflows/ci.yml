@@ -13,13 +13,11 @@ concurrency:
 permissions:
   contents: read
 
-# Shared cache step used by every job: caches downloaded wheels/sdists in
-# Poetry's package cache (~/.cache/pypoetry/cache). Wheels are immutable so
-# multiple parallel jobs can save the same key without conflict; poetry install
-# still builds a fresh venv per runner but skips network downloads.
-#
-# Cache key is intentionally shared across jobs (no ${{ github.job }}) because
-# the content is identical for the same poetry.lock.
+# Each job caches Poetry's package download directory (~/.cache/pypoetry/cache).
+# Using per-job keys (with ${{ github.job }}) avoids the parallel-save race:
+# parallel jobs writing the same key causes GitHub to reject all but the first
+# save. restore-keys: falls back to any compatible entry from a sibling job so
+# subsequent runs still benefit from a warm cache.
 
 jobs:
 
@@ -36,8 +34,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-${{ runner.os }}-3.11-
+          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-3.11-${{ github.job }}-
+            poetry-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Ruff check
         run: poetry run ruff check src/ tests/
@@ -57,8 +57,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-${{ runner.os }}-3.11-
+          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-3.11-${{ github.job }}-
+            poetry-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Mypy
         run: poetry run mypy src/
@@ -76,8 +78,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-${{ runner.os }}-3.11-
+          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-3.11-${{ github.job }}-
+            poetry-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Run tests with coverage
         run: |
@@ -110,8 +114,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-${{ runner.os }}-3.11-
+          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-3.11-${{ github.job }}-
+            poetry-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: pip-audit vulnerability scan
         run: poetry run pip-audit --skip-editable
@@ -130,8 +136,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
-          restore-keys: poetry-${{ runner.os }}-3.11-
+          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-3.11-${{ github.job }}-
+            poetry-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Verify package imports
         run: |
