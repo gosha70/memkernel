@@ -13,11 +13,14 @@ concurrency:
 permissions:
   contents: read
 
-# Each job caches Poetry's package download directory (~/.cache/pypoetry/cache).
-# Using per-job keys (with ${{ github.job }}) avoids the parallel-save race:
-# parallel jobs writing the same key causes GitHub to reject all but the first
-# save. restore-keys: falls back to any compatible entry from a sibling job so
-# subsequent runs still benefit from a warm cache.
+# Caching strategy (snok/install-poetry pattern):
+#   - virtualenvs-in-project: true  →  .venv lives in the project root
+#   - Per-job cache key (github.job) avoids parallel-save races
+#   - poetry install is SKIPPED on an exact cache hit so the restored .venv
+#     is never modified; actions/cache then skips the post-save too (exact
+#     key match). This eliminates the tar failure from a dirty venv.
+#   - On a cache miss (first run or lock file change) each job builds its
+#     own .venv and saves to its own key slot — no conflicts.
 
 jobs:
 
@@ -30,15 +33,19 @@ jobs:
         with:
           python-version: "3.11"
       - uses: snok/install-poetry@v1
-      - name: Cache Poetry packages
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache virtualenv
+        id: cache-venv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-3.11-${{ github.job }}-
-            poetry-${{ runner.os }}-3.11-
-      - run: poetry install --no-interaction
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-${{ github.job }}-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
       - name: Ruff check
         run: poetry run ruff check src/ tests/
       - name: Ruff format check
@@ -53,15 +60,19 @@ jobs:
         with:
           python-version: "3.11"
       - uses: snok/install-poetry@v1
-      - name: Cache Poetry packages
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache virtualenv
+        id: cache-venv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-3.11-${{ github.job }}-
-            poetry-${{ runner.os }}-3.11-
-      - run: poetry install --no-interaction
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-${{ github.job }}-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
       - name: Mypy
         run: poetry run mypy src/
 
@@ -74,15 +85,19 @@ jobs:
         with:
           python-version: "3.11"
       - uses: snok/install-poetry@v1
-      - name: Cache Poetry packages
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache virtualenv
+        id: cache-venv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-3.11-${{ github.job }}-
-            poetry-${{ runner.os }}-3.11-
-      - run: poetry install --no-interaction
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-${{ github.job }}-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
       - name: Run tests with coverage
         run: |
           poetry run pytest \
@@ -110,15 +125,19 @@ jobs:
         with:
           python-version: "3.11"
       - uses: snok/install-poetry@v1
-      - name: Cache Poetry packages
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache virtualenv
+        id: cache-venv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-3.11-${{ github.job }}-
-            poetry-${{ runner.os }}-3.11-
-      - run: poetry install --no-interaction
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-${{ github.job }}-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
       - name: pip-audit vulnerability scan
         run: poetry run pip-audit --skip-editable
 
@@ -132,15 +151,19 @@ jobs:
         with:
           python-version: "3.11"
       - uses: snok/install-poetry@v1
-      - name: Cache Poetry packages
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache virtualenv
+        id: cache-venv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry/cache
-          key: poetry-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-3.11-${{ github.job }}-
-            poetry-${{ runner.os }}-3.11-
-      - run: poetry install --no-interaction
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-${{ github.job }}-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
       - name: Verify package imports
         run: |
           poetry run python - <<'EOF'
