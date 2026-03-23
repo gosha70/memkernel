@@ -13,8 +13,8 @@ from memkernel.core.models import MemoryType, SearchQuery, SearchResult
 from memkernel.retrieval.search import (
     HybridSearchService,
     _build_where_filter,
-    _filter_sparse_results,
-    _rrf_fuse,
+    filter_sparse_results,
+    rrf_fuse,
 )
 from memkernel.retrieval.sparse import BM25Index
 from memkernel.storage.chroma import ChromaVectorStore
@@ -69,7 +69,7 @@ def _insert(
 
 
 # ---------------------------------------------------------------------------
-# _rrf_fuse
+# rrf_fuse
 # ---------------------------------------------------------------------------
 
 
@@ -81,7 +81,7 @@ def test_rrf_doc_in_both_lists_scores_higher() -> None:
     only_dense = SearchResult(ref_id="dense_only", score=0.8, rank=2)
     only_sparse = SearchResult(ref_id="sparse_only", score=0.7, rank=1)
 
-    fused = dict(_rrf_fuse(k, [both, only_dense], [both, only_sparse]))
+    fused = dict(rrf_fuse(k, [both, only_dense], [both, only_sparse]))
 
     assert fused["both"] > fused["dense_only"]
     assert fused["both"] > fused["sparse_only"]
@@ -92,7 +92,7 @@ def test_rrf_numerical_values() -> None:
     """RRF score = 1/(k+rank).  Verify exact arithmetic for a known input."""
     k = 60
     result = SearchResult(ref_id="doc1", score=1.0, rank=1)
-    fused = dict(_rrf_fuse(k, [result]))
+    fused = dict(rrf_fuse(k, [result]))
 
     expected = 1.0 / (k + 1)
     assert abs(fused["doc1"] - expected) < 1e-9
@@ -104,7 +104,7 @@ def test_rrf_two_lists_same_doc() -> None:
     k = 60
     r1 = SearchResult(ref_id="d", score=1.0, rank=1)
     r2 = SearchResult(ref_id="d", score=0.9, rank=1)
-    fused = dict(_rrf_fuse(k, [r1], [r2]))
+    fused = dict(rrf_fuse(k, [r1], [r2]))
 
     expected = 2.0 / (k + 1)
     assert abs(fused["d"] - expected) < 1e-9
@@ -113,7 +113,7 @@ def test_rrf_two_lists_same_doc() -> None:
 @pytest.mark.unit
 def test_rrf_empty_lists() -> None:
     """Empty lists produce empty fused output."""
-    assert _rrf_fuse(60, [], []) == []
+    assert rrf_fuse(60, [], []) == []
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ def test_where_filter_all_three() -> None:
 
 @pytest.mark.unit
 def test_stale_bm25_entry_skipped() -> None:
-    """_filter_sparse_results silently skips ref_ids not in the vector store."""
+    """filter_sparse_results silently skips ref_ids not in the vector store."""
     settings = _make_settings()
     store = _make_store(settings)
     embedding = MockEmbedding()
@@ -191,7 +191,7 @@ def test_stale_bm25_entry_skipped() -> None:
         SearchResult(ref_id="stale-999", score=0.9, rank=2),
     ]
 
-    filtered = _filter_sparse_results(sparse_results, None, store)
+    filtered = filter_sparse_results(sparse_results, None, store)
 
     assert len(filtered) == 1
     assert filtered[0].ref_id == "real-1"
@@ -256,7 +256,7 @@ def test_filtered_sparse_with_type_filter() -> None:
         SearchResult(ref_id="ep-1", score=0.9, rank=2),
     ]
 
-    filtered = _filter_sparse_results(sparse_results, where, store)
+    filtered = filter_sparse_results(sparse_results, where, store)
 
     assert len(filtered) == 1
     assert filtered[0].ref_id == "dec-1"

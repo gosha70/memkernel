@@ -178,6 +178,40 @@ def test_ast_chunker_oversized_class_recurses_into_methods() -> None:
 
 
 @pytest.mark.slow
+def test_ast_chunker_oversized_class_retains_non_boundary_content() -> None:
+    """Oversized class with class-level attributes AND methods must emit both.
+
+    Regression guard for the gap-extraction fix: the oversized boundary walk
+    must emit non-boundary content (class attributes) via byte-range gap
+    extraction even when some inner boundary nodes (methods) also produce chunks.
+    """
+    code = (
+        "class Config:\n"
+        "    alpha = 1\n"
+        "    beta = 2\n"
+        "    gamma = 3\n"
+        "    delta = 4\n"
+        "    def method(self):\n"
+        "        pass\n"
+    )
+    compile(code, "<test>", "exec")
+
+    # chunk_size=80: class (~104 chars) is oversized; method (~35 chars) is not
+    chunker = ASTChunker(_make_settings(chunk_size=80, chunk_overlap=0))
+    result = chunker.chunk(code, {"source": "config.py"})
+
+    full_text = "\n".join(result)
+    # Class-level attributes must not be silently dropped
+    assert "alpha" in full_text
+    assert "beta" in full_text
+    assert "gamma" in full_text
+    # Method must appear in its own chunk
+    assert any("def method" in c for c in result)
+    # Attributes and method must not all collapse into one token-window chunk
+    assert not any("alpha" in c and "def method" in c for c in result)
+
+
+@pytest.mark.slow
 def test_ast_chunker_non_ascii_source_chunks_correctly() -> None:
     """Non-ASCII characters before a function must not corrupt the chunk text.
 

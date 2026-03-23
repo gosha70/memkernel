@@ -48,6 +48,22 @@ _EXT_TO_LANG: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _inner_boundary_nodes(node: Any, boundary_types: frozenset[str]) -> list[Any]:
+    """Return all boundary-type descendants of *node*, stopping at each one found.
+
+    The search is depth-first but does not descend into a node once that node
+    itself is a boundary — its own inner structure is handled by the recursive
+    _walk call that will be made for it later.
+    """
+    result: list[Any] = []
+    for child in node.children:
+        if child.type in boundary_types:
+            result.append(child)
+        else:
+            result.extend(_inner_boundary_nodes(child, boundary_types))
+    return result
+
+
 def _token_chunks(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     """Sliding-window character chunker.
 
@@ -159,9 +175,30 @@ class ASTChunker:
                 if text.strip():
                     chunks.append(text)
                 return
-            # Oversized boundary node — recurse to find inner boundaries
-            for child in node.children:
-                self._walk(child, encoded, boundary_types, chunks)
+            # Oversized boundary node: collect all inner boundary nodes at any
+            # depth, then interleave the gap bytes (preamble, docstrings, class
+            # attributes — anything between inner boundaries) with recursive
+            # boundary chunk emission.  Gaps are token-chunked so no content is
+            # silently dropped regardless of the intermediate tree structure.
+            inner = sorted(
+                _inner_boundary_nodes(node, boundary_types),
+                key=lambda n: n.start_byte,
+            )
+            prev_end = node.start_byte
+            for inner_node in inner:
+                gap = encoded[prev_end : inner_node.start_byte].decode("utf-8")
+                if gap.strip():
+                    for part in _token_chunks(gap, self._settings.chunk_size, self._settings.chunk_overlap):
+                        if part.strip():
+                            chunks.append(part)
+                self._walk(inner_node, encoded, boundary_types, chunks)
+                prev_end = inner_node.end_byte
+            # Trailing gap (anything after the last inner boundary)
+            gap = encoded[prev_end : node.end_byte].decode("utf-8")
+            if gap.strip():
+                for part in _token_chunks(gap, self._settings.chunk_size, self._settings.chunk_overlap):
+                    if part.strip():
+                        chunks.append(part)
             return
 
         for child in node.children:

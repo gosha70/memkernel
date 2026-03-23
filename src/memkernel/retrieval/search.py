@@ -55,13 +55,13 @@ class HybridSearchService:
 
         # Sparse pass — score all, then post-filter to honour metadata filters
         sparse_all = self._sparse_index.search_all(query.query_text)
-        sparse_results = _filter_sparse_results(sparse_all, where, self._vector_store)
+        sparse_results = filter_sparse_results(sparse_all, where, self._vector_store)
         sparse_results = sparse_results[:over_fetch]
 
         # RRF fusion
-        fused = _rrf_fuse(self._settings.rrf_k, dense_results, sparse_results)
+        fused = rrf_fuse(self._settings.rrf_k, dense_results, sparse_results)
 
-        return _build_artifact_refs(fused, query.top_k, self._vector_store, self._settings.preview_length)
+        return build_artifact_refs(fused, query.top_k, self._vector_store, self._settings.preview_length)
 
 
 # ------------------------------------------------------------------
@@ -90,7 +90,7 @@ def _build_where_filter(query: SearchQuery) -> dict[str, Any] | None:
     return {"$and": conditions}
 
 
-def _rrf_fuse(
+def rrf_fuse(
     k: int,
     *result_lists: list[SearchResult],
 ) -> list[tuple[str, float]]:
@@ -130,7 +130,7 @@ def _metadata_matches(memory: Memory, where: dict[str, Any]) -> bool:
     return True
 
 
-def _filter_sparse_results(
+def filter_sparse_results(
     results: list[SearchResult],
     where: dict[str, Any] | None,
     vector_store: VectorStorePort,
@@ -153,7 +153,7 @@ def _filter_sparse_results(
     return [SearchResult(ref_id=r.ref_id, score=r.score, rank=new_rank) for new_rank, r in enumerate(kept, start=1)]
 
 
-def _build_artifact_refs(
+def build_artifact_refs(
     fused: list[tuple[str, float]],
     top_k: int,
     vector_store: VectorStorePort,

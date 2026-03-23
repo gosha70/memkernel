@@ -1,0 +1,206 @@
+{
+  "memories": [
+    {
+      "id": "m01",
+      "content": "We chose PostgreSQL over MySQL for the primary database because of its superior support for JSONB columns, window functions, and advisory locks needed by the job queue. SQLite is used for integration tests to avoid requiring a running Postgres instance.",
+      "type": "decision",
+      "source": "doc_internal/ARCHITECTURE.md"
+    },
+    {
+      "id": "m02",
+      "content": "Authentication uses JWT access tokens (15-minute TTL) plus refresh tokens (30-day TTL) stored in an httpOnly cookie. We rejected storing JWTs in localStorage because of XSS exposure. Refresh token rotation is enabled: every refresh issues a new token pair and invalidates the old refresh token.",
+      "type": "decision",
+      "source": "doc_internal/ARCHITECTURE.md"
+    },
+    {
+      "id": "m03",
+      "content": "Background jobs run via Celery with a Redis broker. We evaluated RQ and Dramatiq but chose Celery for its battle-tested retry semantics, periodic task scheduling via celery-beat, and mature observability tooling (Flower). Task results are stored in Redis with a 24-hour TTL.",
+      "type": "decision",
+      "source": "doc_internal/ARCHITECTURE.md"
+    },
+    {
+      "id": "m04",
+      "content": "All API endpoints are versioned under /api/v1/. Breaking changes require a new version prefix (/api/v2/). Deprecated endpoints are kept for two minor releases with a Deprecation header and a Sunset date. We do not use URL-embedded dates for versioning.",
+      "type": "decision",
+      "source": "doc_internal/ARCHITECTURE.md"
+    },
+    {
+      "id": "m05",
+      "content": "All service functions must have explicit return type annotations. Use Optional[X] only for function parameters; prefer X | None in return types. Never use Any in public API signatures — use TypeVar or Protocol instead.",
+      "type": "convention",
+      "source": "doc_internal/OPERATIONAL_RULES.md"
+    },
+    {
+      "id": "m06",
+      "content": "Database migrations are managed with Alembic. Every migration file must include both upgrade() and downgrade() functions. Migration files are named with a sequential prefix and a short description: e.g. 0023_add_user_preferences_table.py. Never edit a migration that has already been applied to production.",
+      "type": "convention",
+      "source": "doc_internal/OPERATIONAL_RULES.md"
+    },
+    {
+      "id": "m07",
+      "content": "Error handling convention: domain errors subclass AppError (a custom base exception defined in core/exceptions.py). HTTP handlers catch AppError and map it to the appropriate status code via ERROR_CODE_MAP. Never raise HTTPException directly from service layer code — keep HTTP concerns in the handler layer.",
+      "type": "convention",
+      "source": "doc_internal/OPERATIONAL_RULES.md"
+    },
+    {
+      "id": "m08",
+      "content": "Celery tasks must be idempotent. Use the task's unique identifier (order_id, user_id, etc.) as the Celery task ID via apply_async(task_id=...) to enable natural deduplication. Always set autoretry_for=(TransientError,) and max_retries=3 on tasks that call external services.",
+      "type": "convention",
+      "source": "doc_internal/OPERATIONAL_RULES.md"
+    },
+    {
+      "id": "m09",
+      "content": "Structured logging via structlog. All log entries must include: request_id (from middleware), user_id (when authenticated), and service_name. Use log.bind() to attach context rather than interpolating values into the message string. Never use print() for debugging in committed code.",
+      "type": "convention",
+      "source": "doc_internal/OPERATIONAL_RULES.md"
+    },
+    {
+      "id": "m10",
+      "content": "def get_user_by_email(db: Session, email: str) -> User | None:\n    \"\"\"Fetch a user record by email address. Returns None if not found.\"\"\"\n    return db.query(User).filter(User.email == email.lower().strip()).first()",
+      "type": "code",
+      "source": "src/app/repositories/user_repo.py"
+    },
+    {
+      "id": "m11",
+      "content": "class OrderService:\n    \"\"\"Orchestrates order lifecycle: creation, payment, fulfilment.\"\"\"\n\n    def __init__(self, db: Session, payment_gateway: PaymentGateway) -> None:\n        self._db = db\n        self._payment_gateway = payment_gateway\n\n    def create_order(self, user_id: int, cart_items: list[CartItem]) -> Order:\n        \"\"\"Create a new order from a user's cart.\n\n        Raises InsufficientStockError if any item is out of stock.\n        Raises PaymentError if the payment gateway call fails.\n        \"\"\"\n        with self._db.begin():\n            order = Order(user_id=user_id, status=OrderStatus.PENDING)\n            self._db.add(order)\n            for item in cart_items:\n                product = self._db.query(Product).with_for_update().get(item.product_id)\n                if product is None or product.stock < item.quantity:\n                    raise InsufficientStockError(item.product_id)\n                product.stock -= item.quantity\n                order.items.append(OrderItem(product=product, quantity=item.quantity))\n            charge = self._payment_gateway.charge(order.total_cents)\n            order.payment_ref = charge.reference\n            order.status = OrderStatus.PAID\n        return order",
+      "type": "code",
+      "source": "src/app/services/order_service.py"
+    },
+    {
+      "id": "m12",
+      "content": "def hash_password(plain: str) -> str:\n    \"\"\"Hash a plain-text password using bcrypt.\"\"\"\n    import bcrypt\n    salt = bcrypt.gensalt(rounds=12)\n    return bcrypt.hashpw(plain.encode(), salt).decode()\n\n\ndef verify_password(plain: str, hashed: str) -> bool:\n    \"\"\"Return True if plain matches the bcrypt hash.\"\"\"\n    import bcrypt\n    return bcrypt.checkpw(plain.encode(), hashed.encode())",
+      "type": "code",
+      "source": "src/app/auth/password.py"
+    },
+    {
+      "id": "m13",
+      "content": "Session 2026-03-10: Deployed the new user-preferences endpoint to staging. Discovered that the Alembic migration 0019_add_preferences_column.py was missing a server_default, causing NOT NULL constraint violations on existing rows. Fixed by adding server_default=text(\"'{}'\") and re-ran migration. Production deploy blocked until fix is merged.",
+      "type": "episode",
+      "source": "session:2026-03-10"
+    },
+    {
+      "id": "m14",
+      "content": "Session 2026-03-15: Investigated slow query on /api/v1/orders?status=pending. EXPLAIN ANALYZE showed a sequential scan on the orders table (180k rows). Added composite index on (user_id, status, created_at). Query time dropped from 1.2 s to 8 ms. Migration 0021_add_orders_composite_index.py deployed.",
+      "type": "episode",
+      "source": "session:2026-03-15"
+    },
+    {
+      "id": "m15",
+      "content": "Session 2026-03-18: Celery worker crashed with MemoryError during large CSV export task. Root cause: loading entire file into memory before streaming. Fixed by switching to a generator-based chunked writer using csv.writer with a BytesIO buffer, flushing every 500 rows. Task peak memory dropped from 2 GB to under 50 MB.",
+      "type": "episode",
+      "source": "session:2026-03-18"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "query": "Why did we pick PostgreSQL instead of MySQL?",
+      "relevant_ids": ["m01"]
+    },
+    {
+      "id": "q02",
+      "query": "Which database is used for integration tests?",
+      "relevant_ids": ["m01"]
+    },
+    {
+      "id": "q03",
+      "query": "How are JWT tokens stored and why not localStorage?",
+      "relevant_ids": ["m02"]
+    },
+    {
+      "id": "q04",
+      "query": "What is the access token TTL and refresh token expiry?",
+      "relevant_ids": ["m02"]
+    },
+    {
+      "id": "q05",
+      "query": "Which task queue library are we using and why?",
+      "relevant_ids": ["m03"]
+    },
+    {
+      "id": "q06",
+      "query": "How should API breaking changes be handled?",
+      "relevant_ids": ["m04"]
+    },
+    {
+      "id": "q07",
+      "query": "What versioning scheme do we use for REST endpoints?",
+      "relevant_ids": ["m04"]
+    },
+    {
+      "id": "q08",
+      "query": "How do we handle return type annotations for Optional values?",
+      "relevant_ids": ["m05"]
+    },
+    {
+      "id": "q09",
+      "query": "Alembic migration naming convention and downgrade requirement",
+      "relevant_ids": ["m06"]
+    },
+    {
+      "id": "q10",
+      "query": "Where should HTTPException be raised — handler or service layer?",
+      "relevant_ids": ["m07"]
+    },
+    {
+      "id": "q11",
+      "query": "How do we prevent duplicate Celery task execution?",
+      "relevant_ids": ["m08"]
+    },
+    {
+      "id": "q12",
+      "query": "How should structured log entries be constructed?",
+      "relevant_ids": ["m09"]
+    },
+    {
+      "id": "q13",
+      "query": "What fields are required in every log entry?",
+      "relevant_ids": ["m09"]
+    },
+    {
+      "id": "q14",
+      "query": "get_user_by_email function signature and query",
+      "relevant_ids": ["m10"]
+    },
+    {
+      "id": "q15",
+      "query": "db.query User filter email",
+      "relevant_ids": ["m10"]
+    },
+    {
+      "id": "q16",
+      "query": "OrderService create_order InsufficientStockError",
+      "relevant_ids": ["m11"]
+    },
+    {
+      "id": "q17",
+      "query": "How does the order creation flow handle stock and payment?",
+      "relevant_ids": ["m11"]
+    },
+    {
+      "id": "q18",
+      "query": "hash_password bcrypt implementation",
+      "relevant_ids": ["m12"]
+    },
+    {
+      "id": "q19",
+      "query": "How are passwords hashed and verified?",
+      "relevant_ids": ["m12"]
+    },
+    {
+      "id": "q20",
+      "query": "What went wrong with the Alembic migration for the preferences column?",
+      "relevant_ids": ["m06", "m13"]
+    },
+    {
+      "id": "q21",
+      "query": "How was the slow orders query fixed?",
+      "relevant_ids": ["m14"]
+    },
+    {
+      "id": "q22",
+      "query": "How did we fix the Celery memory issue during CSV export?",
+      "relevant_ids": ["m15"]
+    }
+  ]
+}
