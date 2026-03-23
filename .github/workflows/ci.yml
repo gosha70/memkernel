@@ -31,7 +31,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Ruff check
         run: poetry run ruff check src/ tests/
@@ -54,7 +55,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Mypy
         run: poetry run mypy src/
@@ -75,7 +77,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Run tests with coverage
         run: |
@@ -111,7 +114,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: pip-audit vulnerability scan
         run: poetry run pip-audit --skip-editable
@@ -133,7 +137,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.11-${{ hashFiles('poetry.lock') }}
+          key: venv-${{ runner.os }}-3.11-${{ github.job }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-3.11-
       - run: poetry install --no-interaction
       - name: Verify package imports
         run: |
