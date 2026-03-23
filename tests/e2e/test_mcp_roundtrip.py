@@ -183,6 +183,97 @@ async def test_get_not_found() -> None:
 
 
 @pytest.mark.e2e
+async def test_checkpoint_roundtrip_simulated_compaction() -> None:
+    """US4: retain decisions + checkpoint → recall recovers both after compaction.
+
+    Scenario:
+      1. Pre-compaction session: store two architectural decisions.
+      2. Pre-compaction: store a checkpoint snapshot (type=episode, checkpoint=True)
+         summarising the session state.
+      3. Context compaction occurs (simulated — no MCP action required; the server
+         retains all memories while the client context is cleared).
+      4. Post-compaction session: recall(checkpoint_only=True) returns ONLY the
+         checkpoint snapshot, most recent first.
+      5. Unrestricted recall returns decisions AND the checkpoint.
+    """
+    settings = _test_settings()
+    mock_emb = MockEmbedding(dimension=384)
+    server = create_server(settings=settings, embedding=mock_emb)
+
+    async with create_connected_server_and_client_session(server) as client:
+        pre_session = "pre-compaction"
+
+        # 1. Store decisions before compaction
+        r = await client.call_tool(
+            "retain",
+            arguments={
+                "content": "Use PostgreSQL as the primary data store",
+                "type": "decision",
+                "session_id": pre_session,
+            },
+        )
+        decision_ref_1 = json.loads(_text(r))["ref_id"]
+
+        r = await client.call_tool(
+            "retain",
+            arguments={
+                "content": "Authentication uses short-lived JWTs with refresh tokens",
+                "type": "decision",
+                "session_id": pre_session,
+            },
+        )
+        decision_ref_2 = json.loads(_text(r))["ref_id"]
+
+        # 2. Store checkpoint snapshot (type=episode, checkpoint=True)
+        checkpoint_content = (
+            "SESSION CHECKPOINT\n"
+            "Decisions made: PostgreSQL for storage, JWT auth with refresh tokens.\n"
+            "Next: implement the user service."
+        )
+        r = await client.call_tool(
+            "retain",
+            arguments={
+                "content": checkpoint_content,
+                "type": "episode",
+                "checkpoint": True,
+                "session_id": pre_session,
+            },
+        )
+        checkpoint_ref = json.loads(_text(r))["ref_id"]
+
+        # 3. Context compaction happens here (simulated — server state unchanged).
+        #    A new session begins; no session_id filter on recovery calls.
+
+        # 4. checkpoint_only=True must return ONLY the checkpoint, not decisions.
+        #    No session_id filter — checkpoints are retrieved across sessions;
+        #    that is precisely what makes them useful after compaction.
+        r = await client.call_tool(
+            "recall",
+            arguments={
+                "query": "session state decisions",
+                "checkpoint_only": True,
+                "top_k": 10,
+            },
+        )
+        checkpoint_results = json.loads(_text(r))
+        checkpoint_ids = {ref["ref_id"] for ref in checkpoint_results}
+        assert checkpoint_ref in checkpoint_ids, "checkpoint not recovered after compaction"
+        assert decision_ref_1 not in checkpoint_ids, "checkpoint_only leaked a non-checkpoint decision"
+        assert decision_ref_2 not in checkpoint_ids, "checkpoint_only leaked a non-checkpoint decision"
+
+        # 5. Unrestricted recall must surface decisions and checkpoint
+        r = await client.call_tool(
+            "recall",
+            arguments={"query": "PostgreSQL JWT auth session decisions", "top_k": 10},
+        )
+        all_results = json.loads(_text(r))
+        all_ids = {ref["ref_id"] for ref in all_results}
+        assert decision_ref_1 in all_ids, "decision 1 missing after compaction"
+        assert decision_ref_2 in all_ids, "decision 2 missing after compaction"
+        assert checkpoint_ref in all_ids, "checkpoint missing from unrestricted recall"
+
+
+@pytest.mark.e2e
 async def test_tool_count_under_10() -> None:
     """FR-013: Total MCP tool count must be under 10."""
     settings = _test_settings()
