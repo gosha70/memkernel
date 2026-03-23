@@ -112,3 +112,59 @@ def test_retain_same_content_different_type_creates_separate_records() -> None:
 
     assert ref_decision != ref_convention
     assert svc.count() == 2
+
+
+@pytest.mark.integration
+def test_cross_project_isolation() -> None:
+    """Memories stored in project A are invisible to project B and vice versa.
+
+    Each project gets its own ChromaDB collection (memkernel_{project_id}).
+    A query issued from project B must not surface any records from project A,
+    even when the content and query text are identical.
+    """
+    settings_a = _make_settings(project_id="isolation-project-alpha")
+    settings_b = _make_settings(project_id="isolation-project-beta")
+
+    # Both services share the same in-process EphemeralClient to ensure
+    # isolation is enforced by collection namespacing, not by client boundary.
+    shared_client = chromadb.EphemeralClient()
+
+    def _make_service_shared(settings: MemKernelSettings) -> MemoryService:
+        store = ChromaVectorStore(settings, client=shared_client)
+        embedding = MockEmbedding()
+        sparse = BM25Index()
+        search_svc = HybridSearchService(store, embedding, sparse, settings)
+        return MemoryService(store, embedding, sparse, search_svc, settings)
+
+    svc_a = _make_service_shared(settings_a)
+    svc_b = _make_service_shared(settings_b)
+
+    # Store memories in both projects with identical content
+    content = "Use PostgreSQL as the primary database."
+    ref_a = svc_a.retain(content, MemoryType.DECISION, session_id="sess-a")
+    ref_b = svc_b.retain(content, MemoryType.DECISION, session_id="sess-b")
+
+    # ref_ids will differ because they land in separate collections / dedup scopes
+    assert ref_a != ref_b
+
+    # Project A sees only its own memory
+    assert svc_a.count() == 1
+    assert svc_a.get(ref_a) is not None
+    assert svc_a.get(ref_b) is None  # B's ref_id is unknown to A
+
+    # Project B sees only its own memory
+    assert svc_b.count() == 1
+    assert svc_b.get(ref_b) is not None
+    assert svc_b.get(ref_a) is None  # A's ref_id is unknown to B
+
+    # recall() in project A must not surface project B's memory
+    results_a = svc_a.recall("PostgreSQL database", top_k=10)
+    result_ids_a = {r.ref_id for r in results_a}
+    assert ref_a in result_ids_a, "project A recall must return its own memory"
+    assert ref_b not in result_ids_a, "project A recall must not leak project B memory"
+
+    # recall() in project B must not surface project A's memory
+    results_b = svc_b.recall("PostgreSQL database", top_k=10)
+    result_ids_b = {r.ref_id for r in results_b}
+    assert ref_b in result_ids_b, "project B recall must return its own memory"
+    assert ref_a not in result_ids_b, "project B recall must not leak project A memory"
