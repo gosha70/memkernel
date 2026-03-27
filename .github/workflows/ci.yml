@@ -82,7 +82,8 @@ jobs:
       - uses: snok/install-poetry@v1
       - run: poetry install --no-interaction
       - name: pip-audit vulnerability scan
-        run: poetry run pip-audit --skip-editable
+        # CVE-2026-4539 (pygments): no fix version available upstream yet; ignored until patched.
+        run: poetry run pip-audit --skip-editable --ignore-vuln CVE-2026-4539
 
   build-check:
     name: Build Check
