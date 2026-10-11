@@ -25,10 +25,10 @@ bypass: false
 
 ## Summary
 
-The changes correctly implement the release hygiene requirements for memkernel 0.3.0, including version bumps, changelog updates, documentation improvements, and CI workflow updates. The code is consistent with the specified features (document memory type, ask tool, lifecycle component) and maintains architectural integrity. No blocking issues were found.
+The changes correctly implement document identity separation (body vs. summary), session isolation for document parts, and robust error handling for the RLM Studio adapter. The refactoring of `_retain_single` and the introduction of `_matches_query` resolve previous deduplication and filtering edge cases. No blocking correctness issues were found.
 
 ## Findings
 
-- [note] f-aff7ab40: The numbered list in the "Workflow" section has inconsistent numbering (jumps from 4 to 6, then 5). (README.md)
-- [note] f-d0b297b3: The changelog entry for 0.3.0 is placed under [Unreleased] instead of being moved to a new [0.3.0] section with the date. (CHANGELOG.md)
-- [note] f-4931b706: The workflow uses actions/upload-artifact@v5 and actions/download-artifact@v6, which is correct for Node 24 compatibility, but ensure the GitHub Actions runner supports these versions. (.github/workflows/release.yml)
+- [note] f-e1a7f57b: The method `_stamp_document_parts` iterates over all vector store records with a given `document_id` to update session metadata. For large documents with many chunks, this results in N individual `update_metadata` calls. Consider batching updates if the vector store supports it, or ensuring this path is not hit frequently in hot loops. (src/memkernel/core/services.py)
+- [note] f-47b3f9bf: The method `_document_owners` filters out document parts using `_is_document_part`. Ensure that `_is_document_part` correctly identifies all non-summary records (body and chunks) associated with a `document_id` to prevent accidental inclusion of parts in owner lists. (src/memkernel/core/services.py)
+- [note] f-51c6aff0: The `_failure` helper checks for `success=False` in both the top-level result and the `raw_result`. This is robust, but ensure that the `ReasonerError` message includes sufficient context (e.g., the mode or question) to aid debugging in production logs. (src/memkernel/adapters/rlmstudio.py)
