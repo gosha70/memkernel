@@ -274,3 +274,91 @@ def test_settings_defaults_for_documents_and_ask() -> None:
     assert settings.document_summary_chars == 1000
     assert settings.reasoner == "local"
     assert settings.ask_top_k == 5
+
+
+# --------------------------------------------------------------------------
+# document identity, shared bodies, session isolation (PR #6 review)
+# --------------------------------------------------------------------------
+
+
+def _twin_bodies(settings: MemKernelSettings) -> tuple[str, str]:
+    """Two bodies with the same prefix, size, line count, headings and chunk count that differ only in the tail."""
+    prefix = "# Spec\n" + ("shared prefix line\n" * 40)
+    assert len(prefix) > settings.document_summary_chars
+    tail_a = "\n".join(f"tail line {i} alpha ALPHA-TOKEN" for i in range(40))
+    tail_b = "\n".join(f"tail line {i} bravo BRAVO-TOKEN" for i in range(40))
+    assert len(tail_a) == len(tail_b)
+    return prefix + tail_a, prefix + tail_b
+
+
+def test_documents_with_identical_summaries_are_distinct_memories() -> None:
+    settings = _settings()
+    svc, documents, _ = _build(settings)
+    body_a, body_b = _twin_bodies(settings)
+    ref_a = svc.retain(body_a, MemoryType.DOCUMENT, source="spec.md")
+    ref_b = svc.retain(body_b, MemoryType.DOCUMENT, source="spec.md")
+    mem_a, mem_b = svc.get(ref_a, touch=False), svc.get(ref_b, touch=False)
+    assert mem_a is not None and mem_b is not None
+    assert mem_a.content == mem_b.content  # the summaries really do collide
+    assert ref_a != ref_b
+    assert mem_a.document_id != mem_b.document_id
+    assert documents.get(mem_a.document_id or "") == body_a
+    assert documents.get(mem_b.document_id or "") == body_b
+    assert [r.ref_id for r in svc.recall("BRAVO-TOKEN", type=MemoryType.DOCUMENT, top_k=1)] == [ref_b]
+
+
+def test_same_body_under_two_names_shares_one_body_and_survives_forgetting_one() -> None:
+    svc, documents, store = _build()
+    body = _long_document()
+    one = svc.retain(body, MemoryType.DOCUMENT, source="one.md")
+    two = svc.retain(body, MemoryType.DOCUMENT, source="two.md")
+    assert one != two
+    mem_one, mem_two = svc.get(one, touch=False), svc.get(two, touch=False)
+    assert mem_one is not None and mem_two is not None
+    assert mem_one.document_id == mem_two.document_id
+    doc_id = mem_two.document_id or ""
+
+    assert svc.forget(one) is True
+    assert svc.get(one, touch=False) is None
+    assert svc.get(two, touch=False) is not None
+    assert documents.get(doc_id) == body  # body and chunks are still owned by `two`
+    assert [r.ref_id for r in svc.recall("QUETZALCOATL-7741", top_k=1)] == [two]
+
+    assert svc.forget(two) is True
+    assert store.count() == 0
+
+
+def test_retain_same_document_and_name_is_still_idempotent_after_identity_change() -> None:
+    svc, _, store = _build()
+    body = _long_document()
+    ref1 = svc.retain(body, MemoryType.DOCUMENT, source="x.md", session_id="s1")
+    before = store.count()
+    ref2 = svc.retain(body, MemoryType.DOCUMENT, source="x.md", session_id="s2", tags=["later"])
+    assert ref1 == ref2
+    assert store.count() == before
+    memory = svc.get(ref1, touch=False)
+    assert memory is not None and memory.session_id == "s2" and memory.tags == ["later"]
+
+
+def test_document_parts_carry_the_owning_session() -> None:
+    svc, _, store = _build()
+    ref_id = svc.retain(_long_document(), MemoryType.DOCUMENT, source="x.md", session_id="private-session")
+    parts = [m for m in store.list_all() if m.ref_id != ref_id]
+    assert parts and all(m.session_id == "private-session" for m in parts)
+
+
+def test_session_filtered_recall_respects_document_session() -> None:
+    svc, _, _ = _build()
+    ref_id = svc.retain(_long_document(), MemoryType.DOCUMENT, source="x.md", session_id="private-session")
+    leaked = {r.ref_id for r in svc.recall("QUETZALCOATL-7741", session_id="default", top_k=5)}
+    assert ref_id not in leaked
+    found = [r.ref_id for r in svc.recall("QUETZALCOATL-7741", session_id="private-session", top_k=5)]
+    assert found == [ref_id]
+
+
+def test_chunk_hit_never_resolves_to_a_summary_outside_the_requested_filters() -> None:
+    svc, _, _ = _build()
+    ref_id = svc.retain(_long_document(), MemoryType.DOCUMENT, source="x.md")
+    # tier/type filters that exclude `document` summaries must not be bypassed by a chunk hit
+    assert ref_id not in {r.ref_id for r in svc.recall("QUETZALCOATL-7741", type=MemoryType.FACT, top_k=5)}
+    assert ref_id not in {r.ref_id for r in svc.recall("QUETZALCOATL-7741", checkpoint_only=True, top_k=5)}

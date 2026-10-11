@@ -6,6 +6,7 @@ import logging
 import sys
 import types
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 import chromadb
@@ -13,7 +14,7 @@ import pytest
 
 from memkernel.adapters.rlmstudio import RLMStudioReasoner, to_answer
 from memkernel.config import MemKernelSettings
-from memkernel.core.models import Answer, MemoryType
+from memkernel.core.models import Answer, MemoryType, ReasonerError
 from memkernel.core.services import DISTILLATION_PROMPT
 from memkernel.factory import build_service
 from memkernel.retrieval.reasoner import LocalReasoner, ReasonerUnavailable
@@ -80,7 +81,7 @@ def test_adapter_maps_string_object_and_none_results() -> None:
     answer = to_answer(Result(), "auto")
     assert answer.answer == "obj answer"
     assert answer.mode == "direct"
-    assert answer.citations == ["trace:t-1"]
+    assert answer.citations == []
     assert answer.usage == {"steps": 3, "elapsed": 1.5}
 
 
@@ -182,3 +183,79 @@ def test_consolidate_without_synthesize_or_candidates_never_calls_reasoner(monke
         svc.forget(m.ref_id)
     assert svc.consolidate(synthesize=True)["suggested"] == []
     assert fake.calls == []
+
+
+# --------------------------------------------------------------------------
+# real InteractResult shape (rlmstudio.api): metrics, trace, raw_result.success
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class RunResultDTO:
+    answer: str = ""
+    mode_used: str = ""
+    success: bool = True
+    error: str | None = None
+    trace: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class InteractResult:
+    answer: str
+    mode_used: str
+    metrics: dict[str, Any] = field(default_factory=dict)
+    trace: list[dict[str, Any]] | None = None
+    raw_result: RunResultDTO | None = None
+
+
+def _interact_result(answer: str = "42", success: bool = True, error: str | None = None) -> InteractResult:
+    trace = [{"role": "assistant", "content": "x" * 5000} for _ in range(4)]
+    return InteractResult(
+        answer=answer,
+        mode_used="rlm",
+        metrics={"total_tokens": 1234, "total_cost": 0.0042, "execution_time": 3.5, "steps": 6, "model": "m"},
+        trace=trace,
+        raw_result=RunResultDTO(answer=answer, mode_used="rlm", success=success, error=error, trace=trace),
+    )
+
+
+def test_real_interact_result_maps_metrics_and_never_cites_the_trace() -> None:
+    answer = to_answer(_interact_result(), "auto")
+    assert answer.answer == "42"
+    assert answer.mode == "rlm"
+    assert answer.usage == {"total_tokens": 1234, "total_cost": 0.0042, "execution_time": 3.5, "steps": 6}
+    assert answer.citations == []
+    assert sum(len(c) for c in answer.citations) == 0
+
+
+def test_failed_interact_result_raises_instead_of_answering() -> None:
+    failed = _interact_result(answer="Error: provider timed out after 120s", success=False, error="timeout")
+    with pytest.raises(ReasonerError, match="timeout"):
+        to_answer(failed, "auto")
+    with pytest.raises(ReasonerError, match="success=False"):
+        to_answer({"answer": "Error: x", "success": False}, "rlm")
+
+
+def test_ask_surfaces_a_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake(monkeypatch, _interact_result(answer="Error: boom", success=False, error="boom"))
+    svc = build_service(
+        _settings(reasoner="rlmstudio"), embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient()
+    )
+    ref_id = svc.retain("a fact", MemoryType.FACT)
+    with pytest.raises(ReasonerError, match="boom"):
+        svc.ask(ref_id, "q?")
+
+
+def test_consolidate_synthesize_ignores_failed_runs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fake(monkeypatch, _interact_result(answer="fact: Error: provider timed out", success=False, error="timed out"))
+    svc = build_service(
+        _settings(reasoner="rlmstudio"), embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient()
+    )
+    svc.retain("an observation", MemoryType.OBSERVATION)
+    with caplog.at_level(logging.WARNING, logger="memkernel.core.services"):
+        report = svc.consolidate(synthesize=True)
+    assert report["suggested"] == []
+    assert len(report["candidates"]) == 1
+    assert any("timed out" in r.getMessage() for r in caplog.records)

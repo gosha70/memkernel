@@ -124,6 +124,10 @@ class Memory(BaseModel):
     document_id: str | None = None
 
 
+class ReasonerError(RuntimeError):
+    """A ReasonerPort implementation ran but did not produce an answer (provider error, timeout, budget)."""
+
+
 class Answer(BaseModel):
     """Result of ``ask``: the answer text, the reasoning mode actually used, and provenance."""
 

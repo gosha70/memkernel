@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from memkernel.core.models import Answer, SearchResult
+from memkernel.core.models import Answer, ReasonerError, SearchResult
 from memkernel.retrieval.chunking import split_text
 from memkernel.retrieval.search import rrf_fuse
 from memkernel.retrieval.sparse import BM25Index
@@ -27,7 +27,7 @@ RAG_MODE = "rag"
 _CHUNK_JOINER = "\n\n"
 
 
-class ReasonerUnavailable(RuntimeError):  # noqa: N818 — name fixed by spec FR-007
+class ReasonerUnavailable(ReasonerError):  # noqa: N818 — name fixed by spec FR-007
     """Raised by a reasoner adapter whose backing package cannot be imported."""
 
 

@@ -22,6 +22,7 @@ from memkernel.core.models import (
     Memory,
     MemoryTier,
     MemoryType,
+    ReasonerError,
     SearchQuery,
     tier_of,
 )
@@ -109,6 +110,17 @@ def parse_suggestions(text: str) -> list[dict[str, str]]:
         if line:
             suggested.append({"content": line, "type": memory_type})
     return suggested
+
+
+def _matches_query(memory: Memory, query: SearchQuery) -> bool:
+    """True when ``memory`` satisfies the metadata filters of ``query``."""
+    if query.type_filter is not None and memory.type != query.type_filter:
+        return False
+    if query.tier_filter is not None and memory.tier != query.tier_filter:
+        return False
+    if query.session_id_filter is not None and memory.session_id != query.session_id_filter:
+        return False
+    return not (query.checkpoint_only and not memory.checkpoint)
 
 
 def _artifact_ref(memory: Memory, score: float, preview_length: int) -> ArtifactRef:
@@ -232,21 +244,45 @@ class MemoryService:
         source: str,
         extra: _ExtraMeta,
     ) -> str:
-        """Store a document body + chunks through the document store; retain its summary."""
+        """Store a document body + chunks through the document store; retain its summary.
+
+        A document memory's identity is (body, ``source``), never its summary
+        text: two bodies can share a summary (same prefix, size and outline),
+        and one body can legitimately be retained under two names, in which
+        case two summary records share one ``document_id``.
+        """
         assert self._document_store is not None  # guarded by the caller
         name = source or _DEFAULT_DOCUMENT_NAME
+        resolved_session = session_id or self._settings.default_session_id
         doc_id = self._document_store.put(content, name)
         chunks = self._document_chunker.chunk(content, {"source": name}) if self._document_chunker else [content]
         indexed = self._document_store.index(doc_id, chunks)
         summary = _document_summary(content, name, indexed, self._settings.document_summary_chars)
-        return self._retain_single(
-            summary,
-            MemoryType.DOCUMENT,
-            session_id,
-            checkpoint,
-            source,
-            replace(extra, document_id=doc_id),
-        )
+        doc_extra = replace(extra, document_id=doc_id)
+        existing = next((owner for owner in self._document_owners(doc_id) if owner.source == source), None)
+        if existing is not None:
+            self._refresh_existing(existing, resolved_session, checkpoint, doc_extra)
+            ref_id = existing.ref_id
+        else:
+            ref_id = self._retain_single(
+                summary, MemoryType.DOCUMENT, session_id, checkpoint, source, doc_extra, dedup=False
+            )
+        self._stamp_document_parts(doc_id, resolved_session)
+        return ref_id
+
+    def _document_owners(self, document_id: str) -> list[Memory]:
+        """The ``document`` summary records that own ``document_id`` (body and chunks excluded)."""
+        return [m for m in self._vector_store.list_all({"document_id": document_id}) if not _is_document_part(m)]
+
+    def _stamp_document_parts(self, document_id: str, session_id: str) -> None:
+        """Give the body and chunk records the owning session so session-filtered recall sees them.
+
+        The document store port knows nothing about sessions; when one body is
+        shared by several sessions the most recent retain wins.
+        """
+        for part in self._vector_store.list_all({"document_id": document_id}):
+            if _is_document_part(part) and part.session_id != session_id:
+                self._vector_store.update_metadata(part.ref_id, {"session_id": session_id})
 
     def _retain_single(
         self,
@@ -256,28 +292,21 @@ class MemoryService:
         checkpoint: bool,
         source: str,
         extra: _ExtraMeta | None = None,
+        dedup: bool = True,
     ) -> str:
-        """Store a single content string and return its ref_id."""
+        """Store a single content string and return its ref_id.
+
+        ``dedup=False`` skips the content-hash check for records whose identity
+        is not their text (document summaries).
+        """
         extra = extra or _ExtraMeta()
         resolved_session = session_id or self._settings.default_session_id
         content_hash = compute_content_hash(content)
 
         # Dedup check: same hash + same type -> update metadata, return existing id
-        existing = self._vector_store.find_by_hash(content_hash, type.value)
+        existing = self._vector_store.find_by_hash(content_hash, type.value) if dedup else None
         if existing is not None:
-            now = datetime.now(UTC)
-            update: dict[str, Any] = {
-                "session_id": resolved_session,
-                "timestamp": now.isoformat(),
-                "checkpoint": checkpoint,
-            }
-            if extra.importance is not None:
-                update["importance"] = max(existing.importance, extra.importance)
-            if extra.tags:
-                update["tags"] = ",".join(dict.fromkeys([*existing.tags, *extra.tags]))
-            if extra.supersedes:
-                update["supersedes"] = extra.supersedes
-            self._vector_store.update_metadata(existing.ref_id, update)
+            self._refresh_existing(existing, resolved_session, checkpoint, extra)
             return existing.ref_id
 
         # New memory
@@ -324,6 +353,21 @@ class MemoryService:
 
         return ref_id
 
+    def _refresh_existing(self, existing: Memory, session_id: str, checkpoint: bool, extra: _ExtraMeta) -> None:
+        """Dedup hit: bump session/timestamp/checkpoint and merge importance, tags and supersedes."""
+        update: dict[str, Any] = {
+            "session_id": session_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "checkpoint": checkpoint,
+        }
+        if extra.importance is not None:
+            update["importance"] = max(existing.importance, extra.importance)
+        if extra.tags:
+            update["tags"] = ",".join(dict.fromkeys([*existing.tags, *extra.tags]))
+        if extra.supersedes:
+            update["supersedes"] = extra.supersedes
+        self._vector_store.update_metadata(existing.ref_id, update)
+
     def recall(
         self,
         query: str,
@@ -365,7 +409,7 @@ class MemoryService:
                 top_k=fetch_k,
             )
             results = self._search_service.search(search_query)
-            live = self._filter_live(results)
+            live = self._filter_live(results, search_query)
 
             store_exhausted = len(results) < fetch_k
             if len(live) >= desired_k or store_exhausted:
@@ -380,13 +424,15 @@ class MemoryService:
         self._last_recall_ms = (time.perf_counter() - _start) * 1000
         return live
 
-    def _filter_live(self, results: list[ArtifactRef]) -> list[ArtifactRef]:
+    def _filter_live(self, results: list[ArtifactRef], query: SearchQuery) -> list[ArtifactRef]:
         """Drop expired and superseded memories; resolve document chunk hits to their summary.
 
         A hit on a document body or chunk record is replaced by the document's
         summary record (the ``document`` memory) carrying the hit's score, so a
         phrase deep inside a document surfaces the document exactly once and
-        chunk records never appear as top-level results.
+        chunk records never appear as top-level results. The summary must itself
+        satisfy the query's filters (type, tier, session, checkpoint): the
+        filters were applied to the chunk, not to the record being returned.
         """
         memories: dict[str, Memory] = {}
         for ref in results:
@@ -403,7 +449,7 @@ class MemoryService:
                 continue
             if memory.document_id and _is_document_part(memory):
                 if memory.document_id not in summaries:
-                    summaries[memory.document_id] = self._document_summary_record(memory.document_id)
+                    summaries[memory.document_id] = self._document_summary_record(memory.document_id, query)
                 summary = summaries[memory.document_id]
                 if summary is None:
                     continue
@@ -417,11 +463,11 @@ class MemoryService:
             live.append(ref)
         return live
 
-    def _document_summary_record(self, document_id: str) -> Memory | None:
-        """Return the ``document`` memory (summary record) that owns ``document_id``."""
-        for memory in self._vector_store.list_all({"document_id": document_id}):
-            if not _is_document_part(memory):
-                return memory
+    def _document_summary_record(self, document_id: str, query: SearchQuery) -> Memory | None:
+        """Return the first ``document`` summary owning ``document_id`` that satisfies ``query``'s filters."""
+        for owner in self._document_owners(document_id):
+            if _matches_query(owner, query):
+                return owner
         return None
 
     def _touch(self, ref_id: str) -> None:
@@ -517,7 +563,8 @@ class MemoryService:
         store (the summary is used only if the body is gone); any other memory
         is asked about its own content. ``mode`` is one of ``direct``, ``rag``,
         ``rlm``, ``auto`` and is passed to the reasoner unchanged. Asking
-        records an access. Returns None when ``ref_id`` does not exist.
+        records an access. Returns None when ``ref_id`` does not exist; a
+        reasoner that ran but failed raises :class:`ReasonerError`.
         """
         if mode not in ASK_MODES:
             raise ValueError(f"unknown ask mode {mode!r}; expected one of {', '.join(ASK_MODES)}")
@@ -610,7 +657,12 @@ class MemoryService:
         suggested: list[dict[str, str]] = []
         if synthesize and top and self._synthesizer is not None:
             bundle = _CANDIDATE_SEPARATOR.join(m.content for m in top)
-            suggested = parse_suggestions(self._synthesizer.ask(bundle, DISTILLATION_PROMPT, DEFAULT_ASK_MODE).answer)
+            try:
+                answer = self._synthesizer.ask(bundle, DISTILLATION_PROMPT, DEFAULT_ASK_MODE)
+            except ReasonerError as exc:
+                logger.warning("consolidate(synthesize=True): reasoner failed, no suggestions: %s", exc)
+            else:
+                suggested = parse_suggestions(answer.answer)
         return {
             "purged": purged,
             "candidates": [
@@ -651,11 +703,15 @@ class MemoryService:
             # CODE canonical records: delete the linked chunk records first.
             for chunk_ref in canonical.chunk_refs:
                 self._delete_record(chunk_ref)
-            # DOCUMENT summary records: delete the body and chunks the document store keeps.
+            # DOCUMENT summary records: delete the body and chunks the document store
+            # keeps — but only when no other summary (same body, other name) still owns them.
             if canonical.document_id and not _is_document_part(canonical):
-                for part in self._vector_store.list_all({"document_id": canonical.document_id}):
-                    if part.ref_id != ref_id:
-                        self._delete_record(part.ref_id)
+                parts = self._vector_store.list_all({"document_id": canonical.document_id})
+                other_owners = [p for p in parts if not _is_document_part(p) and p.ref_id != ref_id]
+                if not other_owners:
+                    for part in parts:
+                        if _is_document_part(part):
+                            self._delete_record(part.ref_id)
 
         return self._delete_record(ref_id)
 
