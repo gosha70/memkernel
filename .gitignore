@@ -182,6 +182,5 @@ cython_debug/
 .DS_Store
 /.claude
 /doc_internal
-/specs
 AGENTS.md
 CLAUDE.md
