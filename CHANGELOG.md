@@ -44,6 +44,14 @@ All notable changes to this project are documented here. The format follows
 - CI frees runner disk before installing dependencies; actions moved to
   `checkout@v5` / `setup-python@v6`.
 
+### Security
+
+- Refreshed `poetry.lock` (130 packages updated): resolves the advisories the
+  security scan reported on pyjwt, starlette, urllib3, python-multipart,
+  sentence-transformers, transformers, torch, cryptography and others. The
+  four chromadb 1.5.9 advisories without a published fix are ignored
+  explicitly in CI and must be re-checked on the next chromadb bump.
+
 ## [0.1.0] - 2026-03-27
 
 ### Added
