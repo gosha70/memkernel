@@ -10,12 +10,12 @@ belongs, then consume that project as a library.
 | Project | Maturity | Relationship to memkernel | Decision |
 |---|---|---|---|
 | **document-assistant** | high (CI, 36 unit test files, ADRs, eval) | the richest overlapping RAG code (`src/rag/`): BM25 persistence, RRF, cross-encoder reranking, prompt-injection firewall, token-aware splitter, contextual chunk augmentation, embedding provenance in Chroma collection metadata | **extract a shared `ragkit` from `document-assistant/src/rag/`** (langchain-free), not from the existing `ragkit` repo; until then *copy* the small pieces listed below |
-| **ragkit** | low / stale (no packaging, import errors, langchain 0.2 pins) | an older extraction of the same lineage | **treat as dead**; reuse the name for the new extraction |
-| **rlm-studio** | high (1.0.0rc1, CI, 80% coverage gate) | different problem (recursive LMs over huge contexts); clean `history_context` budgeting helpers; benchmark/judge scoring pattern; its own docstring plans to adopt a `rag-core` embedder | **no dependency either way**; copy `compute_inprompt_budget`/`assemble_inprompt_history_within_budget` for recall budgeting; later offer memkernel's store/chunker/hybrid search behind rlm-studio's `StoragePort` |
+| **ragkit** | low / stale (no packaging, import errors, langchain 0.2 pins, no LICENSE file) | an older extraction of the same lineage | **retire** (owner decision): add a LICENSE, archive on GitHub with a pointer, reuse the name for the new extraction |
+| **rlm-studio** | high (1.0.0rc1, CI, 80% coverage gate) | the **document layer** (owner decision, ADR-009): hash-deduplicated file store and chunk index behind `StoragePort`; Direct / RAG / RLM / `auto` execution per query; budgets, traces, replay | **optional extra `memkernel[rlm]`**: `document` memory type stored through RLM Studio, `ask(ref_id, question, mode)` tool, reasoner-backed consolidation; memkernel contributes a local embedder shim to RLM Studio's `EmbeddingPort`; also copy `history_context` budgeting helpers and the benchmark/judge scoring pattern |
 | **my-llm** | early (Phase A learning lab) | typed-decision models over a Hibernate/Liquibase domain | **nothing to share**; a typed classifier for `MemoryType` at `retain` time is a research idea only |
 | **mapatlas** | high (TS monorepo) | geographic field mapping, not a knowledge atlas | **unrelated**; borrow only the dependency-direction lint idea |
 | **code-copilot-team (CCT)** | high (v1.1.0, 40+ bash suites) | **already integrates memkernel** (skill, 3 hooks, launcher writes `mcpServers.memkernel`, `setup.sh --memkernel`, Pi MCP backend declaration, dogfood benchmark) and **already hosts an LLM wiki + maintainer** (`knowledge/wiki`, `scripts/wiki_ingest`, 117 tests) | memkernel is the memory backend; CCT's wiki tooling is the candidate for extraction into its own repo (ADR-008) |
-| **haa** | early scaffold (24 files, no tests) | OpenAI-compatible ReAct loop, Docker sandbox, `harness/memory/agents_md.py` is the whole memory story; `chromadb` pinned but unused | **first non-MCP consumer**: `harness/tools/memory.py` wrapping `memkernel.factory.build_service()` |
+| **haa** | work in progress (owner has just started context management) | OpenAI-compatible ReAct loop, Docker sandbox, `harness/memory/agents_md.py`; `chromadb` pinned but unused. **Intended future: a component-assembly harness** where a developer composes memory, sandbox, tools, workflow (later through a UI) | **first non-MCP consumer and the reference assembler**: memkernel must expose itself as composable components (ports, `build_service()`, a `MemoryLifecycle` with `on_session_start / on_pre_compact / on_post_compact / on_session_end`), not just an MCP server |
 
 ## What memkernel copies now (each < 120 lines, dependency-light)
 
@@ -58,29 +58,28 @@ From `rlm-studio/src/rlmstudio/benchmark/`:
 ## Proposed dependency graph (target state)
 
 ```
-                    ┌────────────┐
-                    │  llm-wiki  │  ← extracted from CCT knowledge/wiki/schema + scripts/wiki_ingest
-                    │ (new repo) │
-                    └─────▲──────┘
-                          │ optional extra
-┌───────────┐       ┌─────┴──────┐        ┌──────────────────────┐
-│  ragkit   │──────▶│  memkernel │◀───────│ document-assistant   │ (consumes ragkit; may consume memkernel for chat memory)
-│ (rebuilt  │       │ (memory    │        └──────────────────────┘
-│ from DA)  │       │  server)   │
-└───────────┘       └─────▲──────┘
-                          │ MCP (Claude Code, Pi) / Python (haa, hooks)
-            ┌─────────────┴─────────────┐
-            │ code-copilot-team   haa   │
-            └───────────────────────────┘
+                    ┌────────────┐      ┌──────────────┐
+                    │  llm-wiki  │      │  rlm-studio  │  document layer: file store, chunk index,
+                    │ (new repo) │      │ (documents,  │  Direct/RAG/RLM/auto "ask" (ADR-009)
+                    └─────▲──────┘      │  reasoning)  │
+                          │ [wiki]      └──────▲───────┘
+                          │ extra              │ [rlm] extra; memkernel gives back an EmbeddingPort shim
+┌───────────┐       ┌─────┴─────────────────────┴──┐     ┌──────────────────────┐
+│  ragkit   │──────▶│           memkernel          │◀────│ document-assistant   │ (consumes ragkit; may consume memkernel)
+│ (rebuilt  │       │ memories, tiers, recall,     │     └──────────────────────┘
+│ from DA)  │       │ consolidation, wiki bridge   │
+└───────────┘       └──────────────▲───────────────┘
+                                   │ MCP (Claude Code, Pi) / Python components (haa, hooks)
+                     ┌─────────────┴─────────────┐
+                     │ code-copilot-team    haa  │  haa = component assembler; CCT = rules/workflow supplier
+                     └───────────────────────────┘
 ```
 
-`rlm-studio`, `my-llm` and `mapatlas` stay outside the graph.
+`my-llm` and `mapatlas` stay outside the graph. Licenses: see `docs/licensing.md`.
 
 ## Licensing note
 
-`document-assistant` and the old `ragkit` are CC-BY-SA-4.0 (share-alike);
-memkernel is MIT; CCT is MIT; haa is Apache-2.0. Anything extracted from
-document-assistant into a library that memkernel depends on must be
-re-licensed by the owner (MIT or Apache-2.0) before memkernel can depend on
-it without inheriting share-alike terms. Copying the small pieces above is
-the owner copying their own code and can be relicensed at the same time.
+Moved to [`../licensing.md`](../licensing.md). Short version: document-assistant
+(CC-BY-SA-4.0) must be relicensed before the new `ragkit` is extracted from
+it; the old ragkit has no LICENSE file; libraries should converge on
+Apache-2.0 (or stay MIT, but not mix in share-alike).

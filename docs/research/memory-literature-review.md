@@ -115,6 +115,32 @@ appears as reflection (Generative Agents), update ops (Mem0), note evolution
 decay from last retrieval; Titans' learned forget gate. Roynard's point:
 decay is right for experience and wrong for facts.
 
+## 5a. CoALA / ReAct / Voyager as the harness blueprint
+
+The owner's *Architectural Frameworks for Language Agents* report stacks
+three ideas: CoALA as the taxonomy (working memory vs episodic / semantic /
+procedural long-term memory; internal actions = reasoning, retrieval,
+learning; external = grounding), ReAct as the runtime loop (thought →
+action → observation), Voyager as the lifelong-learning pattern (a library
+of self-written, verified, embedded-by-description executable skills).
+Mapping onto this design:
+
+| Report element | memkernel / haa |
+|---|---|
+| Working memory (context window + scratchpad) | `task` tier + the harness's message list |
+| Episodic LTM | `episode`, `observation` |
+| Semantic LTM (RAG knowledge base, corporate wiki) | `fact`, `decision`, `convention`; wiki bridge; documents via RLM Studio (ADR-009) |
+| Procedural LTM (skill library) | `procedure`; executable-skill metadata is roadmap 0.3 |
+| Retrieval action | `recall`, `get`, `ask` |
+| Learning action | `retain`, `promote`, `consolidate` |
+| ReAct loop | haa's `cct.py`; Claude Code's own loop |
+| Sandbox for skill verification | haa's Docker sandbox; RLM Studio's sandbox adapters |
+
+The report's own trade-off column is worth keeping in mind: ReAct "explodes
+context window consumption" (hence tiers and `ask` instead of `get`), and
+Voyager "requires securely isolated code execution" (hence skills execute
+in haa's sandbox, never in memkernel).
+
 ## 6. Design implications adopted (see memory-tiers.md §3)
 
 1. Separate persistence semantics by record kind: facts supersede, episodes

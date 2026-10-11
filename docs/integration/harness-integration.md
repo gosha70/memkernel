@@ -59,7 +59,27 @@ haa is a ReAct loop over an OpenAI-compatible endpoint with a Docker sandbox
 and `harness/memory/agents_md.py` (an `AGENTS.md` file injected as a system
 message) as its only memory. `chromadb` is pinned but unused; roadmap items
 6–7 are "ChromaDB-backed memory" and "session persistence and context
-compaction".
+compaction". The owner has just started the context-management work and
+intends haa to become a **component-assembly harness**: a developer picks
+and wires memory, sandbox, tools, workflow and provider components into a
+customised harness, later through a UI.
+
+That intent sets a requirement on memkernel: every capability must be
+available as a Python component with a small, stable interface, not only
+as MCP tools. Concretely (roadmap 0.3): `build_service()` (done), the
+ports in `core/ports.py` (done; `DocumentStorePort`/`ReasonerPort` to
+come), and a `MemoryLifecycle` component exposing
+`on_session_start() -> str`, `on_pre_compact(summary) -> str`,
+`on_post_compact() -> str`, `on_session_end(summary) -> None`, which is
+what the Claude Code hooks already do in script form. haa then assembles
+memory by instantiating `MemoryLifecycle(build_service())` and calling it
+from its loop; a future UI assembles the same objects from configuration.
+
+In CoALA terms (see the owner's *AI Harness Architectures* report):
+haa's loop is the ReAct decision cycle, memkernel is the memory module
+with Retrieval (`recall`/`ask`) and Learning (`retain`/`promote`) as the
+internal actions, and `procedure` memories are the Voyager skill library
+once they carry executable metadata.
 
 Plan (lowest-friction, in-process Python, no MCP client needed):
 

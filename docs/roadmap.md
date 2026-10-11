@@ -13,9 +13,24 @@ Updated 2026-10-11. Ordered by dependency, not by date.
 - [x] `memkernel.factory.build_service()`; hooks use it; `session-start.py`
 - [ ] CHANGELOG, CONTRIBUTING, PyPI publication of `0.2.0`
 
-## 0.3 — hardening with pieces copied from sibling projects
+## 0.3 — documents via RLM Studio, lifecycle components, hardening
 
-(see `docs/research/sibling-projects.md`)
+(see `docs/research/sibling-projects.md`, ADR-009)
+
+- [ ] `DocumentStorePort` + `ReasonerPort` in `core/ports.py`; `document`
+      memory type with a local fallback (chunk + hybrid search)
+- [ ] `memkernel/adapters/rlmstudio.py` behind the `memkernel[rlm]` extra;
+      `ask(ref_id, question, mode="auto")` MCP tool (Direct / RAG / RLM / auto)
+- [ ] `consolidate(synthesize=True)` using the reasoner (opt-in)
+- [ ] Contribute a sentence-transformers `EmbeddingPort` shim to rlm-studio
+- [ ] `memkernel.lifecycle.MemoryLifecycle` (`on_session_start`,
+      `on_pre_compact`, `on_post_compact`, `on_session_end`) so hooks and
+      haa call one component instead of re-implementing the protocol
+- [ ] `procedure` memories as executable skills (Voyager pattern): metadata
+      `language`, `entrypoint`, `verified`, `verification_cmd`; `recall`
+      by task description; haa runs them in its sandbox
+
+### Hardening with pieces copied from sibling projects
 
 - [ ] BM25 index persistence (document-assistant `bm25_index.save/load`)
 - [ ] Embedding-model provenance in Chroma collection metadata; refuse to
