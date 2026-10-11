@@ -36,7 +36,8 @@ WIKI_TAG = "wiki"
 INDEX_FILE = "index.md"
 LOG_FILE = "log.md"
 
-# MemoryType -> (page_type, directory). CODE is not exported: code lives in the repo.
+# MemoryType -> (page_type, directory). CODE is not exported: code lives in the
+# repo. DOCUMENT is not exported either: documents are sources, not wiki pages.
 EXPORT_MAP: dict[MemoryType, tuple[str, str]] = {
     MemoryType.DECISION: ("decision", "decisions"),
     MemoryType.CONVENTION: ("concept", "concepts"),

@@ -77,6 +77,7 @@ def _memory_from_chroma(
         tags=_split_csv(meta.get("tags")),
         supersedes=str(meta["supersedes"]) if meta.get("supersedes") else None,
         promoted_from=str(meta["promoted_from"]) if meta.get("promoted_from") else None,
+        document_id=str(meta["document_id"]) if meta.get("document_id") else None,
     )
 
 

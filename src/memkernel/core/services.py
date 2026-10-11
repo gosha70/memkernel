@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from memkernel.core.models import (
     DEFAULT_IMPORTANCE,
+    DOCUMENT_BODY_TAG,
+    DOCUMENT_CHUNK_TAG,
     ArtifactRef,
     Memory,
     MemoryTier,
@@ -25,10 +27,22 @@ from memkernel.memory.lifecycle import memory_is_expired
 
 if TYPE_CHECKING:
     from memkernel.config import MemKernelSettings
-    from memkernel.core.ports import ChunkerPort, EmbeddingPort, SparseIndexPort, VectorStorePort
+    from memkernel.core.ports import (
+        ChunkerPort,
+        DocumentStorePort,
+        EmbeddingPort,
+        SparseIndexPort,
+        VectorStorePort,
+    )
     from memkernel.retrieval.search import HybridSearchService
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on the outline line appended to a document summary, so that
+# get(document) is at most ``document_summary_chars`` + 200 characters.
+_SUMMARY_OUTLINE_MAX_CHARS = 196
+_SUMMARY_SEPARATOR = "\n\n"
+_DEFAULT_DOCUMENT_NAME = "document"
 
 
 @dataclass(frozen=True)
@@ -39,6 +53,36 @@ class _ExtraMeta:
     tags: list[str] = field(default_factory=list)
     supersedes: str | None = None
     promoted_from: str | None = None
+    document_id: str | None = None
+
+
+def _is_document_part(memory: Memory) -> bool:
+    """True for the body / chunk records a document store keeps beside a document summary."""
+    return DOCUMENT_BODY_TAG in memory.tags or DOCUMENT_CHUNK_TAG in memory.tags
+
+
+def _document_summary(content: str, name: str, chunk_count: int, max_chars: int) -> str:
+    """First ``max_chars`` of the body plus one bounded line with line count and outline."""
+    lines = content.splitlines()
+    headings = [ln.strip().lstrip("#").strip() for ln in lines if ln.lstrip().startswith("#")]
+    outline = f"[document {name}: {len(lines)} lines, {len(content)} chars, {chunk_count} chunks"
+    if headings:
+        outline += "; outline: " + ", ".join(h for h in headings if h)
+    outline = outline[: _SUMMARY_OUTLINE_MAX_CHARS - 1] + "…" if len(outline) > _SUMMARY_OUTLINE_MAX_CHARS else outline
+    return content[:max_chars] + _SUMMARY_SEPARATOR + outline + "]"
+
+
+def _artifact_ref(memory: Memory, score: float, preview_length: int) -> ArtifactRef:
+    return ArtifactRef(
+        ref_id=memory.ref_id,
+        preview=memory.content[:preview_length],
+        score=score,
+        token_count=memory.token_count,
+        type=memory.type,
+        timestamp=memory.timestamp,
+        tier=memory.tier,
+        importance=memory.importance,
+    )
 
 
 class MemoryService:
@@ -66,6 +110,8 @@ class MemoryService:
         search_service: HybridSearchService,
         settings: MemKernelSettings,
         chunker: ChunkerPort | None = None,
+        document_store: DocumentStorePort | None = None,
+        document_chunker: ChunkerPort | None = None,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
@@ -73,6 +119,8 @@ class MemoryService:
         self._search_service = search_service
         self._settings = settings
         self._chunker = chunker
+        self._document_store = document_store
+        self._document_chunker = document_chunker
         self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
@@ -103,9 +151,16 @@ class MemoryService:
         ``supersedes`` links a newer memory to the one it replaces so that
         recall can hide the stale version (see ``forget``/``consolidate``).
 
+        For MemoryType.DOCUMENT with a document store injected: the body is
+        stored through the store, its token chunks are indexed, and the
+        memkernel record keeps only a summary (``get`` never returns the
+        body; use ``ask``). ``source`` names the document.
+
         Idempotent: identical content + type returns the existing ref_id.
         """
         extra = _ExtraMeta(importance=importance, tags=tags or [], supersedes=supersedes, promoted_from=promoted_from)
+        if type == MemoryType.DOCUMENT and self._document_store is not None:
+            return self._retain_document(content, session_id, checkpoint, source, extra)
         if type == MemoryType.CODE and self._chunker is not None:
             chunks = self._chunker.chunk(content, {"source": source})
             if chunks:
@@ -123,6 +178,30 @@ class MemoryService:
                 return ref_id
 
         return self._retain_single(content, type, session_id, checkpoint, source, extra)
+
+    def _retain_document(
+        self,
+        content: str,
+        session_id: str | None,
+        checkpoint: bool,
+        source: str,
+        extra: _ExtraMeta,
+    ) -> str:
+        """Store a document body + chunks through the document store; retain its summary."""
+        assert self._document_store is not None  # guarded by the caller
+        name = source or _DEFAULT_DOCUMENT_NAME
+        doc_id = self._document_store.put(content, name)
+        chunks = self._document_chunker.chunk(content, {"source": name}) if self._document_chunker else [content]
+        indexed = self._document_store.index(doc_id, chunks)
+        summary = _document_summary(content, name, indexed, self._settings.document_summary_chars)
+        return self._retain_single(
+            summary,
+            MemoryType.DOCUMENT,
+            session_id,
+            checkpoint,
+            source,
+            replace(extra, document_id=doc_id),
+        )
 
     def _retain_single(
         self,
@@ -180,6 +259,8 @@ class MemoryService:
             metadata["supersedes"] = extra.supersedes
         if extra.promoted_from:
             metadata["promoted_from"] = extra.promoted_from
+        if extra.document_id:
+            metadata["document_id"] = extra.document_id
 
         # Authoritative store first
         self._vector_store.upsert(
@@ -255,22 +336,48 @@ class MemoryService:
         return live
 
     def _filter_live(self, results: list[ArtifactRef]) -> list[ArtifactRef]:
-        """Drop expired memories and memories that a newer record supersedes."""
+        """Drop expired and superseded memories; resolve document chunk hits to their summary.
+
+        A hit on a document body or chunk record is replaced by the document's
+        summary record (the ``document`` memory) carrying the hit's score, so a
+        phrase deep inside a document surfaces the document exactly once and
+        chunk records never appear as top-level results.
+        """
         memories: dict[str, Memory] = {}
         for ref in results:
             memory = self._vector_store.get_by_id(ref.ref_id)
             if memory is not None:
                 memories[ref.ref_id] = memory
         superseded = {m.supersedes for m in memories.values() if m.supersedes}
+        summaries: dict[str, Memory | None] = {}
         live: list[ArtifactRef] = []
+        seen: set[str] = set()
         for ref in results:
             memory = memories.get(ref.ref_id)
-            if memory is None or ref.ref_id in superseded:
+            if memory is None:
+                continue
+            if memory.document_id and _is_document_part(memory):
+                if memory.document_id not in summaries:
+                    summaries[memory.document_id] = self._document_summary_record(memory.document_id)
+                summary = summaries[memory.document_id]
+                if summary is None:
+                    continue
+                memory = summary
+                ref = _artifact_ref(summary, ref.score, self._settings.preview_length)
+            if ref.ref_id in seen or ref.ref_id in superseded:
                 continue
             if memory_is_expired(memory, self._settings):
                 continue
+            seen.add(ref.ref_id)
             live.append(ref)
         return live
+
+    def _document_summary_record(self, document_id: str) -> Memory | None:
+        """Return the ``document`` memory (summary record) that owns ``document_id``."""
+        for memory in self._vector_store.list_all({"document_id": document_id}):
+            if not _is_document_part(memory):
+                return memory
+        return None
 
     def _touch(self, ref_id: str) -> None:
         """Record an access: bump access_count and last_accessed (rehearsal)."""
@@ -307,7 +414,7 @@ class MemoryService:
             where = conditions[0]
         elif conditions:
             where = {"$and": conditions}
-        memories = self._vector_store.list_all(where)
+        memories = [m for m in self._vector_store.list_all(where) if not _is_document_part(m)]
         if tier is not None:
             memories = [m for m in memories if m.tier == tier]
         return memories
@@ -455,17 +562,21 @@ class MemoryService:
         Returns True if the memory existed and was deleted, False otherwise.
         BM25 removal failure is non-fatal — the index is marked for rebuild.
         """
-        # For CODE canonical records, delete linked chunk records first
         canonical = self._vector_store.get_by_id(ref_id)
         if canonical is not None:
+            # CODE canonical records: delete the linked chunk records first.
             for chunk_ref in canonical.chunk_refs:
-                self._vector_store.delete(chunk_ref)
-                try:
-                    self._sparse_index.remove(chunk_ref)
-                except Exception:
-                    logger.warning("BM25 remove failed for chunk %s", chunk_ref)
-                    self._sparse_index.mark_needs_rebuild()
+                self._delete_record(chunk_ref)
+            # DOCUMENT summary records: delete the body and chunks the document store keeps.
+            if canonical.document_id and not _is_document_part(canonical):
+                for part in self._vector_store.list_all({"document_id": canonical.document_id}):
+                    if part.ref_id != ref_id:
+                        self._delete_record(part.ref_id)
 
+        return self._delete_record(ref_id)
+
+    def _delete_record(self, ref_id: str) -> bool:
+        """Delete one record from the vector store and the BM25 index."""
         deleted = self._vector_store.delete(ref_id)
         try:
             self._sparse_index.remove(ref_id)
@@ -479,7 +590,10 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     def rebuild_sparse_index(self) -> None:
-        """Rebuild the BM25 index from scratch using the vector store as source of truth."""
+        """Rebuild the BM25 index from scratch using the vector store as source of truth.
+
+        Document bodies are left out: their chunks are indexed instead.
+        """
         all_memories = self._vector_store.list_all()
-        documents = [(m.ref_id, m.content) for m in all_memories]
+        documents = [(m.ref_id, m.content) for m in all_memories if DOCUMENT_BODY_TAG not in m.tags]
         self._sparse_index.rebuild(documents)

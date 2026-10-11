@@ -34,6 +34,12 @@ class MemKernelSettings(BaseSettings):
     chunk_size: int = 1500  # max chars per chunk
     chunk_overlap: int = 200  # char overlap between token chunks (fallback only)
 
+    # Documents and ask() (ADR-009)
+    document_store: Literal["local"] = "local"  # where `document` bodies live
+    document_summary_chars: int = 1000  # characters of the body kept in the document's summary record
+    reasoner: Literal["local", "rlmstudio"] = "local"  # ReasonerPort behind ask(); falls back to local
+    ask_top_k: int = 5  # chunks the local reasoner returns per ask()
+
     # Lifecycle / decay (see docs/architecture/memory-tiers.md)
     episode_ttl_days: int = 30  # base TTL for short-term `episode` memories
     observation_ttl_days: int = 7  # base TTL for short-term `observation` memories

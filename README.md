@@ -158,6 +158,10 @@ All settings are read from environment variables with the `MEMKERNEL_` prefix, o
 | `MEMKERNEL_PREVIEW_LENGTH` | `200` | Max characters in the `preview` field of `ArtifactRef` |
 | `MEMKERNEL_CHUNK_SIZE` | `1500` | Max characters per AST chunk (code memories) |
 | `MEMKERNEL_CHUNK_OVERLAP` | `200` | Character overlap between token-based fallback chunks |
+| `MEMKERNEL_DOCUMENT_STORE` | `local` | Where `document` bodies live (`local` = the project's own ChromaDB collection) |
+| `MEMKERNEL_DOCUMENT_SUMMARY_CHARS` | `1000` | Characters of the body kept in a `document` memory's summary record |
+| `MEMKERNEL_REASONER` | `local` | `ReasonerPort` behind `ask`: `local` (hybrid search over chunks, no LLM) or `rlmstudio` (falls back to `local` when `rlmstudio` is not importable) |
+| `MEMKERNEL_ASK_TOP_K` | `5` | Chunks the local reasoner returns per `ask` |
 | `MEMKERNEL_EPISODE_TTL_DAYS` | `30` | Base TTL for `episode` memories (short-term) |
 | `MEMKERNEL_OBSERVATION_TTL_DAYS` | `7` | Base TTL for `observation` memories (short-term) |
 | `MEMKERNEL_TASK_TTL_HOURS` | `24` | Base TTL for `task` memories (working) |

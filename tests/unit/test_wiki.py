@@ -213,3 +213,13 @@ def test_export_then_import_round_trip_does_not_duplicate(tmp_path: Path) -> Non
     WikiImporter(svc, tmp_path).import_pages()
     # The wiki page is now a second, wiki-tagged memory; a second export must not re-emit it.
     assert WikiExporter(svc, tmp_path).export().written == []
+
+
+def test_export_skips_document_memories(tmp_path: Path) -> None:
+    """Documents are sources, not wiki pages: they never become draft pages."""
+    svc = _service()
+    svc.retain("# Spec\n\nA long document body.", MemoryType.DOCUMENT, source="specs/spec.md")
+    svc.retain("Use Postgres", MemoryType.DECISION)
+    report = WikiExporter(svc, tmp_path).export()
+    assert report.written == ["decisions/use-postgres.md"]
+    assert report.skipped == 1

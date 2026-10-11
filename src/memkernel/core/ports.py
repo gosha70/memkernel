@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from memkernel.core.models import Memory, SearchResult
+    from memkernel.core.models import Answer, Memory, SearchResult
 
 
 @runtime_checkable
@@ -93,3 +93,31 @@ class ChunkerPort(Protocol):
     """Code/text chunking strategy (stub for future US3)."""
 
     def chunk(self, content: str, metadata: dict[str, Any]) -> list[str]: ...
+
+
+@runtime_checkable
+class DocumentStorePort(Protocol):
+    """Document bodies: stored whole, chunk-indexed, searchable per document (ADR-009)."""
+
+    def put(self, content: str, name: str) -> str:
+        """Store a document body and return its doc_id (idempotent for identical content)."""
+        ...
+
+    def get(self, doc_id: str) -> str | None:
+        """Return the stored body, or None if ``doc_id`` is unknown."""
+        ...
+
+    def index(self, doc_id: str, chunks: list[str]) -> int:
+        """Index the chunks of a stored document; returns the number of chunks indexed."""
+        ...
+
+    def search(self, doc_id: str, query: str, top_k: int) -> list[str]:
+        """Return the top_k chunk texts of one document ranked against ``query``."""
+        ...
+
+
+@runtime_checkable
+class ReasonerPort(Protocol):
+    """Answers a question about a body of text in a given mode (direct | rag | rlm | auto)."""
+
+    def ask(self, content: str, question: str, mode: str) -> Answer: ...

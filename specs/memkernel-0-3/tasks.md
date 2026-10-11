@@ -7,18 +7,18 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 1 | | Add `DocumentStorePort` and `ReasonerPort` protocols (FR-001); keep them under `@runtime_checkable` like the existing ports | `src/memkernel/core/ports.py` | build | [ ] |
-| 2 | [P] | Add `Answer` model and `MemoryType.DOCUMENT` (long-term, importance 0.6) to `TYPE_TIER` / `DEFAULT_IMPORTANCE` (FR-001, FR-002) | `src/memkernel/core/models.py` | build | [ ] |
-| 3 | [P] | Add settings `reasoner`, `document_store`, `document_summary_chars`, `ask_top_k` (FR-008) and document them in `README.md`'s configuration table | `src/memkernel/config.py`, `README.md` | build | [ ] |
-| 4 | | Implement `LocalDocumentStore` on the existing Chroma collection: body as canonical record, chunks tagged `document_chunk` with `document_id`, `put/get/index/search` (FR-004); add a token-based `split_text` helper if `retrieval/chunking.py` lacks a public one | `src/memkernel/storage/documents.py`, `src/memkernel/retrieval/chunking.py` | build | [ ] |
-| 5 | | Wire `retain(type=DOCUMENT)`: store body via the port, index chunks, keep a summary record with `document_id` metadata; hide `document_chunk` records from `recall` and `list_memories`; `forget` removes body and chunks (FR-003) | `src/memkernel/core/services.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
-| 6 | [P] | Skip `DOCUMENT` in `WikiExporter` (FR-002) and add a test | `src/memkernel/wiki/sync.py`, `tests/unit/test_wiki.py` | build | [ ] |
-| 7 | | Unit tests for the store and the retain path (FR-013) | `tests/unit/test_documents.py` | build | [ ] |
+| 1 | | Add `DocumentStorePort` and `ReasonerPort` protocols (FR-001); keep them under `@runtime_checkable` like the existing ports | `src/memkernel/core/ports.py` | build | [x] |
+| 2 | [P] | Add `Answer` model and `MemoryType.DOCUMENT` (long-term, importance 0.6) to `TYPE_TIER` / `DEFAULT_IMPORTANCE` (FR-001, FR-002) | `src/memkernel/core/models.py` | build | [x] |
+| 3 | [P] | Add settings `reasoner`, `document_store`, `document_summary_chars`, `ask_top_k` (FR-008) and document them in `README.md`'s configuration table | `src/memkernel/config.py`, `README.md` | build | [x] |
+| 4 | | Implement `LocalDocumentStore` on the existing Chroma collection: body as canonical record, chunks tagged `document_chunk` with `document_id`, `put/get/index/search` (FR-004); add a token-based `split_text` helper if `retrieval/chunking.py` lacks a public one | `src/memkernel/storage/documents.py`, `src/memkernel/retrieval/chunking.py` | build | [x] |
+| 5 | | Wire `retain(type=DOCUMENT)`: store body via the port, index chunks, keep a summary record with `document_id` metadata; hide `document_chunk` records from `recall` and `list_memories`; `forget` removes body and chunks (FR-003) | `src/memkernel/core/services.py`, `src/memkernel/storage/chroma.py` | build | [x] |
+| 6 | [P] | Skip `DOCUMENT` in `WikiExporter` (FR-002) and add a test | `src/memkernel/wiki/sync.py`, `tests/unit/test_wiki.py` | build | [x] |
+| 7 | | Unit tests for the store and the retain path (FR-013) | `tests/unit/test_documents.py` | build | [x] |
 
 **Checkpoint US1** — verify before continuing:
-- [ ] `poetry run mypy src/` clean; `poetry run ruff check src/ tests/` clean
-- [ ] `poetry run pytest tests/unit/test_documents.py tests/unit/test_wiki.py -q` green
-- [ ] Existing 0.2 tests still pass unchanged
+- [x] `poetry run mypy src/` clean; `poetry run ruff check src/ tests/` clean
+- [x] `poetry run pytest tests/unit/test_documents.py tests/unit/test_wiki.py -q` green
+- [x] Existing 0.2 tests still pass unchanged
 
 ---
 
