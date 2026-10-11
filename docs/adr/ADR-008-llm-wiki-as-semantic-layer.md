@@ -48,7 +48,7 @@ right home for curated, cited, human-reviewed knowledge.
    `workflow|playbook`→`procedure`.
 4. **Repository recommendation.** The wiki maintainer (schema, linter,
    ingest/promote/query/lint CLI) should be extracted from CCT into a new
-   standalone repository — working name `gosha70/llm-wiki` — published as a
+   standalone repository — working name `gosha70/ai-wiki` — published as a
    Python package with no runtime dependencies beyond the standard library
    and an optional LLM backend. memkernel depends on it as an optional
    extra (`memkernel[wiki]`) for the LLM-driven operations; the bridge in
@@ -75,9 +75,9 @@ right home for curated, cited, human-reviewed knowledge.
 - Two new MCP tools (`wiki_export`, `wiki_import`) and a `MEMKERNEL_WIKI_DIR`
   setting.
 - A curation loop appears: export drafts → human/agent curates → import.
-  Until `llm-wiki` exists, CCT's `scripts/wiki promote` is the curator.
+  Until `ai-wiki` exists, CCT's `scripts/wiki promote` is the curator.
 - Compiled pages carry `memkernel_ref` in frontmatter so a page can be
   traced back to the memory it came from, and imported memories carry the
   page path as `source`.
-- Follow-up: the new `llm-wiki` repo (extraction PR against CCT), then
+- Follow-up: the new `ai-wiki` repo (extraction PR against CCT), then
   `memkernel[wiki]` extra wiring `wiki query`/`wiki lint --health` as tools.

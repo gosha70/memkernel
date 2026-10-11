@@ -45,9 +45,28 @@ Updated 2026-10-11. Ordered by dependency, not by date.
       (Pi, Codex, haa scripts)
 - [ ] Eval: knowledge-update and abstention categories (LongMemEval-style)
 
+## Cross-repository sequence
+
+Order is by dependency. A step starts when the one it depends on has a
+*published* artefact (tag or PyPI release), not when it is merged.
+
+| # | Repo | Deliverable | Depends on | Unblocks |
+|---|------|-------------|------------|----------|
+| 1 | memkernel | merge this branch, `0.2.0` on PyPI, CHANGELOG | — | CCT `setup.sh --memkernel` without a path; haa pin |
+| 2 | ai-wiki | `0.1.0`: move `knowledge/wiki/schema`, `lint-wiki.sh` and `scripts/wiki_ingest` from CCT; `ai-wiki` CLI (`ingest`, `promote`, `query`, `lint`); backends `claude`, `codex`, `cursor`, `test` | nothing in code (extraction) | CCT thin wrapper; `memkernel[wiki]` |
+| 3 | rlm-studio | publish `1.0.0` **as is**; freeze `interact()`, mode names, `StoragePort`, `EmbeddingPort`, `RLMKitClient` as the public contract | — | `memkernel[rlm]` from PyPI |
+| 4 | memkernel | `0.3.0`: `DocumentStorePort`, `ReasonerPort`, `document` type, `ask`, `MemoryLifecycle`, rlm-studio adapter, ai-wiki extra | 1, 2, 3 | haa, CCT, rlm-studio hybrid requirements |
+| 5 | rlm-studio | `1.1.0`: hybrid mode defined from `ask()` traces (retrieval-seeded RLM with an escalation ladder) | 4 (usage data) | memkernel `ask(mode="hybrid")` |
+| 6 | haa | memory component + lifecycle wiring; sandbox-executed `procedure` skills | 4 | the component-assembly UI |
+| 7 | code-copilot-team | consume ai-wiki and memkernel 0.3: hooks on the factory, skill text, `MEMKERNEL_WIKI_DIR`, bump dogfood SHA | 2, 4 | — |
+| 8 | document-assistant → ragkit | relicense, extract `src/rag/` into the new `ragkit`, memkernel contributes `ASTChunker`/`rrf_fuse` | licensing decision | memkernel 0.4 depends on ragkit |
+
+Steps 2 and 3 run in parallel with 1. Step 8 is last because nothing above
+is blocked on it.
+
 ## 0.4 — ecosystem
 
-- [ ] New repo `llm-wiki`: extract CCT's `knowledge/wiki/schema`, linter and
+- [ ] `ai-wiki`: extract CCT's `knowledge/wiki/schema`, linter and
       `scripts/wiki_ingest` into a stdlib-only package; `memkernel[wiki]`
       extra exposes `wiki query` / `wiki lint --health` as tools
 - [ ] New `ragkit` rebuilt from `document-assistant/src/rag/` (langchain-free);

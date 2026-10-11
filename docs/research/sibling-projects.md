@@ -59,7 +59,7 @@ From `rlm-studio/src/rlmstudio/benchmark/`:
 
 ```
                     ┌────────────┐      ┌──────────────┐
-                    │  llm-wiki  │      │  rlm-studio  │  document layer: file store, chunk index,
+                    │  ai-wiki   │      │  rlm-studio  │  document layer: file store, chunk index,
                     │ (new repo) │      │ (documents,  │  Direct/RAG/RLM/auto "ask" (ADR-009)
                     └─────▲──────┘      │  reasoning)  │
                           │ [wiki]      └──────▲───────┘

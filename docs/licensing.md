@@ -14,13 +14,13 @@ Reviewed 2026-10-11 from the `LICENSE` files in each checkout.
 | mapatlas | Apache-2.0 | unrelated |
 | document-assistant | CC-BY-SA-4.0 | source of the future `ragkit` extraction |
 | ragkit (old) | **no LICENSE file** (README/pyproject silent) | to be retired |
-| llm-wiki (new) | — | to be extracted from code-copilot-team (MIT) |
+| ai-wiki | Apache-2.0 (created 2026-10-11, empty) | receives the wiki maintainer extracted from code-copilot-team (MIT) |
 | ragkit (new) | — | to be extracted from document-assistant (CC-BY-SA-4.0) |
 
 ## Recommendation
 
 1. **Libraries other projects embed: Apache-2.0.** memkernel, the new
-   `llm-wiki`, the new `ragkit`, and rlm-studio are dependencies of other
+   `ai-wiki`, the new `ragkit`, and rlm-studio are dependencies of other
    people's harnesses. Apache-2.0 adds an explicit patent grant and
    contributor terms that MIT lacks, is what haa and mapatlas already use,
    and is the common choice for infrastructure (Chroma, sentence-transformers'
@@ -59,7 +59,7 @@ Reviewed 2026-10-11 from the `LICENSE` files in each checkout.
 
 | Repository | Target |
 |---|---|
-| memkernel, llm-wiki, ragkit (new), rlm-studio | Apache-2.0 |
+| memkernel, ai-wiki, ragkit (new), rlm-studio | Apache-2.0 |
 | haa, mapatlas | Apache-2.0 (unchanged) |
 | code-copilot-team | MIT (unchanged; a configuration framework, not an embedded library) |
 | document-assistant | Apache-2.0 (relicensed from CC-BY-SA-4.0) |
