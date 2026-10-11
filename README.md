@@ -5,6 +5,8 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
+**Site:** [memkernel.dev](https://memkernel.dev) · **Package:** [pypi.org/project/memkernel](https://pypi.org/project/memkernel/)
+
 Code-aware memory server for AI coding copilots.
 
 MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory across sessions. When Claude compacts context or a session ends, project decisions, conventions, and code understanding are normally lost. MemKernel stores them in a local vector database and retrieves them on demand.

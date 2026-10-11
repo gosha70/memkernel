@@ -6,6 +6,8 @@ authors = ["EGOGE"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/gosha70/memkernel"
+homepage = "https://memkernel.dev"
+documentation = "https://memkernel.dev"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
