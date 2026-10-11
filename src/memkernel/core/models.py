@@ -85,6 +85,11 @@ DEFAULT_IMPORTANCE: dict[MemoryType, float] = {
 DOCUMENT_BODY_TAG = "document_body"
 DOCUMENT_CHUNK_TAG = "document_chunk"
 
+# Reasoning modes accepted by ask(): RLM Studio's Direct / RAG / RLM / auto
+# selection, passed through to the ReasonerPort unchanged (ADR-009).
+ASK_MODES: tuple[str, ...] = ("direct", "rag", "rlm", "auto")
+DEFAULT_ASK_MODE = "auto"
+
 
 def tier_of(memory_type: MemoryType) -> MemoryTier:
     """Return the tier a memory type belongs to."""

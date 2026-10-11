@@ -12,9 +12,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from memkernel.core.models import (
+    ASK_MODES,
+    DEFAULT_ASK_MODE,
     DEFAULT_IMPORTANCE,
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
+    Answer,
     ArtifactRef,
     Memory,
     MemoryTier,
@@ -31,6 +34,7 @@ if TYPE_CHECKING:
         ChunkerPort,
         DocumentStorePort,
         EmbeddingPort,
+        ReasonerPort,
         SparseIndexPort,
         VectorStorePort,
     )
@@ -112,6 +116,7 @@ class MemoryService:
         chunker: ChunkerPort | None = None,
         document_store: DocumentStorePort | None = None,
         document_chunker: ChunkerPort | None = None,
+        reasoner: ReasonerPort | None = None,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
@@ -121,6 +126,7 @@ class MemoryService:
         self._chunker = chunker
         self._document_store = document_store
         self._document_chunker = document_chunker
+        self._reasoner = reasoner
         self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
@@ -464,6 +470,33 @@ class MemoryService:
         if memory is not None and touch:
             self._touch(ref_id)
         return memory
+
+    def ask(self, ref_id: str, question: str, mode: str = DEFAULT_ASK_MODE) -> Answer | None:
+        """Answer ``question`` about one memory through the configured ReasonerPort.
+
+        For a ``document`` memory the full body is loaded from the document
+        store (the summary is used only if the body is gone); any other memory
+        is asked about its own content. ``mode`` is one of ``direct``, ``rag``,
+        ``rlm``, ``auto`` and is passed to the reasoner unchanged. Asking
+        records an access. Returns None when ``ref_id`` does not exist.
+        """
+        if mode not in ASK_MODES:
+            raise ValueError(f"unknown ask mode {mode!r}; expected one of {', '.join(ASK_MODES)}")
+        if self._reasoner is None:
+            raise RuntimeError("ask() requires a ReasonerPort; build the service through build_service()")
+        memory = self._vector_store.get_by_id(ref_id)
+        if memory is None:
+            return None
+        content = memory.content
+        if memory.type == MemoryType.DOCUMENT and memory.document_id and self._document_store is not None:
+            body = self._document_store.get(memory.document_id)
+            if body is None:
+                logger.warning("document body %s missing for %s; asking about the summary", memory.document_id, ref_id)
+            else:
+                content = body
+        answer = self._reasoner.ask(content, question, mode)
+        self._touch(ref_id)
+        return answer
 
     # ------------------------------------------------------------------
     # Consolidation (short-term -> long-term)

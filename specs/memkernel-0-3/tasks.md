@@ -26,15 +26,15 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 8 | | Implement `LocalReasoner` (FR-006): chunk, rank with dense + BM25 + RRF via the existing components, return top `ask_top_k` chunks as `Answer(mode="rag")`; define `ReasonerUnavailable` here | `src/memkernel/retrieval/reasoner.py` | build | [ ] |
-| 9 | | Add `MemoryService.ask(ref_id, question, mode)` (FR-005): resolve body (document store for `document`, own content otherwise), validate `mode` ∈ {direct, rag, rlm, auto}, touch the memory, return `Answer`; `None` when missing | `src/memkernel/core/services.py` | build | [ ] |
-| 10 | | Wire `reasoner` and `document_store` in `build_service()` (FR-008) with the local defaults | `src/memkernel/factory.py` | build | [ ] |
-| 11 | | Register the `ask` MCP tool and remove the `forget_expired` tool (FR-010); update the tool-set e2e assertion and add the document → ask → recall e2e test | `src/memkernel/mcp/tools/memory.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
-| 12 | [P] | Unit tests for the reasoner and `ask` on document and non-document memories (FR-013) | `tests/unit/test_reasoner.py`, `tests/unit/test_ask.py` | build | [ ] |
+| 8 | | Implement `LocalReasoner` (FR-006): chunk, rank with dense + BM25 + RRF via the existing components, return top `ask_top_k` chunks as `Answer(mode="rag")`; define `ReasonerUnavailable` here | `src/memkernel/retrieval/reasoner.py` | build | [x] |
+| 9 | | Add `MemoryService.ask(ref_id, question, mode)` (FR-005): resolve body (document store for `document`, own content otherwise), validate `mode` ∈ {direct, rag, rlm, auto}, touch the memory, return `Answer`; `None` when missing | `src/memkernel/core/services.py` | build | [x] |
+| 10 | | Wire `reasoner` and `document_store` in `build_service()` (FR-008) with the local defaults | `src/memkernel/factory.py` | build | [x] |
+| 11 | | Register the `ask` MCP tool and remove the `forget_expired` tool (FR-010); update the tool-set e2e assertion and add the document → ask → recall e2e test | `src/memkernel/mcp/tools/memory.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [x] |
+| 12 | [P] | Unit tests for the reasoner and `ask` on document and non-document memories (FR-013) | `tests/unit/test_reasoner.py`, `tests/unit/test_ask.py` | build | [x] |
 
 **Checkpoint US2** — verify before continuing:
-- [ ] `tests/e2e/test_mcp_roundtrip.py` passes with exactly nine tools listed
-- [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
+- [x] `tests/e2e/test_mcp_roundtrip.py` passes with exactly nine tools listed
+- [x] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
 
 ---
 

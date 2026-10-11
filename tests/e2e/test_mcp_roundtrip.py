@@ -291,7 +291,7 @@ async def test_tool_count_under_10() -> None:
             "forget",
             "promote",
             "consolidate",
-            "forget_expired",
+            "ask",
             "wiki_export",
             "wiki_import",
         }
@@ -332,9 +332,6 @@ async def test_tiered_memory_roundtrip_promote_consolidate() -> None:
 
         result = await client.call_tool("consolidate", arguments={})
         assert json.loads(_text(result))["candidates"] == []
-
-        result = await client.call_tool("forget_expired", arguments={})
-        assert json.loads(_text(result))["deleted"] == 0
 
 
 @pytest.mark.e2e
@@ -386,3 +383,48 @@ async def test_wiki_tools_require_a_directory() -> None:
         result = await client.call_tool("wiki_export", arguments={})
         assert result.isError
         assert "wiki" in _text(result).lower()
+
+
+@pytest.mark.e2e
+async def test_document_roundtrip_retain_ask_recall() -> None:
+    """US1/US2: retain(type=document) -> ask -> recall(tier=long_term) through the MCP client."""
+    marker = "the escape hatch is spelled QUETZALCOATL-7741"
+    rows = [f"line {i}: filler prose about nothing in particular" for i in range(300)]
+    rows[200] = marker
+    body = "\n".join(rows)
+    settings = _test_settings()
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+
+    async with create_connected_server_and_client_session(server) as client:
+        result = await client.call_tool(
+            "retain", arguments={"content": body, "type": "document", "source": "specs/escape.md"}
+        )
+        ref_id = json.loads(_text(result))["ref_id"]
+
+        # get() returns the summary, never the body
+        result = await client.call_tool("get", arguments={"ref_id": ref_id})
+        summary = json.loads(_text(result))
+        assert summary["type"] == "document"
+        assert len(summary["content"]) <= settings.document_summary_chars + 200
+        assert marker not in summary["content"]
+        assert "chunk_refs" not in summary
+
+        # ask() consults the body through the local reasoner
+        result = await client.call_tool(
+            "ask", arguments={"ref_id": ref_id, "question": "how is the escape hatch spelled QUETZALCOATL-7741"}
+        )
+        answer = json.loads(_text(result))
+        assert answer["mode"] == "rag"
+        assert any(marker in c for c in answer["citations"])
+        assert set(answer) == {"answer", "mode", "citations", "usage"}
+
+        result = await client.call_tool("ask", arguments={"ref_id": "missing", "question": "?"})
+        assert json.loads(_text(result))["error"] == "not_found"
+
+        result = await client.call_tool("ask", arguments={"ref_id": ref_id, "question": "?", "mode": "hybrid"})
+        assert result.isError
+
+        # recall by a phrase deep in the document returns the document once, no chunk records
+        result = await client.call_tool("recall", arguments={"query": "QUETZALCOATL-7741", "tier": "long_term"})
+        refs = json.loads(_text(result))
+        assert [r["ref_id"] for r in refs] == [ref_id]
