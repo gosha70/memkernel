@@ -183,4 +183,3 @@ cython_debug/
 /.claude
 /doc_internal
 AGENTS.md
-CLAUDE.md
