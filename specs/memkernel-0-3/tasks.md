@@ -42,14 +42,14 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 13 | | Implement `RLMStudioReasoner` (FR-007): lazy `import rlmstudio` inside `__init__`, raise `ReasonerUnavailable` if absent, `ask` calls `rlmstudio.interact(content, question, mode=mode)` and maps the result into `Answer` (answer text, mode actually used, usage tokens/cost when present) | `src/memkernel/adapters/__init__.py`, `src/memkernel/adapters/rlmstudio.py` | build | [ ] |
-| 14 | | `build_service()`: when `settings.reasoner == "rlmstudio"`, construct the adapter, catch `ReasonerUnavailable`, log a warning, fall back to `LocalReasoner` (FR-007) | `src/memkernel/factory.py` | build | [ ] |
-| 15 | | `consolidate(synthesize=True)` (FR-009): one `ReasonerPort.ask` call over candidate contents with a module-constant distillation prompt; parse one statement per line into `suggested: [{content, type}]`; local reasoner yields `[]` | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [ ] |
-| 16 | [P] | Tests with a fake `rlmstudio` module injected via `monkeypatch.setitem(sys.modules, ...)`: mode pass-through, result mapping, fallback warning, `synthesize=True` parsing (FR-013, FR-016) | `tests/unit/test_rlmstudio_adapter.py` | build | [ ] |
+| 13 | | Implement `RLMStudioReasoner` (FR-007): lazy `import rlmstudio` inside `__init__`, raise `ReasonerUnavailable` if absent, `ask` calls `rlmstudio.interact(content, question, mode=mode)` and maps the result into `Answer` (answer text, mode actually used, usage tokens/cost when present) | `src/memkernel/adapters/__init__.py`, `src/memkernel/adapters/rlmstudio.py` | build | [x] |
+| 14 | | `build_service()`: when `settings.reasoner == "rlmstudio"`, construct the adapter, catch `ReasonerUnavailable`, log a warning, fall back to `LocalReasoner` (FR-007) | `src/memkernel/factory.py` | build | [x] |
+| 15 | | `consolidate(synthesize=True)` (FR-009): one `ReasonerPort.ask` call over candidate contents with a module-constant distillation prompt; parse one statement per line into `suggested: [{content, type}]`; local reasoner yields `[]` | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [x] |
+| 16 | [P] | Tests with a fake `rlmstudio` module injected via `monkeypatch.setitem(sys.modules, ...)`: mode pass-through, result mapping, fallback warning, `synthesize=True` parsing (FR-013, FR-016) | `tests/unit/test_rlmstudio_adapter.py` | build | [x] |
 
 **Checkpoint US3** — verify before continuing:
-- [ ] `pyproject.toml` dependencies unchanged (FR-016); `poetry check --lock` passes
-- [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
+- [x] `pyproject.toml` dependencies unchanged (FR-016); `poetry check --lock` passes
+- [x] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
 
 ---
 

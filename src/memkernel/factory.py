@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from memkernel.config import MemKernelSettings
 from memkernel.core.services import MemoryService
 from memkernel.retrieval.chunking import TokenChunker
-from memkernel.retrieval.reasoner import LocalReasoner
+from memkernel.retrieval.reasoner import LocalReasoner, ReasonerUnavailable
 from memkernel.retrieval.search import HybridSearchService
 from memkernel.retrieval.sparse import BM25Index
 from memkernel.storage.chroma import ChromaVectorStore
@@ -69,6 +69,7 @@ def build_service(
         settings=resolved,
     )
     document_store = LocalDocumentStore(vector_store, embedding, sparse_index, resolved)
+    resolved_reasoner = reasoner if reasoner is not None else _build_reasoner(resolved, embedding)
     service = MemoryService(
         vector_store=vector_store,
         embedding=embedding,
@@ -78,7 +79,11 @@ def build_service(
         chunker=chunker,
         document_store=document_store,
         document_chunker=TokenChunker(resolved),
-        reasoner=reasoner if reasoner is not None else _build_reasoner(resolved, embedding),
+        reasoner=resolved_reasoner,
+        # The local reasoner only retrieves; it cannot distil statements, so
+        # consolidate(synthesize=True) gets a synthesizer only when an external
+        # (LLM-backed) reasoner is in place.
+        synthesizer=None if isinstance(resolved_reasoner, LocalReasoner) else resolved_reasoner,
     )
     if rebuild_sparse_index:
         service.rebuild_sparse_index()
@@ -86,5 +91,12 @@ def build_service(
 
 
 def _build_reasoner(settings: MemKernelSettings, embedding: EmbeddingPort) -> ReasonerPort:
-    """Return the ReasonerPort named by ``settings.reasoner`` (``local`` in this build)."""
+    """Return the ReasonerPort named by ``settings.reasoner``, falling back to the local one."""
+    if settings.reasoner == "rlmstudio":
+        from memkernel.adapters.rlmstudio import RLMStudioReasoner
+
+        try:
+            return RLMStudioReasoner()
+        except ReasonerUnavailable as exc:
+            logger.warning("MEMKERNEL_REASONER=rlmstudio but %s; falling back to the local reasoner", exc)
     return LocalReasoner(embedding, settings)

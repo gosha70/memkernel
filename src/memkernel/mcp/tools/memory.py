@@ -132,14 +132,17 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
     async def consolidate(
         session_id: str | None = None,
         limit: int = 20,
+        synthesize: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Run a consolidation pass: purge expired short-term memories and return the
         short-term/working memories most worth promoting (ranked by importance and how
         often they were recalled). Call promote(ref_id, type, content) for the keepers.
+        synthesize=true also asks the configured external reasoner to draft long-term
+        statements under "suggested" (empty with the built-in local reasoner).
         """
         svc = _service(ctx)
-        return json.dumps(svc.consolidate(session_id=session_id, limit=limit))
+        return json.dumps(svc.consolidate(session_id=session_id, limit=limit, synthesize=synthesize))
 
     @server.tool()
     async def ask(

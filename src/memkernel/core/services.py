@@ -48,6 +48,19 @@ _SUMMARY_OUTLINE_MAX_CHARS = 196
 _SUMMARY_SEPARATOR = "\n\n"
 _DEFAULT_DOCUMENT_NAME = "document"
 
+# consolidate(synthesize=True): the fixed instruction sent once, over the
+# concatenated candidate contents, to an external reasoner (FR-009).
+DISTILLATION_PROMPT = (
+    "Distil these short-term memories of a coding session into durable statements worth "
+    "keeping across sessions. Write one statement per line, each prefixed with its type and "
+    "a colon — decision:, convention:, fact: or procedure: — and nothing else."
+)
+_SYNTHESIS_TYPES: frozenset[str] = frozenset(
+    {MemoryType.DECISION.value, MemoryType.CONVENTION.value, MemoryType.FACT.value, MemoryType.PROCEDURE.value}
+)
+_DEFAULT_SYNTHESIS_TYPE = MemoryType.FACT.value
+_CANDIDATE_SEPARATOR = "\n\n---\n\n"
+
 
 @dataclass(frozen=True)
 class _ExtraMeta:
@@ -74,6 +87,28 @@ def _document_summary(content: str, name: str, chunk_count: int, max_chars: int)
         outline += "; outline: " + ", ".join(h for h in headings if h)
     outline = outline[: _SUMMARY_OUTLINE_MAX_CHARS - 1] + "…" if len(outline) > _SUMMARY_OUTLINE_MAX_CHARS else outline
     return content[:max_chars] + _SUMMARY_SEPARATOR + outline + "]"
+
+
+def parse_suggestions(text: str) -> list[dict[str, str]]:
+    """Parse one statement per line, optionally prefixed ``<type>:``, into ``{content, type}`` dicts.
+
+    Leading list markers (``-``, ``*``, ``1.``) are stripped; unknown or missing
+    types default to ``fact``; empty statements are dropped.
+    """
+    suggested: list[dict[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip().lstrip("-*•").strip()
+        if line[:1].isdigit():
+            line = line.lstrip("0123456789").lstrip(".)").strip()
+        if not line:
+            continue
+        memory_type = _DEFAULT_SYNTHESIS_TYPE
+        head, sep, tail = line.partition(":")
+        if sep and head.strip().lower() in _SYNTHESIS_TYPES:
+            memory_type, line = head.strip().lower(), tail.strip()
+        if line:
+            suggested.append({"content": line, "type": memory_type})
+    return suggested
 
 
 def _artifact_ref(memory: Memory, score: float, preview_length: int) -> ArtifactRef:
@@ -117,6 +152,7 @@ class MemoryService:
         document_store: DocumentStorePort | None = None,
         document_chunker: ChunkerPort | None = None,
         reasoner: ReasonerPort | None = None,
+        synthesizer: ReasonerPort | None = None,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
@@ -127,6 +163,9 @@ class MemoryService:
         self._document_store = document_store
         self._document_chunker = document_chunker
         self._reasoner = reasoner
+        # A reasoner able to distil statements (an LLM-backed one); None keeps
+        # consolidate(synthesize=True) a no-op, as with the local reasoner.
+        self._synthesizer = synthesizer
         self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
@@ -538,6 +577,7 @@ class MemoryService:
         session_id: str | None = None,
         limit: int = 20,
         purge: bool = True,
+        synthesize: bool = False,
     ) -> dict[str, Any]:
         """Run a consolidation pass and return promotion candidates.
 
@@ -546,9 +586,14 @@ class MemoryService:
            been promoted yet by ``importance * (1 + access_count)`` — the
            memories the agent kept coming back to — and return the top
            ``limit`` as candidates for :meth:`promote`.
+        3. With ``synthesize=True`` and an external reasoner configured, ask
+           it once to distil the candidates into long-term statements,
+           returned under ``"suggested"`` as ``{"content", "type"}`` items
+           (empty with the local reasoner, which cannot synthesise).
 
-        This is deliberately LLM-free: the server does the bookkeeping, the
-        agent does the synthesis (see docs/architecture/memory-tiers.md).
+        Without ``synthesize`` this is deliberately LLM-free: the server does
+        the bookkeeping, the agent does the synthesis (see
+        docs/architecture/memory-tiers.md).
         """
         purged = self.forget_expired() if purge else 0
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
@@ -560,7 +605,12 @@ class MemoryService:
             if m.tier != MemoryTier.LONG_TERM and m.ref_id not in promoted_sources and not m.checkpoint
         ]
         candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
+        top = candidates[:limit]
         preview_len = self._settings.preview_length
+        suggested: list[dict[str, str]] = []
+        if synthesize and top and self._synthesizer is not None:
+            bundle = _CANDIDATE_SEPARATOR.join(m.content for m in top)
+            suggested = parse_suggestions(self._synthesizer.ask(bundle, DISTILLATION_PROMPT, DEFAULT_ASK_MODE).answer)
         return {
             "purged": purged,
             "candidates": [
@@ -573,8 +623,9 @@ class MemoryService:
                     "timestamp": m.timestamp.isoformat(),
                     "preview": m.content[:preview_len],
                 }
-                for m in candidates[:limit]
+                for m in top
             ],
+            "suggested": suggested,
         }
 
     def forget_expired(self) -> int:
