@@ -57,13 +57,13 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 17 | | Implement `MemoryLifecycle` with `on_session_start`, `on_pre_compact(summary)`, `on_post_compact`, `on_session_end(summary)` returning the markdown the hooks print today (FR-011) | `src/memkernel/lifecycle.py` | build | [ ] |
-| 18 | | Rewrite the three hook templates as thin wrappers: build service, call the method, print; keep stdin handling in `pre-compact.py` and the section headings byte-identical (FR-012) | `templates/hooks/session-start.py`, `templates/hooks/pre-compact.py`, `templates/hooks/post-compact.py` | build | [ ] |
-| 19 | [P] | Unit tests for all four methods against an ephemeral store with `MockEmbedding` (FR-013) | `tests/unit/test_lifecycle_component.py` | build | [ ] |
+| 17 | | Implement `MemoryLifecycle` with `on_session_start`, `on_pre_compact(summary)`, `on_post_compact`, `on_session_end(summary)` returning the markdown the hooks print today (FR-011) | `src/memkernel/lifecycle.py` | build | [x] |
+| 18 | | Rewrite the three hook templates as thin wrappers: build service, call the method, print; keep stdin handling in `pre-compact.py` and the section headings byte-identical (FR-012) | `templates/hooks/session-start.py`, `templates/hooks/pre-compact.py`, `templates/hooks/post-compact.py` | build | [x] |
+| 19 | [P] | Unit tests for all four methods against an ephemeral store with `MockEmbedding` (FR-013) | `tests/unit/test_lifecycle_component.py` | build | [x] |
 
 **Checkpoint US4** — verify before continuing:
-- [ ] Each hook template compiles (`python -m py_compile`) and `ruff check templates/` is clean
-- [ ] `poetry run pytest -m "not slow" -q` green; mypy clean
+- [x] Each hook template compiles (`python -m py_compile`) and `ruff check templates/` is clean
+- [x] `poetry run pytest -m "not slow" -q` green; mypy clean
 
 ---
 

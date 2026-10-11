@@ -5,6 +5,9 @@ Called by Claude Code before context compaction.  Reads the compaction event
 from stdin (JSON), then stores a structured checkpoint in MemKernel so that
 post-compaction recovery can restore session state.
 
+The whole protocol lives in ``memkernel.lifecycle.MemoryLifecycle``; this
+script only parses stdin, builds the service and prints ``on_pre_compact()``.
+
 Prerequisites:
     `memkernel` (and its dependencies: chromadb, sentence-transformers, etc.) must
     be installed in the Python interpreter that runs this script.  The script imports
@@ -53,7 +56,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 # Allow running from a local checkout without `pip install`.
@@ -61,8 +63,8 @@ _REPO_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 if _REPO_SRC.is_dir() and str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
 
-from memkernel.core.models import MemoryType  # noqa: E402
 from memkernel.factory import build_service  # noqa: E402
+from memkernel.lifecycle import MemoryLifecycle  # noqa: E402
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
@@ -71,30 +73,8 @@ def main() -> None:
     # Claude Code passes the compaction event as JSON on stdin.
     raw = sys.stdin.read().strip()
     event: dict[str, object] = json.loads(raw) if raw else {}
-    summary = str(event.get("summary", "Compaction triggered — no summary provided."))
-
-    now = datetime.now(UTC)
-    session_id = now.strftime("checkpoint-%Y%m%d-%H%M%S")
-    content = f"SESSION CHECKPOINT — {now.isoformat()}\n\n{summary}"
-
-    svc = build_service()
-    ref_id = svc.retain(
-        content=content,
-        type=MemoryType.EPISODE,
-        checkpoint=True,
-        session_id=session_id,
-        importance=0.8,
-        tags=["checkpoint"],
-    )
-    # Compaction is a natural consolidation point: purge decayed short-term
-    # memories and surface what the agent kept using, so the post-compaction
-    # context can suggest promoting it to long-term memory.
-    report = svc.consolidate(limit=5)
-    print(
-        f"MemKernel: checkpoint retained — ref_id={ref_id}; purged={report['purged']} expired; "
-        f"{len(report['candidates'])} promotion candidate(s)",
-        file=sys.stderr,
-    )
+    summary = str(event.get("summary", ""))
+    print(MemoryLifecycle(build_service()).on_pre_compact(summary), file=sys.stderr)
 
 
 if __name__ == "__main__":
