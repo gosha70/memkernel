@@ -54,29 +54,9 @@ def create_app(memory_service: MemoryService | None = None) -> FastAPI:
 
 def _build_service() -> MemoryService:
     """Construct MemoryService from environment settings (production only)."""
-    from memkernel.config import MemKernelSettings
-    from memkernel.core.services import MemoryService
-    from memkernel.retrieval.chunking import ASTChunker
-    from memkernel.retrieval.embeddings import SentenceTransformerEmbedding
-    from memkernel.retrieval.search import HybridSearchService
-    from memkernel.retrieval.sparse import BM25Index
-    from memkernel.storage.chroma import ChromaVectorStore
+    from memkernel.factory import build_service
 
-    settings = MemKernelSettings()
-    vector_store = ChromaVectorStore(settings)
-    embedding = SentenceTransformerEmbedding(settings)
-    sparse_index = BM25Index()
-    search_service = HybridSearchService(vector_store, embedding, sparse_index, settings)
-    svc = MemoryService(
-        vector_store=vector_store,
-        embedding=embedding,
-        sparse_index=sparse_index,
-        search_service=search_service,
-        settings=settings,
-        chunker=ASTChunker(settings),
-    )
-    svc.rebuild_sparse_index()
-    return svc
+    return build_service()
 
 
 # Module-level app for `uvicorn memkernel.api.app:app`

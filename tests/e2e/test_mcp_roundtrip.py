@@ -284,4 +284,54 @@ async def test_tool_count_under_10() -> None:
         tools = await client.list_tools()
         tool_names = [t.name for t in tools.tools]
         assert len(tool_names) < 10
-        assert set(tool_names) == {"retain", "recall", "get", "forget"}
+        assert set(tool_names) == {
+            "retain",
+            "recall",
+            "get",
+            "forget",
+            "promote",
+            "consolidate",
+            "forget_expired",
+            "wiki_export",
+            "wiki_import",
+        }
+
+
+@pytest.mark.e2e
+async def test_tiered_memory_roundtrip_promote_consolidate() -> None:
+    """Short-term observation -> consolidate lists it -> promote to long-term fact -> tier filter."""
+    settings = _test_settings()
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+
+    async with create_connected_server_and_client_session(server) as client:
+        result = await client.call_tool(
+            "retain",
+            arguments={"content": "pytest needs MEMKERNEL_PROJECT_ID set", "type": "observation", "tags": ["ci"]},
+        )
+        obs_ref = json.loads(_text(result))["ref_id"]
+
+        result = await client.call_tool("get", arguments={"ref_id": obs_ref})
+        assert json.loads(_text(result))["tier"] == "short_term"
+
+        result = await client.call_tool("consolidate", arguments={})
+        report = json.loads(_text(result))
+        assert report["purged"] == 0
+        assert [c["ref_id"] for c in report["candidates"]] == [obs_ref]
+
+        result = await client.call_tool(
+            "promote",
+            arguments={"ref_id": obs_ref, "type": "fact", "content": "CI sets MEMKERNEL_PROJECT_ID for pytest."},
+        )
+        promoted = json.loads(_text(result))
+        assert promoted["promoted_from"] == obs_ref
+
+        result = await client.call_tool("recall", arguments={"query": "MEMKERNEL_PROJECT_ID", "tier": "long_term"})
+        refs = json.loads(_text(result))
+        assert [r["ref_id"] for r in refs] == [promoted["ref_id"]]
+        assert refs[0]["tier"] == "long_term"
+
+        result = await client.call_tool("consolidate", arguments={})
+        assert json.loads(_text(result))["candidates"] == []
+
+        result = await client.call_tool("forget_expired", arguments={})
+        assert json.loads(_text(result))["deleted"] == 0

@@ -55,35 +55,14 @@ _REPO_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 if _REPO_SRC.is_dir() and str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
 
-import chromadb  # noqa: E402
-from chromadb.api import ClientAPI as ChromaClientAPI  # noqa: E402,TC002
-
-from memkernel.config import MemKernelSettings  # noqa: E402
-from memkernel.core.services import MemoryService  # noqa: E402
-from memkernel.retrieval.chunking import ASTChunker  # noqa: E402
-from memkernel.retrieval.embeddings import SentenceTransformerEmbedding  # noqa: E402
-from memkernel.retrieval.search import HybridSearchService  # noqa: E402
-from memkernel.retrieval.sparse import BM25Index  # noqa: E402
-from memkernel.storage.chroma import ChromaVectorStore  # noqa: E402
+from memkernel.core.models import MemoryTier  # noqa: E402
+from memkernel.factory import build_service  # noqa: E402
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
 
-def _build_service() -> MemoryService:
-    settings = MemKernelSettings()
-    persist = settings.chroma_persist_path
-    client: ChromaClientAPI = chromadb.EphemeralClient() if not persist else chromadb.PersistentClient(path=persist)
-    store = ChromaVectorStore(settings, client=client)
-    embedding = SentenceTransformerEmbedding(settings)
-    sparse = BM25Index()
-    search_svc = HybridSearchService(store, embedding, sparse, settings)
-    svc = MemoryService(store, embedding, sparse, search_svc, settings, chunker=ASTChunker(settings))
-    svc.rebuild_sparse_index()
-    return svc
-
-
 def main() -> None:
-    svc = _build_service()
+    svc = build_service()
 
     # Retrieve checkpoints with a large top_k so the subsequent timestamp sort
     # covers all real-world checkpoints — recall is relevance-ranked, not
@@ -101,12 +80,16 @@ def main() -> None:
         if mem is not None:
             latest_checkpoint = mem.content
 
-    # Broader long-term context (decisions + conventions, not checkpoint-filtered).
+    # Broader long-term context (decisions, conventions, facts, procedures).
     context_refs = svc.recall(
         "decisions conventions architecture",
+        tier=MemoryTier.LONG_TERM,
         top_k=5,
     )
-    context_previews = "\n".join(f"- {r.preview}" for r in context_refs) if context_refs else ""
+    context_previews = "\n".join(f"- [{r.type}] {r.preview}" for r in context_refs) if context_refs else ""
+
+    # Short-term memories the agent kept coming back to: candidates for promotion.
+    candidates = svc.consolidate(limit=5, purge=False)["candidates"]
 
     # Output is injected by Claude Code into the new session's context.
     print("## Recovered from MemKernel (post-compaction)\n")
@@ -124,8 +107,14 @@ def main() -> None:
     else:
         print("No prior memories found.")
 
+    if candidates:
+        print("\n### Promotion candidates (short-term memories worth keeping)")
+        for c in candidates:
+            print(f"- {c['ref_id']} [{c['type']}, recalled {c['access_count']}x]: {c['preview']}")
+        print("Call promote(ref_id, type, content) for anything that should outlive this session.")
+
     print("\n---")
-    print("Use recall() for full content of any memory shown above.")
+    print("Use recall() / get(ref_id) for full content of any memory shown above.")
 
 
 if __name__ == "__main__":

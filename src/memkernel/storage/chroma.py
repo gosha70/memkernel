@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import chromadb
 
-from memkernel.core.models import Memory, MemoryType, SearchResult
+from memkernel.core.models import DEFAULT_IMPORTANCE, Memory, MemoryTier, MemoryType, SearchResult, tier_of
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -48,12 +48,20 @@ def _memory_from_chroma(
     meta = metadatas[index]
     raw_ts = meta.get("timestamp", "")
     timestamp = datetime.fromisoformat(str(raw_ts)) if raw_ts else datetime.now(tz=UTC)
-    raw_chunk_refs = str(meta.get("chunk_refs", ""))
-    chunk_refs = [r for r in raw_chunk_refs.split(",") if r] if raw_chunk_refs else []
+    chunk_refs = _split_csv(meta.get("chunk_refs"))
+    memory_type = MemoryType(str(meta.get("type", "episode")))
+    # Records written by memkernel 0.1.x carry no tier/importance metadata;
+    # derive defaults from the type so old stores keep working unchanged.
+    raw_tier = meta.get("tier")
+    tier = MemoryTier(str(raw_tier)) if raw_tier else tier_of(memory_type)
+    raw_importance = meta.get("importance")
+    importance = float(raw_importance) if raw_importance is not None else DEFAULT_IMPORTANCE[memory_type]
+    raw_last = meta.get("last_accessed")
+    last_accessed = datetime.fromisoformat(str(raw_last)) if raw_last else None
     return Memory(
         ref_id=ids[index],
         content=documents[index],
-        type=MemoryType(str(meta.get("type", "episode"))),
+        type=memory_type,
         project_id=str(meta.get("project_id", "")),
         session_id=str(meta.get("session_id", "")),
         timestamp=timestamp,
@@ -62,7 +70,21 @@ def _memory_from_chroma(
         token_count=int(meta.get("token_count", 0)),
         checkpoint=bool(meta.get("checkpoint", False)),
         chunk_refs=chunk_refs,
+        tier=tier,
+        importance=importance,
+        access_count=int(meta.get("access_count", 0) or 0),
+        last_accessed=last_accessed,
+        tags=_split_csv(meta.get("tags")),
+        supersedes=str(meta["supersedes"]) if meta.get("supersedes") else None,
+        promoted_from=str(meta["promoted_from"]) if meta.get("promoted_from") else None,
     )
+
+
+def _split_csv(raw: Any) -> list[str]:
+    """Split a comma-separated metadata value into a list (ChromaDB has no list type)."""
+    if not raw:
+        return []
+    return [part for part in str(raw).split(",") if part]
 
 
 class ChromaVectorStore:

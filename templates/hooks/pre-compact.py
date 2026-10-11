@@ -61,33 +61,10 @@ _REPO_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 if _REPO_SRC.is_dir() and str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
 
-import chromadb  # noqa: E402
-from chromadb.api import ClientAPI as ChromaClientAPI  # noqa: E402,TC002
-
-from memkernel.config import MemKernelSettings  # noqa: E402
 from memkernel.core.models import MemoryType  # noqa: E402
-from memkernel.core.services import MemoryService  # noqa: E402
-from memkernel.retrieval.chunking import ASTChunker  # noqa: E402
-from memkernel.retrieval.embeddings import SentenceTransformerEmbedding  # noqa: E402
-from memkernel.retrieval.search import HybridSearchService  # noqa: E402
-from memkernel.retrieval.sparse import BM25Index  # noqa: E402
-from memkernel.storage.chroma import ChromaVectorStore  # noqa: E402
+from memkernel.factory import build_service  # noqa: E402
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-
-
-def _build_service() -> MemoryService:
-    """Construct a MemoryService using env-based settings (same as the server)."""
-    settings = MemKernelSettings()
-    persist = settings.chroma_persist_path
-    client: ChromaClientAPI = chromadb.EphemeralClient() if not persist else chromadb.PersistentClient(path=persist)
-    store = ChromaVectorStore(settings, client=client)
-    embedding = SentenceTransformerEmbedding(settings)
-    sparse = BM25Index()
-    search_svc = HybridSearchService(store, embedding, sparse, settings)
-    svc = MemoryService(store, embedding, sparse, search_svc, settings, chunker=ASTChunker(settings))
-    svc.rebuild_sparse_index()
-    return svc
 
 
 def main() -> None:
@@ -100,14 +77,24 @@ def main() -> None:
     session_id = now.strftime("checkpoint-%Y%m%d-%H%M%S")
     content = f"SESSION CHECKPOINT — {now.isoformat()}\n\n{summary}"
 
-    svc = _build_service()
+    svc = build_service()
     ref_id = svc.retain(
         content=content,
         type=MemoryType.EPISODE,
         checkpoint=True,
         session_id=session_id,
+        importance=0.8,
+        tags=["checkpoint"],
     )
-    print(f"MemKernel: checkpoint retained — ref_id={ref_id}", file=sys.stderr)
+    # Compaction is a natural consolidation point: purge decayed short-term
+    # memories and surface what the agent kept using, so the post-compaction
+    # context can suggest promoting it to long-term memory.
+    report = svc.consolidate(limit=5)
+    print(
+        f"MemKernel: checkpoint retained — ref_id={ref_id}; purged={report['purged']} expired; "
+        f"{len(report['candidates'])} promotion candidate(s)",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
