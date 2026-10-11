@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """Wiki page model plus a dependency-free frontmatter parser/renderer.
 
 The page format follows the schema used by ``code-copilot-team/knowledge/wiki``

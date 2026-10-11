@@ -1,12 +1,12 @@
 # Licensing across the memkernel ecosystem
 
-Reviewed 2026-10-11 from the `LICENSE` files in each checkout.
+Reviewed 2026-10-11 from the `LICENSE` files in each checkout; memkernel relicensed the same day.
 
 ## Current state
 
 | Repository | License today | Role in the ecosystem |
 |---|---|---|
-| memkernel | MIT | library + MCP server, consumed by everything |
+| memkernel | **Apache-2.0** (relicensed from MIT on this branch, 2026-10-11) | library + MCP server, consumed by everything |
 | rlm-studio | MIT | library (document layer, ADR-009) |
 | code-copilot-team | MIT | harness configuration framework, consumer |
 | my-llm | MIT | unrelated lab |

@@ -1,5 +1,10 @@
 # MemKernel
 
+[![CI](https://github.com/gosha70/memkernel/actions/workflows/ci.yml/badge.svg)](https://github.com/gosha70/memkernel/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/memkernel)](https://pypi.org/project/memkernel/)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
 Code-aware memory server for AI coding copilots.
 
 MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory across sessions. When Claude compacts context or a session ends, project decisions, conventions, and code understanding are normally lost. MemKernel stores them in a local vector database and retrieves them on demand.
@@ -243,6 +248,16 @@ ruff check . && mypy src/                # lint + type check
 
 CI runs on every push and PR: lint, type check, tests (≥ 80% coverage), security scan, and build verification.
 
+### Releasing
+
+Releases are published to PyPI by [`.github/workflows/release.yml`](.github/workflows/release.yml) using trusted publishing (no token in the repo). To cut a release:
+
+1. Set `version` in `pyproject.toml` and move the `[Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under the new version.
+2. Merge to `main` with CI green.
+3. Tag and push: `git tag -a v0.2.0 -m "memkernel 0.2.0" && git push origin v0.2.0`.
+
+The workflow refuses a tag that does not match the `pyproject.toml` version, builds the sdist and wheel, smoke-installs the wheel, and uploads through the `pypi` environment.
+
 ---
 
 ## Architecture
@@ -266,6 +281,19 @@ Further reading: [`docs/architecture/memory-tiers.md`](docs/architecture/memory-
 
 ---
 
+## Related projects
+
+MemKernel is the memory component of a small family of projects by the same author; each is usable on its own.
+
+| Project | Role | Relationship |
+|---|---|---|
+| [ai-wiki](https://github.com/gosha70/ai-wiki) | LLM-maintained markdown wiki (ingest / promote / query / lint) | the human-readable form of long-term memory; `wiki_export` / `wiki_import` speak its page schema (ADR-008) |
+| [rlm-studio](https://github.com/gosha70/rlm-studio) | Recursive Language Models workbench: Direct / RAG / RLM / auto over large documents | the document layer; planned `document` memory type and `ask()` tool (ADR-009) |
+| [code-copilot-team](https://github.com/gosha70/code-copilot-team) | Enforceable harness configuration for Claude Code, Pi and other copilots | consumes MemKernel through MCP and hooks |
+| [haa](https://github.com/gosha70/haa) | Home-built AI coding harness, future component assembler | consumes MemKernel in-process through `build_service()` |
+
+The cross-repository sequence is in [`docs/roadmap.md`](docs/roadmap.md).
+
 ## License
 
-MIT
+Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).

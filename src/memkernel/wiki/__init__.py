@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """LLM-wiki bridge: compile long-term memories into markdown pages and index wiki pages as memories.
 
 The wiki (Karpathy's "LLM Wiki" pattern) is the human-readable, git-versioned

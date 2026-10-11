@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """Export long-term memories to wiki pages and import wiki pages as memories.
 
 Direction 1 — ``WikiExporter`` ("compile"): every long-term memory that has no

@@ -114,7 +114,7 @@ Chroma client and a mock embedder (memkernel's `tests/conftest.py`
 
 ## Open-sourcing memkernel
 
-- Already MIT, CI with lint/type/test/security/build. Missing for a release:
+- Apache-2.0 (relicensed 2026-10-11), CI with lint/type/test/security/build. Missing for a release:
   PyPI publication (CCT's spec notes "pre-publication uses pip install -e"),
   a CHANGELOG, and a `CONTRIBUTING.md`.
 - Publish `0.2.0` once this branch merges; CCT's `setup.sh --memkernel` then

@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """MCP tool registrations for the LLM-wiki bridge: wiki_export, wiki_import."""
 
 from __future__ import annotations

@@ -2,7 +2,17 @@
 name = "memkernel"
 version = "0.2.0"
 description = "Code-aware memory server for AI coding copilots"
-authors = []
+authors = ["EGOGE"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/gosha70/memkernel"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
 packages = [{include = "memkernel", from = "src"}]
 
 [tool.poetry.scripts]
