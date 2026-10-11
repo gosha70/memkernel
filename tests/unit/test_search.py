@@ -13,7 +13,9 @@ from memkernel.core.models import MemoryType, SearchQuery, SearchResult
 from memkernel.retrieval.search import (
     HybridSearchService,
     _build_where_filter,
+    _metadata_matches,
     filter_sparse_results,
+    include_document_parts,
     rrf_fuse,
 )
 from memkernel.retrieval.sparse import BM25Index
@@ -277,3 +279,41 @@ def test_search_top_k_zero_does_not_crash() -> None:
     # top_k=0 previously caused over_fetch=0 → ChromaDB raised an exception
     results = service.search(SearchQuery(query_text="some content", top_k=0))
     assert results == []
+
+
+# ---------------------------------------------------------------------------
+# include_document_parts / document_part matching
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_include_document_parts_wraps_filter_in_or_and_keeps_none() -> None:
+    assert include_document_parts(None) is None
+    assert include_document_parts({"session_id": "s1"}) == {"$or": [{"session_id": "s1"}, {"document_part": True}]}
+
+
+@pytest.mark.unit
+def test_metadata_matches_lets_document_parts_through_or_filters() -> None:
+    from datetime import UTC, datetime
+
+    from memkernel.core.models import DOCUMENT_CHUNK_TAG, Memory, MemoryType
+
+    def mem(tags: list[str], session: str) -> Memory:
+        return Memory(
+            ref_id="r",
+            content="c",
+            type=MemoryType.DOCUMENT,
+            project_id="p",
+            session_id=session,
+            timestamp=datetime.now(UTC),
+            content_hash="h",
+            token_count=1,
+            tags=tags,
+        )
+
+    where = include_document_parts({"session_id": "s1"})
+    assert where is not None
+    assert _metadata_matches(mem([DOCUMENT_CHUNK_TAG], "default"), where) is True
+    assert _metadata_matches(mem([], "s1"), where) is True
+    assert _metadata_matches(mem([], "s2"), where) is False
+    assert _metadata_matches(mem([], "s2"), {"document_part": True}) is False

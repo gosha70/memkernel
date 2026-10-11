@@ -267,22 +267,11 @@ class MemoryService:
             ref_id = self._retain_single(
                 summary, MemoryType.DOCUMENT, session_id, checkpoint, source, doc_extra, dedup=False
             )
-        self._stamp_document_parts(doc_id, resolved_session)
         return ref_id
 
     def _document_owners(self, document_id: str) -> list[Memory]:
         """The ``document`` summary records that own ``document_id`` (body and chunks excluded)."""
         return [m for m in self._vector_store.list_all({"document_id": document_id}) if not _is_document_part(m)]
-
-    def _stamp_document_parts(self, document_id: str, session_id: str) -> None:
-        """Give the body and chunk records the owning session so session-filtered recall sees them.
-
-        The document store port knows nothing about sessions; when one body is
-        shared by several sessions the most recent retain wins.
-        """
-        for part in self._vector_store.list_all({"document_id": document_id}):
-            if _is_document_part(part) and part.session_id != session_id:
-                self._vector_store.update_metadata(part.ref_id, {"session_id": session_id})
 
     def _retain_single(
         self,
@@ -430,9 +419,10 @@ class MemoryService:
         A hit on a document body or chunk record is replaced by the document's
         summary record (the ``document`` memory) carrying the hit's score, so a
         phrase deep inside a document surfaces the document exactly once and
-        chunk records never appear as top-level results. The summary must itself
-        satisfy the query's filters (type, tier, session, checkpoint): the
-        filters were applied to the chunk, not to the record being returned.
+        chunk records never appear as top-level results. Parts are shared by
+        every owner of a body and are exempt from metadata filters at search
+        time, so the query's filters (type, tier, session, checkpoint) are
+        applied here, to the owning summary that is actually returned.
         """
         memories: dict[str, Memory] = {}
         for ref in results:

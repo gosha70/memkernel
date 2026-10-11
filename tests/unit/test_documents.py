@@ -340,11 +340,15 @@ def test_retain_same_document_and_name_is_still_idempotent_after_identity_change
     assert memory is not None and memory.session_id == "s2" and memory.tags == ["later"]
 
 
-def test_document_parts_carry_the_owning_session() -> None:
-    svc, _, store = _build()
-    ref_id = svc.retain(_long_document(), MemoryType.DOCUMENT, source="x.md", session_id="private-session")
-    parts = [m for m in store.list_all() if m.ref_id != ref_id]
-    assert parts and all(m.session_id == "private-session" for m in parts)
+def test_shared_body_in_two_sessions_is_recallable_by_each_owner() -> None:
+    svc, _, _ = _build()
+    body = _long_document()
+    one = svc.retain(body, MemoryType.DOCUMENT, source="one.md", session_id="s1")
+    two = svc.retain(body, MemoryType.DOCUMENT, source="two.md", session_id="s2")
+    svc.retain("an unrelated fact about QUETZALCOATL-7741", MemoryType.FACT, session_id="s1")
+    assert one in {r.ref_id for r in svc.recall("QUETZALCOATL-7741 escape hatch", session_id="s1", top_k=5)}
+    assert [r.ref_id for r in svc.recall("QUETZALCOATL-7741 escape hatch", session_id="s2", top_k=5)] == [two]
+    assert two not in {r.ref_id for r in svc.recall("QUETZALCOATL-7741 escape hatch", session_id="s1", top_k=5)}
 
 
 def test_session_filtered_recall_respects_document_session() -> None:

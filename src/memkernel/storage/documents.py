@@ -26,6 +26,7 @@ from memkernel.core.models import (
     DEFAULT_IMPORTANCE,
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
+    DOCUMENT_PART_KEY,
     MemoryType,
     tier_of,
 )
@@ -151,4 +152,8 @@ class LocalDocumentStore:
             "access_count": 0,
             "tags": tag,
             "document_id": doc_id,
+            # Parts are shared by every owner of the body and carry no owner
+            # session: the default session here is a placeholder, and search
+            # exempts parts from metadata filters (see retrieval/search.py).
+            DOCUMENT_PART_KEY: True,
         }

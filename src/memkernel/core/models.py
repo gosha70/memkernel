@@ -84,6 +84,11 @@ DEFAULT_IMPORTANCE: dict[MemoryType, float] = {
 # top-level recall / list results; a chunk hit resolves to the document summary.
 DOCUMENT_BODY_TAG = "document_body"
 DOCUMENT_CHUNK_TAG = "document_chunk"
+# Boolean metadata key set on body/chunk records so search can exempt them
+# from owner-specific filters (session, type, tier, checkpoint): one body may
+# be owned by several summaries in different sessions, so the filters are
+# applied to the owning summary a hit resolves to, not to the shared part.
+DOCUMENT_PART_KEY = "document_part"
 
 # Reasoning modes accepted by ask(): RLM Studio's Direct / RAG / RLM / auto
 # selection, passed through to the ReasonerPort unchanged (ADR-009).

@@ -6,7 +6,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from memkernel.core.models import ArtifactRef, Memory, SearchResult
+from memkernel.core.models import (
+    DOCUMENT_BODY_TAG,
+    DOCUMENT_CHUNK_TAG,
+    DOCUMENT_PART_KEY,
+    ArtifactRef,
+    Memory,
+    SearchResult,
+)
 from memkernel.memory.lifecycle import recency_score
 
 if TYPE_CHECKING:
@@ -52,7 +59,7 @@ class HybridSearchService:
 
     def search(self, query: SearchQuery) -> list[ArtifactRef]:
         """Run hybrid search and return up to query.top_k ArtifactRefs."""
-        where = _build_where_filter(query)
+        where = include_document_parts(_build_where_filter(query))
         over_fetch = max(1, query.top_k * 3)
 
         # Dense pass
@@ -100,6 +107,19 @@ def _build_where_filter(query: SearchQuery) -> dict[str, Any] | None:
     if len(conditions) == 1:
         return conditions[0]
     return {"$and": conditions}
+
+
+def include_document_parts(where: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Let document body/chunk records through a metadata filter.
+
+    Parts are shared by every summary that owns the same body, possibly in
+    different sessions, so owner-specific filters cannot be evaluated on them.
+    They pass here and are filtered once resolved to their owning summary
+    (``MemoryService._filter_live``). ``None`` (no filter) stays ``None``.
+    """
+    if where is None:
+        return None
+    return {"$or": [where, {DOCUMENT_PART_KEY: True}]}
 
 
 def rrf_fuse(
@@ -163,11 +183,20 @@ def _metadata_matches(memory: Memory, where: dict[str, Any]) -> bool:
     Supports the subset of ChromaDB filter syntax used by this module:
       - Simple equality: {"field": value}
       - $and: [cond, ...]
+      - $or: [cond, ...]
+      - the ``document_part`` marker, derived from the record's tags
     """
     if "$and" in where:
         return all(_metadata_matches(memory, cond) for cond in where["$and"])
+    if "$or" in where:
+        return any(_metadata_matches(memory, cond) for cond in where["$or"])
 
     for key, value in where.items():
+        if key == DOCUMENT_PART_KEY:
+            actual: Any = DOCUMENT_BODY_TAG in memory.tags or DOCUMENT_CHUNK_TAG in memory.tags
+            if actual != value:
+                return False
+            continue
         actual = getattr(memory, _FIELD_MAP.get(key, key), None)
         if actual is None:
             return False
