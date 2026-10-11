@@ -114,8 +114,8 @@ Retention: `ttl = base_ttl × (1 + access_boost × access_count)`, measured from
 2. **While working** — `retain(type="task")` when the plan changes; `retain(type="observation")` for findings; durable knowledge as `decision` / `convention` / `fact` / `procedure`.
 3. **Before compaction** — `retain(type="episode", checkpoint=true)` (the `pre-compact.py` hook) and `consolidate()`.
 4. **After compaction / end of phase** — `promote(ref_id, type, content)` for the candidates worth keeping.
-6. **Large artefacts** — `retain(type="document", content=<body>, source=<name>)` then `ask(ref_id, question)`; never `get` a document to read it.
-5. **Curate** — `wiki_export` → review the drafts → `wiki_import`.
+5. **Large artefacts** — `retain(type="document", content=<body>, source=<name>)` then `ask(ref_id, question)`; never `get` a document to read it.
+6. **Curate** — `wiki_export` → review the drafts → `wiki_import`.
 
 ### Quick examples
 
