@@ -71,20 +71,20 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 20 | | Bump to `0.3.0`; write the `[0.3.0]` CHANGELOG section (added: document, ask, ports, lifecycle, reasoner settings; removed: `forget_expired` tool) (FR-014) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [ ] |
-| 21 | [P] | README: `document` type row, `ask` tool row, reasoner/document settings, `MemoryLifecycle` embedding example, `rlm-studio` git-install note; CLAUDE.md template: `document` + `ask` guidance (FR-014, FR-016) | `README.md`, `templates/claude-memory-instructions.md` | build | [ ] |
-| 22 | [P] | Bump `actions/upload-artifact@v5` and `actions/download-artifact@v6` in the release workflow (FR-015); mark ADR-009 `accepted` | `.github/workflows/release.yml`, `docs/adr/ADR-009-rlm-studio-for-documents.md` | build | [ ] |
+| 20 | | Bump to `0.3.0`; write the `[0.3.0]` CHANGELOG section (added: document, ask, ports, lifecycle, reasoner settings; removed: `forget_expired` tool) (FR-014) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [x] |
+| 21 | [P] | README: `document` type row, `ask` tool row, reasoner/document settings, `MemoryLifecycle` embedding example, `rlm-studio` git-install note; CLAUDE.md template: `document` + `ask` guidance (FR-014, FR-016) | `README.md`, `templates/claude-memory-instructions.md` | build | [x] |
+| 22 | [P] | Bump `actions/upload-artifact@v5` and `actions/download-artifact@v6` in the release workflow (FR-015); mark ADR-009 `accepted` | `.github/workflows/release.yml`, `docs/adr/ADR-009-rlm-studio-for-documents.md` | build | [x] |
 
 **Checkpoint US5** — verify before continuing:
-- [ ] `poetry build` succeeds and the wheel installs in a clean venv
-- [ ] Coverage ≥ 80 percent: `poetry run pytest -m "not slow" --cov=memkernel --cov-fail-under=80 -q`
+- [x] `poetry build` succeeds and the wheel installs in a clean venv
+- [x] Coverage ≥ 80 percent: `poetry run pytest -m "not slow" --cov=memkernel --cov-fail-under=80 -q`
 
 ---
 
 ## Final Verification
 
-- [ ] Type checker: 0 errors
-- [ ] Linter: 0 errors
-- [ ] All existing tests pass
-- [ ] No [NEEDS CLARIFICATION] markers remain in spec.md
-- [ ] Registered MCP tools are exactly: retain, recall, get, forget, promote, consolidate, ask, wiki_export, wiki_import
+- [x] Type checker: 0 errors
+- [x] Linter: 0 errors
+- [x] All existing tests pass
+- [x] No [NEEDS CLARIFICATION] markers remain in spec.md
+- [x] Registered MCP tools are exactly: retain, recall, get, forget, promote, consolidate, ask, wiki_export, wiki_import

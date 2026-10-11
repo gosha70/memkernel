@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: Apache-2.0
 """MemKernel — Code-aware memory server for AI coding copilots."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Added
+
+- `document` memory type (long-term, importance 0.6): `retain(type="document")`
+  stores the body through a `DocumentStorePort`, indexes its token chunks for
+  hybrid search and keeps a summary record; `get` returns the summary, recall
+  resolves chunk hits to the document and never lists chunk records (ADR-009).
+- `ask(ref_id, question, mode="auto")` MCP tool and `MemoryService.ask`:
+  answer a question about one memory without loading it; `mode` is
+  `direct | rag | rlm | auto`, passed to the reasoner unchanged.
+- Ports `DocumentStorePort` and `ReasonerPort` in `core/ports.py`; `Answer`
+  model; built-in `LocalDocumentStore` (ChromaDB) and LLM-free `LocalReasoner`
+  (dense + BM25 + RRF over chunks, `mode="rag"`).
+- RLM Studio adapter `memkernel.adapters.rlmstudio.RLMStudioReasoner`
+  (`MEMKERNEL_REASONER=rlmstudio`, lazy import, falls back to the local
+  reasoner with a warning when `rlmstudio` is not installed).
+- `consolidate(synthesize=True)`: with an external reasoner, drafts long-term
+  statements from the candidates under `"suggested"`.
+- `memkernel.lifecycle.MemoryLifecycle` with `on_session_start`,
+  `on_pre_compact`, `on_post_compact`, `on_session_end`; the hook templates
+  are thin wrappers over it.
+- Settings `MEMKERNEL_DOCUMENT_STORE`, `MEMKERNEL_DOCUMENT_SUMMARY_CHARS`,
+  `MEMKERNEL_REASONER`, `MEMKERNEL_ASK_TOP_K`; `split_text` / `TokenChunker`
+  in `retrieval/chunking.py`.
+
+### Changed
+
+- `consolidate` reports always carry a `suggested` list (empty unless
+  `synthesize=True` with an external reasoner).
+- `templates/claude-memory-instructions.md` tells the agent to use
+  `retain(type="document")` + `ask()` for anything longer than a screen.
+- Release workflow uses `actions/upload-artifact@v5` and
+  `actions/download-artifact@v6` (Node 24).
+
+### Removed
+
+- The `forget_expired` MCP tool (purging stays inside `consolidate`; the
+  `MemoryService.forget_expired` method remains). The server exposes nine
+  tools: `retain, recall, get, forget, promote, consolidate, ask, wiki_export,
+  wiki_import`.
+
 ## [0.2.0] - 2026-10-11
 
 ### Added
