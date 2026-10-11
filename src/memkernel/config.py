@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """MemKernel configuration via environment variables."""
 
 from __future__ import annotations
@@ -34,8 +34,21 @@ class MemKernelSettings(BaseSettings):
     chunk_size: int = 1500  # max chars per chunk
     chunk_overlap: int = 200  # char overlap between token chunks (fallback only)
 
-    # TTL
-    episode_ttl_days: int = 30
+    # Lifecycle / decay (see docs/architecture/memory-tiers.md)
+    episode_ttl_days: int = 30  # base TTL for short-term `episode` memories
+    observation_ttl_days: int = 7  # base TTL for short-term `observation` memories
+    task_ttl_hours: int = 24  # base TTL for working-memory `task` records
+    access_boost: float = 0.5  # each recall extends TTL by this fraction of the base TTL
+    recency_half_life_days: float = 7.0  # recency decay half-life for short-term memories
+
+    # Recall scoring: final = w_relevance * fused + w_recency * recency + w_importance * importance
+    recall_weight_relevance: float = 1.0
+    recall_weight_recency: float = 0.3
+    recall_weight_importance: float = 0.3
+
+    # LLM wiki bridge: directory holding the markdown wiki (index.md, decisions/, ...).
+    # Empty = no wiki configured; wiki_export/wiki_import then require an explicit path.
+    wiki_dir: str = ""
 
     # Server
     transport: Literal["stdio", "streamable-http"] = "stdio"

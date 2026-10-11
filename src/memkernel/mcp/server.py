@@ -1,5 +1,5 @@
-# Copyright (c) EGOGE - All Rights Reserved.
-# This software may be used and distributed according to the terms of the MIT license.
+# Copyright (c) 2026 EGOGE
+# SPDX-License-Identifier: Apache-2.0
 """MCP server factory and entry point."""
 
 from __future__ import annotations
@@ -18,14 +18,13 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context  # noqa: TC002 — runtime import for introspection
 
 from memkernel.config import MemKernelSettings
-from memkernel.core.services import MemoryService
+from memkernel.factory import build_service
 from memkernel.mcp.tools.memory import register_memory_tools
-from memkernel.retrieval.search import HybridSearchService
-from memkernel.retrieval.sparse import BM25Index
-from memkernel.storage.chroma import ChromaVectorStore
+from memkernel.mcp.tools.wiki import register_wiki_tools
 
 if TYPE_CHECKING:
     from memkernel.core.ports import EmbeddingPort
+    from memkernel.core.services import MemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -53,32 +52,7 @@ def create_server(
 
     @asynccontextmanager
     async def lifespan(server: FastMCP[MemKernelContext]) -> AsyncIterator[MemKernelContext]:
-        if captured_embedding is not None:
-            emb = captured_embedding
-        else:
-            from memkernel.retrieval.embeddings import SentenceTransformerEmbedding
-
-            emb = SentenceTransformerEmbedding(resolved_settings)
-
-        from memkernel.retrieval.chunking import ASTChunker
-
-        vector_store = ChromaVectorStore(resolved_settings)
-        sparse_index = BM25Index()
-        search_service = HybridSearchService(
-            vector_store=vector_store,
-            embedding=emb,
-            sparse_index=sparse_index,
-            settings=resolved_settings,
-        )
-        memory_service = MemoryService(
-            vector_store=vector_store,
-            embedding=emb,
-            sparse_index=sparse_index,
-            search_service=search_service,
-            settings=resolved_settings,
-            chunker=ASTChunker(resolved_settings),
-        )
-        memory_service.rebuild_sparse_index()
+        memory_service = build_service(settings=resolved_settings, embedding=captured_embedding)
         yield MemKernelContext(memory_service=memory_service, settings=resolved_settings)
 
     server: FastMCP[MemKernelContext] = FastMCP(
@@ -88,6 +62,7 @@ def create_server(
         lifespan=lifespan,
     )
     register_memory_tools(server)
+    register_wiki_tools(server)
     _register_health_resource(server)
     return server
 

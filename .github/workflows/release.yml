@@ -1,0 +1,61 @@
+name: Release to PyPI
+
+# Publishes a tagged version with PyPI trusted publishing (OpenID Connect).
+# One-time setup: on pypi.org add a pending publisher for project `memkernel`,
+# owner `gosha70`, repository `memkernel`, workflow `release.yml`,
+# environment `pypi`; in this repo create the `pypi` environment.
+# Each release: bump `version` in pyproject.toml, update CHANGELOG.md, merge,
+# then `git tag -a vX.Y.Z -m "memkernel X.Y.Z" && git push origin vX.Y.Z`.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+      - name: Check that the tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(poetry version -s)"
+          if [ "$tag" != "$ver" ]; then
+            echo "Tag $tag does not match pyproject.toml version $ver" >&2
+            exit 1
+          fi
+      - name: Build sdist and wheel
+        run: poetry build
+      - name: Smoke-test the wheel in a clean environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          /tmp/smoke/bin/python -c "import memkernel; print('memkernel', memkernel.__version__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memkernel/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

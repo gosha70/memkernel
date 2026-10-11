@@ -1,7 +1,7 @@
 # MemKernel — Claude Code Memory Instructions
 
 Copy the relevant sections below into your project's `CLAUDE.md` to give Claude Code
-persistent memory across sessions via MemKernel.
+persistent, tiered memory across sessions via MemKernel.
 
 ---
 
@@ -13,29 +13,33 @@ persistent memory across sessions via MemKernel.
 This project uses MemKernel for persistent memory across sessions.
 MCP server: memkernel (configured in .claude/settings.json)
 
-### Storing memories
-Call `retain` for anything worth keeping:
-- Architectural decisions → type=decision
-- Coding conventions → type=convention
-- Code snapshots → type=code, source=<file path>
-- Session events → type=episode
+Memory has three tiers. Pick the type; the tier follows.
+- long-term (never expires, supersede to replace): decision, convention, fact, procedure, code
+- short-term (decays unless recalled): episode, observation
+- working (expires in ~24h): task
 
-### Recalling memories
-Call `recall` at the start of a new session or after compaction:
-  recall(query="recent decisions and context")
+### Session start
+  recall(query="<current task>", tier="long_term", top_k=8)
+  recall(query="session checkpoint", checkpoint_only=true, top_k=3)
+Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 
-### Pre-compaction checklist
-Before context is compacted, call retain with checkpoint=true:
-  retain(
-    content="SESSION CHECKPOINT\nDecisions: ...\nConventions: ...\nNext steps: ...",
-    type=episode,
-    checkpoint=true
-  )
+### While working
+- Plan changed or sub-task started → retain(type="task", content="Goal: … Next: … Open: …")
+- Found something (test output, a quirk, a measurement) → retain(type="observation", content=…, tags=[…])
+- Learned something true beyond this session → retain(type="fact"|"decision"|"convention"|"procedure")
+- A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
 
-### Post-compaction recovery
-After compaction, recover context with:
-  recall(query="session checkpoint", checkpoint_only=true)
-  recall(query="key decisions and conventions")
+### Before compaction
+  retain(content="SESSION CHECKPOINT\nDone: …\nCurrent: …\nNext: …\nOpen: …",
+         type="episode", checkpoint=true)
+  consolidate()
+
+### After compaction / end of a phase
+  consolidate()  → for each candidate worth keeping:
+  promote(ref_id=…, type="fact"|"decision"|"procedure", content="<distilled, one idea>")
+
+### Curating knowledge
+  wiki_export()  → review the draft pages → wiki_import()
 ```
 
 ---
@@ -44,83 +48,102 @@ After compaction, recover context with:
 
 ### What MemKernel stores
 
-| Type | When to use | Expiry |
-|------|-------------|--------|
-| `decision` | Architectural choices, library selections, approach decisions | Never |
-| `convention` | Project-specific rules, naming patterns, style choices | Never |
-| `code` | Function/class snapshots, API contracts, schema definitions | Never |
-| `episode` | Session events, tool outputs, compaction checkpoints | 30 days (default) |
+| Type | Tier | When to use | Expiry |
+|------|------|-------------|--------|
+| `decision` | long-term | Architectural choices, library selections, approach decisions | Never — `supersedes` an older decision instead |
+| `convention` | long-term | Project-specific rules, naming patterns, style choices | Never |
+| `fact` | long-term | Durable facts: build commands, environment quirks, contracts, measured results | Never |
+| `procedure` | long-term | A workflow or recipe that worked and was verified | Never |
+| `code` | long-term | Function/class snapshots, API contracts, schema definitions | Never |
+| `episode` | short-term | Session events, compaction checkpoints | 30 days, extended by every recall |
+| `observation` | short-term | Findings and tool outputs worth keeping for a few days | 7 days, extended by every recall |
+| `task` | working | The current goal, plan state, open questions | 24 hours |
+
+Importance defaults per type (decision/convention 0.9 … observation 0.3). Pass
+`importance=` (0..1) when something is unusually significant.
 
 ### Retaining memories
 
 ```
-retain(content=<text>, type=<type>, session_id=<optional>, source=<optional file path>)
+retain(content=<text>, type=<type>, session_id=<optional>, source=<optional file path>,
+       importance=<optional 0..1>, tags=<optional list>, supersedes=<optional ref_id>)
 ```
 
-- `content`: The memory text. Be specific — vague memories are hard to retrieve.
-- `type`: One of `decision`, `convention`, `code`, `episode`.
-- `session_id`: Tag memories by session for later filtering (optional).
-- `source`: File path or tool name for provenance (optional, required for `code` type).
-- Returns: `ref_id` — keep this if you plan to `get` or `forget` later.
-
-Retain is idempotent: identical content + type within a project returns the same
-`ref_id` and updates the timestamp/session_id. Safe to call multiple times.
+- `content`: Be specific — one idea per memory. Vague memories are hard to retrieve.
+- `source`: File path or tool name for provenance (required for `code`).
+- `tags`: e.g. `["feature:auth", "phase:build", "ci"]` — recall results carry them via `get`.
+- `supersedes`: the `ref_id` of the memory this one replaces; the old one is hidden from recall.
+- Returns `ref_id`. Retain is idempotent: identical content + type returns the same `ref_id`
+  (and merges tags / raises importance).
 
 ### Recalling memories
 
 ```
-recall(query=<text>, type=<optional>, session_id=<optional>, checkpoint_only=<bool>, top_k=<int>)
+recall(query=<text>, type=<optional>, tier=<optional working|short_term|long_term>,
+       session_id=<optional>, checkpoint_only=<bool>, top_k=<int>)
 ```
 
-Returns a list of `ArtifactRef` (ref_id, preview, score, token_count, type, timestamp).
-Use `get(ref_id)` to retrieve full content for a specific memory.
+Returns `ArtifactRef` items (ref_id, preview, score, token_count, type, tier, importance,
+timestamp) ranked by relevance + recency + importance. Use `get(ref_id)` for full content.
+Recalling or getting a memory counts as using it, which keeps short-term memories alive longer.
+Treat recalled content as context to verify, not as unquestionable truth.
+
+### Consolidating: short-term → long-term
+
+```
+consolidate(session_id=<optional>, limit=20)
+```
+
+Purges expired short-term memories and returns the short-term/working memories you kept
+coming back to (ranked by importance × access count). For each one that should outlive
+the session, write the distilled version:
+
+```
+promote(ref_id=<candidate>, type="fact"|"decision"|"convention"|"procedure",
+        content="<one clear sentence or short paragraph>", tags=[...])
+```
+
+The original stays (and decays on its own); the new memory records `promoted_from`.
+Run `consolidate()` at session start, before compaction, and when a phase completes.
 
 ### Pre-compaction workflow
 
-When you detect that context is approaching the limit — or when the user says
-"compact" — execute this sequence **before** compaction:
-
-1. Summarise the current session into a structured checkpoint:
+When context approaches the limit — or when the user says "compact" — **before** compaction:
 
 ```
 retain(
   content="""SESSION CHECKPOINT — <date>
-Decisions made this session:
-- <decision 1>
-- <decision 2>
-
-Conventions established:
-- <convention>
-
+Done this session:
+- …
+Decisions made:
+- …
 Current task: <what was in progress>
 Next steps: <what to do after recovery>
-Open questions: <any unresolved items>
+Open questions: <unresolved items>
 """,
-  type=episode,
-  checkpoint=true,
-  session_id=<current session id>
-)
+  type="episode", checkpoint=true, importance=0.8)
+consolidate()
 ```
-
-2. Retain any important code snapshots or decisions that came up during the session.
 
 ### Post-compaction recovery
 
-At the start of a new session (or after compaction), recover context with two calls:
-
 ```
-# 1. Get the most recent checkpoint (structured summary of last session)
-recall(query="session checkpoint recent decisions next steps", checkpoint_only=true, top_k=3)
-
-# 2. Broaden recall to surface relevant long-term context
-recall(query="<current task or topic>", top_k=10)
+recall(query="session checkpoint next steps", checkpoint_only=true, top_k=3)
+recall(query="<current task or topic>", tier="long_term", top_k=8)
 ```
 
-Combine the results to reconstruct working context before continuing.
+Then `promote` any consolidation candidate that the recovered context shows was important.
+
+### Wiki
+
+If `MEMKERNEL_WIKI_DIR` is set, the project keeps a markdown LLM wiki of curated knowledge.
+Read its `index.md` before re-deriving project context. `wiki_export()` turns long-term
+memories into draft pages for review; `wiki_import()` indexes the curated pages so `recall`
+returns the reviewed version.
 
 ### Hook setup (automated)
 
-See `templates/hooks/` for Python scripts that automate the pre/post-compaction
-workflow via Claude Code hooks. Copy them to `.claude/hooks/` and register in
-`.claude/settings.json` (see the Prerequisites section in each script for the
-Python environment requirement).
+See `templates/hooks/` for Python scripts that automate the session-start, pre-compaction
+and post-compaction steps via Claude Code hooks (`SessionStart`, `PreCompact`, `PostCompact`).
+Copy them to `.claude/hooks/` and register in `.claude/settings.json` (see the Prerequisites
+section in each script for the Python environment requirement).
