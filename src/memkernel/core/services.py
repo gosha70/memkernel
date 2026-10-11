@@ -441,8 +441,10 @@ class MemoryService:
         """Delete every memory whose retention window has lapsed. Returns the number deleted."""
         deleted = 0
         for memory in self._vector_store.list_all():
-            if memory.tier != MemoryTier.LONG_TERM and memory_is_expired(memory, self._settings) and self.forget(
-                memory.ref_id
+            if (
+                memory.tier != MemoryTier.LONG_TERM
+                and memory_is_expired(memory, self._settings)
+                and self.forget(memory.ref_id)
             ):
                 deleted += 1
         return deleted

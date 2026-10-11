@@ -335,3 +335,54 @@ async def test_tiered_memory_roundtrip_promote_consolidate() -> None:
 
         result = await client.call_tool("forget_expired", arguments={})
         assert json.loads(_text(result))["deleted"] == 0
+
+
+@pytest.mark.e2e
+async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
+    """wiki_export compiles long-term memories to pages; wiki_import indexes curated pages."""
+    from pathlib import Path
+
+    wiki_dir = Path(str(tmp_path)) / "wiki"
+    settings = MemKernelSettings(
+        project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}",
+        chroma_persist_path="",
+        wiki_dir=str(wiki_dir),
+    )
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+
+    async with create_connected_server_and_client_session(server) as client:
+        await client.call_tool("retain", arguments={"content": "Use arq for background jobs", "type": "decision"})
+        await client.call_tool("retain", arguments={"content": "ran tests", "type": "episode"})
+
+        result = await client.call_tool("wiki_export", arguments={})
+        export = json.loads(_text(result))
+        assert export["written"] == ["decisions/use-arq-for-background-jobs.md"]
+        assert (wiki_dir / "index.md").is_file() and (wiki_dir / "log.md").is_file()
+
+        # Curate the draft, then import it: recall must return the curated page version.
+        page = wiki_dir / "decisions/use-arq-for-background-jobs.md"
+        page.write_text(page.read_text().replace("status: draft", "status: stable"))
+        result = await client.call_tool("wiki_import", arguments={"wiki_dir": str(wiki_dir)})
+        imported = json.loads(_text(result))
+        assert imported["imported"] == ["decisions/use-arq-for-background-jobs.md"]
+
+        result = await client.call_tool("recall", arguments={"query": "arq background jobs", "tier": "long_term"})
+        refs = json.loads(_text(result))
+        result = await client.call_tool("get", arguments={"ref_id": refs[0]["ref_id"]})
+        top = json.loads(_text(result))
+        assert "wiki" in top["tags"]
+        assert top["importance"] == 0.9
+
+        # Second export must not re-emit the page that now exists.
+        result = await client.call_tool("wiki_export", arguments={})
+        assert json.loads(_text(result))["written"] == []
+
+
+@pytest.mark.e2e
+async def test_wiki_tools_require_a_directory() -> None:
+    """Without MEMKERNEL_WIKI_DIR and without wiki_dir the wiki tools report an error."""
+    server = create_server(settings=_test_settings(), embedding=MockEmbedding(dimension=384))
+    async with create_connected_server_and_client_session(server) as client:
+        result = await client.call_tool("wiki_export", arguments={})
+        assert result.isError
+        assert "wiki" in _text(result).lower()
