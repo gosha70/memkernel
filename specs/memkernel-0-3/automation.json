@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "profile": "pr",
+  "branch": {
+    "name": "feature/memkernel-0-3",
+    "base": "main",
+    "remote": "origin"
+  },
+  "phases": {
+    "source": "tasks.md",
+    "milestone_every": 10,
+    "max_phases": 5
+  },
+  "build": {
+    "max_turns": 90,
+    "permission_mode": "acceptEdits",
+    "max_fix_sessions_per_phase": 2
+  },
+  "test": {
+    "command": "poetry run ruff check src/ tests/ && poetry run ruff format --check src/ tests/ && poetry run mypy src/ && poetry run pytest -m \"not slow\" -q -p no:cacheprovider --cov=memkernel --cov-fail-under=80",
+    "timeout_sec": 900
+  },
+  "review": {
+    "reviewers": [
+      {
+        "provider": "deepseek",
+        "specialization": "correctness",
+        "scope": "both",
+        "gating": true
+      }
+    ],
+    "max_rounds": 3,
+    "round_timeout_sec": 900,
+    "loop_timeout_sec": 600
+  },
+  "caps": {
+    "wall_clock_sec": 10800,
+    "cost_usd": 15
+  },
+  "unattended": {
+    "on_review_breaker": "terminate",
+    "on_stale_finding": "terminate",
+    "on_origin_gate": "terminate",
+    "budget": {
+      "meter_all_invocations": true,
+      "estimate_unmetered": true,
+      "estimate_usd_per_invocation": 2.0
+    }
+  },
+  "notify": {
+    "command": ""
+  },
+  "pr": {
+    "closes": [],
+    "title": "feat: memkernel 0.3 — document type, ask(), ports, MemoryLifecycle [auto-build]"
+  },
+  "merge": {
+    "enabled": false,
+    "require_green_ci": true,
+    "require_branch_protection": true,
+    "method": "squash"
+  }
+}

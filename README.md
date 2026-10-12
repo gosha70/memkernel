@@ -5,6 +5,8 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
+**Site:** [memkernel.dev](https://memkernel.dev) · **Package:** [pypi.org/project/memkernel](https://pypi.org/project/memkernel/)
+
 Code-aware memory server for AI coding copilots.
 
 MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory across sessions. When Claude compacts context or a session ends, project decisions, conventions, and code understanding are normally lost. MemKernel stores them in a local vector database and retrieves them on demand.
@@ -72,7 +74,7 @@ Copy the hook scripts from [`templates/hooks/`](templates/hooks/) to `.claude/ho
 | `pre-compact.py` | `PreCompact` | Retains a checkpoint episode, runs a consolidation pass |
 | `post-compact.py` | `PostCompact` | Re-injects the checkpoint, long-term context and promotion candidates |
 
-See the Prerequisites section inside each script for the Python environment requirement.
+See the Prerequisites section inside each script for the Python environment requirement. Each script is a thin wrapper over [`MemoryLifecycle`](#embedding-memkernel-in-your-own-harness), so an in-process harness gets the same behaviour without the scripts.
 
 ---
 
@@ -85,8 +87,8 @@ See the Prerequisites section inside each script for the Python environment requ
 | `get(ref_id)` | Fetch full content of a specific memory. Records an access. |
 | `forget(ref_id)` | Delete a memory from all indexes. |
 | `promote(ref_id, type, content?, importance?, tags?)` | Turn a short-term/working memory into a long-term one (you supply the distilled text). Keeps provenance via `promoted_from`. |
-| `consolidate(session_id?, limit?)` | Purge expired short-term memories and list the ones most worth promoting (ranked by importance × how often they were recalled). |
-| `forget_expired()` | Delete every short-term/working memory whose retention window lapsed. |
+| `consolidate(session_id?, limit?, synthesize?)` | Purge expired short-term memories and list the ones most worth promoting (ranked by importance × how often they were recalled). `synthesize=true` also asks an external reasoner to draft long-term statements (`suggested`). |
+| `ask(ref_id, question, mode?)` | Answer a question about one memory without loading it — for a `document` the full body is consulted. `mode`: `direct` \| `rag` \| `rlm` \| `auto`, passed to the reasoner unchanged; the built-in reasoner answers in `rag` mode with the best-matching chunks. Returns `answer`, `mode`, `citations`, `usage`. |
 | `wiki_export(wiki_dir?)` | Compile long-term memories without a wiki page into draft markdown pages (`index.md`, `log.md` updated). |
 | `wiki_import(wiki_dir?)` | Index curated wiki pages as long-term memories (idempotent; changed pages supersede). |
 
@@ -99,6 +101,7 @@ See the Prerequisites section inside each script for the Python environment requ
 | `fact` | long-term | Durable project facts: build commands, environments, contracts | 0.7 | Never |
 | `procedure` | long-term | How-to that worked: workflows, recipes, verified skills | 0.8 | Never |
 | `code` | long-term | Function/class snapshots, API contracts | 0.6 | Never |
+| `document` | long-term | Large artefacts (specs, transcripts, files): the body is stored and chunk-indexed, `get` returns a summary, `ask` reads the body | 0.6 | Never |
 | `episode` | short-term | Session events, compaction checkpoints | 0.4 | 30 days, extended by every recall |
 | `observation` | short-term | Findings, tool outputs, things noticed | 0.3 | 7 days, extended by every recall |
 | `task` | working | The current goal, plan state, open questions | 0.5 | 24 hours |
@@ -111,7 +114,8 @@ Retention: `ttl = base_ttl × (1 + access_boost × access_count)`, measured from
 2. **While working** — `retain(type="task")` when the plan changes; `retain(type="observation")` for findings; durable knowledge as `decision` / `convention` / `fact` / `procedure`.
 3. **Before compaction** — `retain(type="episode", checkpoint=true)` (the `pre-compact.py` hook) and `consolidate()`.
 4. **After compaction / end of phase** — `promote(ref_id, type, content)` for the candidates worth keeping.
-5. **Curate** — `wiki_export` → review the drafts → `wiki_import`.
+5. **Large artefacts** — `retain(type="document", content=<body>, source=<name>)` then `ask(ref_id, question)`; never `get` a document to read it.
+6. **Curate** — `wiki_export` → review the drafts → `wiki_import`.
 
 ### Quick examples
 
@@ -137,6 +141,10 @@ retain(content="Use arq, not Celery", type="decision", supersedes="<old decision
 get(ref_id="<ref_id from recall>")
 
 forget(ref_id="<ref_id>")
+
+retain(content=<the whole spec>, type="document", source="specs/auth/spec.md")
+
+ask(ref_id="<document ref_id>", question="Which endpoints need rate limiting?", mode="auto")
 ```
 
 ---
@@ -158,6 +166,10 @@ All settings are read from environment variables with the `MEMKERNEL_` prefix, o
 | `MEMKERNEL_PREVIEW_LENGTH` | `200` | Max characters in the `preview` field of `ArtifactRef` |
 | `MEMKERNEL_CHUNK_SIZE` | `1500` | Max characters per AST chunk (code memories) |
 | `MEMKERNEL_CHUNK_OVERLAP` | `200` | Character overlap between token-based fallback chunks |
+| `MEMKERNEL_DOCUMENT_STORE` | `local` | Where `document` bodies live (`local` = the project's own ChromaDB collection) |
+| `MEMKERNEL_DOCUMENT_SUMMARY_CHARS` | `1000` | Characters of the body kept in a `document` memory's summary record |
+| `MEMKERNEL_REASONER` | `local` | `ReasonerPort` behind `ask`: `local` (hybrid search over chunks, no LLM) or `rlmstudio` (falls back to `local` when `rlmstudio` is not importable) |
+| `MEMKERNEL_ASK_TOP_K` | `5` | Chunks the local reasoner returns per `ask` |
 | `MEMKERNEL_EPISODE_TTL_DAYS` | `30` | Base TTL for `episode` memories (short-term) |
 | `MEMKERNEL_OBSERVATION_TTL_DAYS` | `7` | Base TTL for `observation` memories (short-term) |
 | `MEMKERNEL_TASK_TTL_HOURS` | `24` | Base TTL for `task` memories (working) |
@@ -210,6 +222,35 @@ report = svc.consolidate()                 # {"purged": n, "candidates": [...]}
 
 `build_service()` is the supported entry point; the MCP server, the admin API and the hook templates all use it. Integration notes for `code-copilot-team` and `haa` are in [`docs/integration/harness-integration.md`](docs/integration/harness-integration.md).
 
+### The session protocol as a component
+
+`MemoryLifecycle` packages what the hook scripts do, so a harness calls four methods instead of re-implementing the protocol. Every method returns markdown ready for injection and does nothing but talk to the service:
+
+```python
+from memkernel.factory import build_service
+from memkernel.lifecycle import MemoryLifecycle
+
+memory = MemoryLifecycle(build_service())
+system_context = memory.on_session_start()       # checkpoint, long-term context, promotion candidates, wiki pointer
+...
+memory.on_pre_compact(summary)                   # checkpoint episode + consolidation, before the context is compacted
+recovered = memory.on_post_compact()             # what to re-inject after compaction
+memory.on_session_end(summary)                   # final checkpoint + consolidation
+```
+
+### Documents and `ask`
+
+`retain(type="document")` keeps large artefacts out of the context window: the body goes to the document store (built-in: the project's own ChromaDB collection), its chunks are indexed for hybrid search, and the memkernel record is a summary. `ask(ref_id, question, mode)` answers through a `ReasonerPort`:
+
+- `MEMKERNEL_REASONER=local` (default) — no LLM: the question is matched against the document's chunks with dense + BM25 + RRF and the best chunks come back as the answer, `mode="rag"`.
+- `MEMKERNEL_REASONER=rlmstudio` — delegates to [rlm-studio](https://github.com/gosha70/rlm-studio)'s `interact(content, question, mode=mode)`, so `direct`, `rag`, `rlm` and `auto` select how the document is read (ADR-009). `rlm-studio` is not a memkernel dependency and is not on PyPI yet; install it from git into the same environment:
+
+  ```bash
+  pip install "rlm-studio @ git+https://github.com/gosha70/rlm-studio"
+  ```
+
+  When it is not importable, `build_service()` logs a warning and uses the local reasoner. With an external reasoner, `consolidate(synthesize=True)` also drafts long-term statements from the session's short-term memories.
+
 ## LLM wiki bridge
 
 Long-term memory has a human-readable twin: a markdown wiki in the [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern (`index.md`, `log.md`, typed pages with cited sources — the same schema as `code-copilot-team/knowledge/wiki`).
@@ -254,7 +295,7 @@ Releases are published to PyPI by [`.github/workflows/release.yml`](.github/work
 
 1. Set `version` in `pyproject.toml` and move the `[Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under the new version.
 2. Merge to `main` with CI green.
-3. Tag and push: `git tag -a v0.2.0 -m "memkernel 0.2.0" && git push origin v0.2.0`.
+3. Tag and push: `git tag -a v0.3.0 -m "memkernel 0.3.0" && git push origin v0.3.0`.
 
 The workflow refuses a tag that does not match the `pyproject.toml` version, builds the sdist and wheel, smoke-installs the wheel, and uploads through the `pypi` environment.
 
@@ -266,12 +307,14 @@ The workflow refuses a tag that does not match the `pyproject.toml` version, bui
 src/memkernel/
 ├── mcp/           # MCP server + tool definitions (memory tools, wiki tools)
 ├── core/          # Domain models (tiers, types), MemoryService, ports (interfaces)
-├── storage/       # ChromaDB adapter
-├── retrieval/     # AST chunking, embeddings, hybrid search (dense + BM25 + RRF + rescoring)
+├── adapters/      # Optional external systems (RLM Studio reasoner), imported lazily
+├── storage/       # ChromaDB adapter, local document store
+├── retrieval/     # AST/token chunking, embeddings, hybrid search (dense + BM25 + RRF + rescoring), local reasoner
 ├── memory/        # Lifecycle: TTL/decay policies, retention, deduplication
 ├── wiki/          # LLM-wiki bridge: page model, export, import
 ├── api/           # FastAPI admin endpoints
 ├── factory.py     # build_service() — the supported embedding entry point
+├── lifecycle.py   # MemoryLifecycle — the session protocol as a component
 └── config.py      # Pydantic settings
 ```
 
@@ -288,7 +331,7 @@ MemKernel is the memory component of a small family of projects by the same auth
 | Project | Role | Relationship |
 |---|---|---|
 | [ai-wiki](https://github.com/gosha70/ai-wiki) | LLM-maintained markdown wiki (ingest / promote / query / lint) | the human-readable form of long-term memory; `wiki_export` / `wiki_import` speak its page schema (ADR-008) |
-| [rlm-studio](https://github.com/gosha70/rlm-studio) | Recursive Language Models workbench: Direct / RAG / RLM / auto over large documents | the document layer; planned `document` memory type and `ask()` tool (ADR-009) |
+| [rlm-studio](https://github.com/gosha70/rlm-studio) | Recursive Language Models workbench: Direct / RAG / RLM / auto over large documents | the document layer behind `document` memories and the `ask()` tool (`MEMKERNEL_REASONER=rlmstudio`, ADR-009) |
 | [code-copilot-team](https://github.com/gosha70/code-copilot-team) | Enforceable harness configuration for Claude Code, Pi and other copilots | consumes MemKernel through MCP and hooks |
 | [haa](https://github.com/gosha70/haa) | Home-built AI coding harness, future component assembler | consumes MemKernel in-process through `build_service()` |
 

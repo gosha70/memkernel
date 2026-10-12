@@ -87,6 +87,26 @@ def _token_chunks(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     return chunks
 
 
+def split_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """Public token-based splitter: sliding character windows, no syntax awareness.
+
+    Used for ``document`` memories, whose bodies are prose, transcripts or
+    mixed artefacts rather than code (see ADR-009).
+    """
+    return _token_chunks(text, chunk_size, chunk_overlap)
+
+
+class TokenChunker:
+    """``ChunkerPort`` implementation over :func:`split_text` (settings-driven sizes)."""
+
+    def __init__(self, settings: MemKernelSettings) -> None:
+        self._settings = settings
+
+    def chunk(self, content: str, metadata: dict[str, Any]) -> list[str]:
+        """Split *content* into token chunks; ``metadata`` is accepted for port compatibility."""
+        return split_text(content, self._settings.chunk_size, self._settings.chunk_overlap)
+
+
 # ---------------------------------------------------------------------------
 # ASTChunker
 # ---------------------------------------------------------------------------

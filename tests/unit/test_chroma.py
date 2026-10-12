@@ -328,3 +328,20 @@ def test_upsert_accepts_complete_metadata(store: ChromaVectorStore) -> None:
     """upsert() must not raise when all required metadata keys are present."""
     store.upsert("ref-ok", "content", _unit_embedding("content"), _base_metadata())
     assert store.get_by_id("ref-ok") is not None
+
+
+@pytest.mark.unit
+def test_count_with_where_counts_only_matching_records(store: ChromaVectorStore) -> None:
+    """count(where=...) returns the number of matching records without loading them."""
+    for i, mem_type in enumerate(["decision", "decision", "episode"]):
+        store.upsert(
+            ref_id=f"c{i}",
+            content=f"content {i}",
+            embedding=[0.1] * 8,
+            metadata={**_base_metadata(), "type": mem_type, "hash": f"h{i}", "flag": i == 0},
+        )
+    assert store.count() == 3
+    assert store.count(where={"type": "decision"}) == 2
+    assert store.count(where={"flag": True}) == 1
+    assert store.count(where={"$and": [{"type": "decision"}, {"flag": False}]}) == 1
+    assert store.count(where={"type": "fact"}) == 0

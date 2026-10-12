@@ -1,11 +1,13 @@
 [tool.poetry]
 name = "memkernel"
-version = "0.2.0"
+version = "0.3.0"
 description = "Code-aware memory server for AI coding copilots"
 authors = ["EGOGE"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/gosha70/memkernel"
+homepage = "https://memkernel.dev"
+documentation = "https://memkernel.dev"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

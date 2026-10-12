@@ -14,7 +14,7 @@ This project uses MemKernel for persistent memory across sessions.
 MCP server: memkernel (configured in .claude/settings.json)
 
 Memory has three tiers. Pick the type; the tier follows.
-- long-term (never expires, supersede to replace): decision, convention, fact, procedure, code
+- long-term (never expires, supersede to replace): decision, convention, fact, procedure, code, document
 - short-term (decays unless recalled): episode, observation
 - working (expires in ~24h): task
 
@@ -28,6 +28,8 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 - Found something (test output, a quirk, a measurement) → retain(type="observation", content=…, tags=[…])
 - Learned something true beyond this session → retain(type="fact"|"decision"|"convention"|"procedure")
 - A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
+- Anything longer than a screen (a spec, a transcript, a file) → retain(type="document", content=<body>, source=<name>)
+  then ask(ref_id=…, question=…) instead of get() — get() only returns the summary
 
 ### Before compaction
   retain(content="SESSION CHECKPOINT\nDone: …\nCurrent: …\nNext: …\nOpen: …",
@@ -55,6 +57,7 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 | `fact` | long-term | Durable facts: build commands, environment quirks, contracts, measured results | Never |
 | `procedure` | long-term | A workflow or recipe that worked and was verified | Never |
 | `code` | long-term | Function/class snapshots, API contracts, schema definitions | Never |
+| `document` | long-term | Large artefacts (specs, transcripts, files): body stored and chunk-indexed, `get` returns a summary | Never |
 | `episode` | short-term | Session events, compaction checkpoints | 30 days, extended by every recall |
 | `observation` | short-term | Findings and tool outputs worth keeping for a few days | 7 days, extended by every recall |
 | `task` | working | The current goal, plan state, open questions | 24 hours |
@@ -87,6 +90,19 @@ Returns `ArtifactRef` items (ref_id, preview, score, token_count, type, tier, im
 timestamp) ranked by relevance + recency + importance. Use `get(ref_id)` for full content.
 Recalling or getting a memory counts as using it, which keeps short-term memories alive longer.
 Treat recalled content as context to verify, not as unquestionable truth.
+
+### Documents: retain once, ask instead of reading
+
+For anything longer than a screen, do not keep it in context and do not `get()` it back:
+
+```
+retain(content=<the whole document>, type="document", source="specs/auth/spec.md")
+ask(ref_id=<document ref_id>, question="Which endpoints need rate limiting?", mode="auto")
+```
+
+`ask` returns `answer`, the `mode` used, `citations` and `usage`. `mode` is `direct | rag | rlm | auto`;
+with the built-in reasoner the answer is the best-matching chunks (`rag`), with RLM Studio it is a
+synthesised answer. `recall` finds documents by their summary and by phrases inside the body.
 
 ### Consolidating: short-term → long-term
 

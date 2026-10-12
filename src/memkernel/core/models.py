@@ -42,6 +42,8 @@ class MemoryType(StrEnum):
     CODE = "code"
     # Long-term, procedural
     PROCEDURE = "procedure"
+    # Long-term, a large artefact whose body lives in the document store (ADR-009)
+    DOCUMENT = "document"
     # Short-term, episodic
     EPISODE = "episode"
     OBSERVATION = "observation"
@@ -55,6 +57,7 @@ TYPE_TIER: dict[MemoryType, MemoryTier] = {
     MemoryType.FACT: MemoryTier.LONG_TERM,
     MemoryType.CODE: MemoryTier.LONG_TERM,
     MemoryType.PROCEDURE: MemoryTier.LONG_TERM,
+    MemoryType.DOCUMENT: MemoryTier.LONG_TERM,
     MemoryType.EPISODE: MemoryTier.SHORT_TERM,
     MemoryType.OBSERVATION: MemoryTier.SHORT_TERM,
     MemoryType.TASK: MemoryTier.WORKING,
@@ -69,10 +72,28 @@ DEFAULT_IMPORTANCE: dict[MemoryType, float] = {
     MemoryType.PROCEDURE: 0.8,
     MemoryType.FACT: 0.7,
     MemoryType.CODE: 0.6,
+    MemoryType.DOCUMENT: 0.6,
     MemoryType.TASK: 0.5,
     MemoryType.EPISODE: 0.4,
     MemoryType.OBSERVATION: 0.3,
 }
+
+
+# Tags that mark the records a document store keeps beside the memkernel summary
+# record: the canonical body and its indexed chunks. Both are hidden from
+# top-level recall / list results; a chunk hit resolves to the document summary.
+DOCUMENT_BODY_TAG = "document_body"
+DOCUMENT_CHUNK_TAG = "document_chunk"
+# Boolean metadata key set on body/chunk records so search can exempt them
+# from owner-specific filters (session, type, tier, checkpoint): one body may
+# be owned by several summaries in different sessions, so the filters are
+# applied to the owning summary a hit resolves to, not to the shared part.
+DOCUMENT_PART_KEY = "document_part"
+
+# Reasoning modes accepted by ask(): RLM Studio's Direct / RAG / RLM / auto
+# selection, passed through to the ReasonerPort unchanged (ADR-009).
+ASK_MODES: tuple[str, ...] = ("direct", "rag", "rlm", "auto")
+DEFAULT_ASK_MODE = "auto"
 
 
 def tier_of(memory_type: MemoryType) -> MemoryTier:
@@ -103,6 +124,22 @@ class Memory(BaseModel):
     tags: list[str] = []
     supersedes: str | None = None
     promoted_from: str | None = None
+    # Set on a ``document`` summary record and on the body/chunk records the
+    # document store keeps for it (ADR-009).
+    document_id: str | None = None
+
+
+class ReasonerError(RuntimeError):
+    """A ReasonerPort implementation ran but did not produce an answer (provider error, timeout, budget)."""
+
+
+class Answer(BaseModel):
+    """Result of ``ask``: the answer text, the reasoning mode actually used, and provenance."""
+
+    answer: str
+    mode: str
+    citations: list[str] = []
+    usage: dict[str, float | int] = {}
 
 
 class ArtifactRef(BaseModel):

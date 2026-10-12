@@ -1,6 +1,6 @@
 # ADR-009: RLM Studio is the document layer; memkernel asks questions of documents instead of loading them
 
-Status: proposed (2026-10-11), awaiting owner confirmation of the "hybrid mode" reading below.
+Status: accepted (2026-10-11). Implemented in memkernel 0.3 (`specs/memkernel-0-3`); the "hybrid mode" reading below is the owner's.
 
 ## Context
 
