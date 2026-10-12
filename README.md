@@ -101,7 +101,7 @@ See the Prerequisites section inside each script for the Python environment requ
 | `fact` | long-term | Durable project facts: build commands, environments, contracts | 0.7 | Never |
 | `procedure` | long-term | How-to that worked: workflows, recipes, verified skills | 0.8 | Never |
 | `code` | long-term | Function/class snapshots, API contracts | 0.6 | Never |
-| `document` | long-term | Large artefacts (specs, transcripts, files): the body is stored and chunk-indexed, `get` returns a summary, `ask` reads the body | 0.6 | Never |
+| `document` | long-term | Large artefacts (specs, transcripts, files): the body is stored and chunk-indexed, `get` returns a summary, `ask` answers from the indexed chunks (local reasoner) or the body (RLM Studio) | 0.6 | Never |
 | `episode` | short-term | Session events, compaction checkpoints | 0.4 | 30 days, extended by every recall |
 | `observation` | short-term | Findings, tool outputs, things noticed | 0.3 | 7 days, extended by every recall |
 | `task` | working | The current goal, plan state, open questions | 0.5 | 24 hours |
