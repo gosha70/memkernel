@@ -15,7 +15,7 @@ import pytest
 from memkernel.adapters.rlmstudio import RLMStudioReasoner, to_answer
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import Answer, MemoryType, ReasonerError
-from memkernel.core.services import DISTILLATION_PROMPT
+from memkernel.core.services import DISTILLATION_PROMPT, parse_suggestions
 from memkernel.factory import build_service
 from memkernel.retrieval.reasoner import LocalReasoner, ReasonerUnavailable
 from tests.conftest import MockEmbedding
@@ -295,3 +295,25 @@ def test_consolidate_synthesize_ignores_failed_runs(
     assert report["suggested"] == []
     assert len(report["candidates"]) == 1
     assert any("timed out" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (
+            "3 retries are enough for the flaky suite",
+            {"content": "3 retries are enough for the flaky suite", "type": "fact"},
+        ),
+        ("1.5s is the p99 for recall", {"content": "1.5s is the p99 for recall", "type": "fact"}),
+        ("fact: 2 workers saturate the box", {"content": "2 workers saturate the box", "type": "fact"}),
+        ("2. decision: use arq", {"content": "use arq", "type": "decision"}),
+        ("10) procedure: run the smoke test", {"content": "run the smoke test", "type": "procedure"}),
+        ("- convention: snake_case", {"content": "snake_case", "type": "convention"}),
+        ("* 42 is the answer", {"content": "42 is the answer", "type": "fact"}),
+        ("-dash-prefixed-name is a flag", {"content": "-dash-prefixed-name is a flag", "type": "fact"}),
+        ("1.", None),
+        ("", None),
+    ],
+)
+def test_parse_suggestions_keeps_leading_numbers(line: str, expected: dict[str, str] | None) -> None:
+    assert parse_suggestions(line) == ([expected] if expected else [])

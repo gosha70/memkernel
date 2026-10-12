@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -62,6 +63,9 @@ _SYNTHESIS_TYPES: frozenset[str] = frozenset(
 )
 _DEFAULT_SYNTHESIS_TYPE = MemoryType.FACT.value
 _CANDIDATE_SEPARATOR = "\n\n---\n\n"
+# A list marker is a bullet or "1." / "1)" followed by whitespace; a bare
+# leading number ("3 retries", "1.5s") is part of the statement.
+_LIST_MARKER_RE = re.compile(r"^(?:[-*•]|\d{1,3}[.)])(?:\s+|$)")
 
 
 @dataclass(frozen=True)
@@ -94,14 +98,13 @@ def _document_summary(content: str, name: str, chunk_count: int, max_chars: int)
 def parse_suggestions(text: str) -> list[dict[str, str]]:
     """Parse one statement per line, optionally prefixed ``<type>:``, into ``{content, type}`` dicts.
 
-    Leading list markers (``-``, ``*``, ``1.``) are stripped; unknown or missing
-    types default to ``fact``; empty statements are dropped.
+    A leading list marker (``- ``, ``* ``, ``1. ``, ``1) ``) is stripped; a bare
+    leading number is kept. Unknown or missing types default to ``fact``; empty
+    statements are dropped.
     """
     suggested: list[dict[str, str]] = []
     for raw in text.splitlines():
-        line = raw.strip().lstrip("-*•").strip()
-        if line[:1].isdigit():
-            line = line.lstrip("0123456789").lstrip(".)").strip()
+        line = _LIST_MARKER_RE.sub("", raw.strip(), count=1).strip()
         if not line:
             continue
         memory_type = _DEFAULT_SYNTHESIS_TYPE
