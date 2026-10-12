@@ -31,6 +31,9 @@ All notable changes to this project are documented here. The format follows
 - Settings `MEMKERNEL_DOCUMENT_STORE`, `MEMKERNEL_DOCUMENT_SUMMARY_CHARS`,
   `MEMKERNEL_REASONER`, `MEMKERNEL_ASK_TOP_K`; `split_text` / `TokenChunker`
   in `retrieval/chunking.py`.
+- Port additions for adapter authors: `VectorStorePort.count(where=None)`
+  (filtered, ids-only count) and `DocumentStorePort.indexed(doc_id)` (number
+  of indexed chunks); both must be implemented by custom backends.
 
 ### Changed
 
