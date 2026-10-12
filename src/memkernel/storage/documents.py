@@ -28,9 +28,11 @@ from memkernel.core.models import (
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
     MemoryType,
+    SearchResult,
     tier_of,
 )
 from memkernel.memory.dedup import compute_content_hash
+from memkernel.retrieval.search import rrf_fuse
 
 if TYPE_CHECKING:
     from memkernel.config import MemKernelSettings
@@ -40,6 +42,11 @@ logger = logging.getLogger(__name__)
 
 _DOC_ID_PREFIX = "doc-"
 _CHUNK_ID_SEPARATOR = "-chunk-"
+
+
+def _rerank(results: list[SearchResult]) -> list[SearchResult]:
+    """Re-number ranks 1..n after filtering a ranked list down to one document's chunks."""
+    return [SearchResult(ref_id=r.ref_id, score=r.score, rank=rank) for rank, r in enumerate(results, start=1)]
 
 
 class LocalDocumentStore:
@@ -108,19 +115,34 @@ class LocalDocumentStore:
         return len(chunks)
 
     def search(self, doc_id: str, query: str, top_k: int) -> list[str]:
-        """Dense search restricted to one document's chunks; returns chunk texts, best first."""
+        """Hybrid search (dense + BM25, RRF-fused) restricted to one document's chunks; best chunk texts first.
+
+        This is the retrieval step of ``ask`` for the LLM-free reasoner: the
+        chunks were embedded and BM25-indexed at ``index`` time, so nothing is
+        re-embedded here but the query.
+        """
         if top_k <= 0:
             return []
+        prefix = f"{doc_id}{_CHUNK_ID_SEPARATOR}"
         query_embedding = self._embedding.embed([query])[0]
         # The where-filter also matches the body and the summary record, which
-        # carry the same document_id: over-fetch by two and drop them.
-        results = self._vector_store.search_dense(query_embedding, top_k + 2, where={"document_id": doc_id})
+        # carry the same document_id: over-fetch by two and keep chunk ids only.
+        dense = [
+            r
+            for r in self._vector_store.search_dense(query_embedding, top_k + 2, where={"document_id": doc_id})
+            if r.ref_id.startswith(prefix)
+        ]
+        sparse = [r for r in self._sparse_index.search_all(query) if r.ref_id.startswith(prefix)]
+        # Exact-term hits win ties, as in LocalReasoner: a question usually names what it is about.
+        fused = rrf_fuse(self._settings.rrf_k, _rerank(sparse), _rerank(dense))
         texts: list[str] = []
-        for result in results:
-            memory = self._vector_store.get_by_id(result.ref_id)
-            if memory is not None and DOCUMENT_CHUNK_TAG in memory.tags:
+        for ref_id, _ in fused:
+            if len(texts) >= top_k:
+                break
+            memory = self._vector_store.get_by_id(ref_id)
+            if memory is not None:
                 texts.append(memory.content)
-        return texts[:top_k]
+        return texts
 
     # ------------------------------------------------------------------
     # Internals

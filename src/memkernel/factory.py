@@ -84,6 +84,7 @@ def build_service(
         reasoner=resolved_reasoner,
         # An external reasoner that fails at ask() time degrades to the local one.
         fallback_reasoner=LocalReasoner(embedding, resolved) if external else None,
+        local_reasoner=not external,
         # The local reasoner only retrieves; it cannot distil statements, so
         # consolidate(synthesize=True) gets a synthesizer only when an external
         # (LLM-backed) reasoner is in place.

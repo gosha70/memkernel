@@ -66,6 +66,7 @@ _SYNTHESIS_TYPES: frozenset[str] = frozenset(
 )
 _DEFAULT_SYNTHESIS_TYPE = MemoryType.FACT.value
 _CANDIDATE_SEPARATOR = "\n\n---\n\n"
+_CHUNK_JOINER = "\n\n"
 # A list marker is a bullet or "1." / "1)" followed by whitespace; a bare
 # leading number ("3 retries", "1.5s") is part of the statement.
 _LIST_MARKER_RE = re.compile(r"^(?:[-*•]|\d{1,3}[.)])(?:\s+|$)")
@@ -184,6 +185,7 @@ class MemoryService:
         reasoner: ReasonerPort | None = None,
         synthesizer: ReasonerPort | None = None,
         fallback_reasoner: ReasonerPort | None = None,
+        local_reasoner: bool = True,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
@@ -200,6 +202,12 @@ class MemoryService:
         # Answers ask() when ``reasoner`` raises ReasonerError (provider down,
         # failed run); None re-raises, which only happens for hand-built services.
         self._fallback_reasoner = fallback_reasoner
+        # True when ``reasoner`` is the built-in retrieval-only LocalReasoner: a
+        # document is then asked through its indexed chunks (document store
+        # search) instead of handing the reasoner the whole body to re-chunk and
+        # re-embed. An external reasoner (RLM Studio) retrieves on its own and
+        # gets the body.
+        self._local_reasoner = local_reasoner
         self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
@@ -576,10 +584,12 @@ class MemoryService:
     def ask(self, ref_id: str, question: str, mode: str = DEFAULT_ASK_MODE) -> Answer | None:
         """Answer ``question`` about one memory through the configured ReasonerPort.
 
-        For a ``document`` memory the full body is loaded from the document
-        store (the summary is used only if the body is gone); any other memory
-        is asked about its own content. ``mode`` is one of ``direct``, ``rag``,
-        ``rlm``, ``auto`` and is passed to the reasoner unchanged. Asking
+        For a ``document`` memory an external reasoner gets the full body from
+        the document store, while the built-in local reasoner gets the indexed
+        chunks that best match the question (the summary is used only if the
+        body is gone); any other memory is asked about its own content.
+        ``mode`` is one of ``direct``, ``rag``, ``rlm``, ``auto`` and is passed
+        to the reasoner unchanged. Asking
         records an access. Returns None when ``ref_id`` does not exist. When
         the reasoner raises :class:`ReasonerError` the fallback reasoner answers
         instead (``usage["fallback"] == 1``, warning logged); without a fallback
@@ -592,23 +602,39 @@ class MemoryService:
         memory = self._vector_store.get_by_id(ref_id)
         if memory is None:
             return None
-        content = memory.content
-        if memory.type == MemoryType.DOCUMENT and memory.document_id and self._document_store is not None:
-            body = self._document_store.get(memory.document_id)
-            if body is None:
-                logger.warning("document body %s missing for %s; asking about the summary", memory.document_id, ref_id)
-            else:
-                content = body
+        is_document = (
+            memory.type == MemoryType.DOCUMENT and bool(memory.document_id) and self._document_store is not None
+        )
+        content = (
+            self._document_content(memory, question, chunks=self._local_reasoner) if is_document else memory.content
+        )
         try:
             answer = self._reasoner.ask(content, question, mode)
         except ReasonerError as exc:
             if self._fallback_reasoner is None:
                 raise
             logger.warning("ask(%s): reasoner failed (%s); answering with the fallback reasoner", ref_id, exc)
+            if is_document:
+                content = self._document_content(memory, question, chunks=True)
             answer = self._fallback_reasoner.ask(content, question, mode)
             answer = answer.model_copy(update={"usage": {**answer.usage, "fallback": 1}})
         self._touch(ref_id)
         return answer
+
+    def _document_content(self, memory: Memory, question: str, chunks: bool) -> str:
+        """The text a reasoner sees for a document: its best indexed chunks (``chunks``) or the whole body."""
+        assert self._document_store is not None and memory.document_id  # guarded by the caller
+        if chunks:
+            best = self._document_store.search(memory.document_id, question, self._settings.ask_top_k)
+            if best:
+                return _CHUNK_JOINER.join(best)
+        body = self._document_store.get(memory.document_id)
+        if body is None:
+            logger.warning(
+                "document body %s missing for %s; asking about the summary", memory.document_id, memory.ref_id
+            )
+            return memory.content
+        return body
 
     # ------------------------------------------------------------------
     # Consolidation (short-term -> long-term)

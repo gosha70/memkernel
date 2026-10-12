@@ -47,7 +47,7 @@ def _settings(**overrides: Any) -> MemKernelSettings:
     return MemKernelSettings(**base)
 
 
-def _build(reasoner: Any = None, with_reasoner: bool = True) -> tuple[MemoryService, Any]:
+def _build(reasoner: Any = None, with_reasoner: bool = True, local_reasoner: bool = True) -> tuple[MemoryService, Any]:
     settings = _settings()
     store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
     embedding = MockEmbedding()
@@ -65,6 +65,7 @@ def _build(reasoner: Any = None, with_reasoner: bool = True) -> tuple[MemoryServ
         document_store=documents,
         document_chunker=TokenChunker(settings),
         reasoner=reasoner,
+        local_reasoner=local_reasoner,
     )
     return svc, reasoner
 
@@ -91,6 +92,28 @@ def test_ask_on_document_consults_the_body_not_the_summary() -> None:
     assert answer.mode == "rag"
     assert any(MARKER in c for c in answer.citations)
     assert MARKER in answer.answer
+
+
+def test_local_reasoner_gets_indexed_chunks_not_the_whole_body() -> None:
+    recorder = RecordingReasoner()
+    svc, _ = _build(reasoner=recorder, local_reasoner=True)
+    body = _body()
+    ref_id = svc.retain(body, MemoryType.DOCUMENT, source="x.md")
+    svc.ask(ref_id, "how is the escape hatch spelled QUETZALCOATL-7741")
+    content = recorder.calls[0][0]
+    assert content != body
+    assert len(content) < len(body)
+    assert "QUETZALCOATL-7741" in content
+    assert content.count("\n\n") == svc._settings.ask_top_k - 1  # noqa: SLF001 — top_k chunks joined
+
+
+def test_external_reasoner_gets_the_whole_body() -> None:
+    recorder = RecordingReasoner()
+    svc, _ = _build(reasoner=recorder, local_reasoner=False)
+    body = _body()
+    ref_id = svc.retain(body, MemoryType.DOCUMENT, source="x.md")
+    svc.ask(ref_id, "anything?", mode="rlm")
+    assert recorder.calls[0] == (body, "anything?", "rlm")
 
 
 def test_ask_on_non_document_uses_own_content_and_passes_mode_through() -> None:
@@ -155,7 +178,7 @@ def test_ask_without_fallback_propagates_reasoner_error() -> None:
 
 def test_ask_on_document_whose_body_is_gone_falls_back_to_summary() -> None:
     recorder = RecordingReasoner()
-    svc, _ = _build(reasoner=recorder)
+    svc, _ = _build(reasoner=recorder, local_reasoner=False)
     ref_id = svc.retain(_body(), MemoryType.DOCUMENT, source="x.md")
     summary = svc.get(ref_id, touch=False)
     assert summary is not None and summary.document_id is not None

@@ -140,6 +140,10 @@ def test_search_returns_only_chunk_texts_of_that_document() -> None:
     assert "three four" not in hits
     assert len(hits) == 2
     assert documents.search(first, "three", top_k=0) == []
+    # BM25 carries exact terms even when the (hash-based) dense side is noise
+    assert documents.search(other, "four", top_k=1) == ["three four"]
+    # no term overlap: the dense side alone still returns every chunk of that document
+    assert sorted(documents.search(first, "zzzz", top_k=5)) == ["one two", "three"]
 
 
 # --------------------------------------------------------------------------
