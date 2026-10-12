@@ -248,9 +248,15 @@ class ChromaVectorStore:
             metadatas=[_to_chroma_metadata(merged)],
         )
 
-    def count(self) -> int:
-        """Return the total number of memories in the collection."""
-        return self._collection.count()
+    def count(self, where: dict[str, Any] | None = None) -> int:
+        """Return the number of records in the collection, or of those matching ``where``.
+
+        A filtered count fetches ids only — no documents, metadata or embeddings.
+        """
+        if where is None:
+            return self._collection.count()
+        result = self._collection.get(where=where, include=[])
+        return len(result.get("ids") or [])
 
     def list_collections(self) -> list[dict[str, Any]]:
         """List all collections accessible via this client with their record counts."""

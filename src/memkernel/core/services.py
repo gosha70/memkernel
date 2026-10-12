@@ -502,8 +502,7 @@ class MemoryService:
 
     def count(self) -> int:
         """Return the number of memories in this project (document bodies and chunks excluded)."""
-        hidden = len(self._vector_store.list_all({DOCUMENT_PART_KEY: True}))
-        return self._vector_store.count() - hidden
+        return self._vector_store.count() - self._vector_store.count(where={DOCUMENT_PART_KEY: True})
 
     def list_memories(
         self,

@@ -47,7 +47,9 @@ class VectorStorePort(Protocol):
         """Fetch-and-merge: only overwrites caller-specified keys."""
         ...
 
-    def count(self) -> int: ...
+    def count(self, where: dict[str, Any] | None = None) -> int:
+        """Number of records, optionally only those matching a metadata filter (ids-only fetch)."""
+        ...
 
     def list_collections(self) -> list[dict[str, Any]]:
         """List all collections visible to this adapter with their record counts."""
