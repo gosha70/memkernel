@@ -165,6 +165,7 @@ class MemoryService:
         document_chunker: ChunkerPort | None = None,
         reasoner: ReasonerPort | None = None,
         synthesizer: ReasonerPort | None = None,
+        fallback_reasoner: ReasonerPort | None = None,
     ) -> None:
         self._vector_store = vector_store
         self._embedding = embedding
@@ -178,6 +179,9 @@ class MemoryService:
         # A reasoner able to distil statements (an LLM-backed one); None keeps
         # consolidate(synthesize=True) a no-op, as with the local reasoner.
         self._synthesizer = synthesizer
+        # Answers ask() when ``reasoner`` raises ReasonerError (provider down,
+        # failed run); None re-raises, which only happens for hand-built services.
+        self._fallback_reasoner = fallback_reasoner
         self._last_recall_ms: float | None = None
 
     # ------------------------------------------------------------------
@@ -553,8 +557,10 @@ class MemoryService:
         store (the summary is used only if the body is gone); any other memory
         is asked about its own content. ``mode`` is one of ``direct``, ``rag``,
         ``rlm``, ``auto`` and is passed to the reasoner unchanged. Asking
-        records an access. Returns None when ``ref_id`` does not exist; a
-        reasoner that ran but failed raises :class:`ReasonerError`.
+        records an access. Returns None when ``ref_id`` does not exist. When
+        the reasoner raises :class:`ReasonerError` the fallback reasoner answers
+        instead (``usage["fallback"] == 1``, warning logged); without a fallback
+        the error propagates.
         """
         if mode not in ASK_MODES:
             raise ValueError(f"unknown ask mode {mode!r}; expected one of {', '.join(ASK_MODES)}")
@@ -570,7 +576,14 @@ class MemoryService:
                 logger.warning("document body %s missing for %s; asking about the summary", memory.document_id, ref_id)
             else:
                 content = body
-        answer = self._reasoner.ask(content, question, mode)
+        try:
+            answer = self._reasoner.ask(content, question, mode)
+        except ReasonerError as exc:
+            if self._fallback_reasoner is None:
+                raise
+            logger.warning("ask(%s): reasoner failed (%s); answering with the fallback reasoner", ref_id, exc)
+            answer = self._fallback_reasoner.ask(content, question, mode)
+            answer = answer.model_copy(update={"usage": {**answer.usage, "fallback": 1}})
         self._touch(ref_id)
         return answer
 

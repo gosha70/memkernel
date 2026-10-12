@@ -9,7 +9,7 @@ import chromadb
 import pytest
 
 from memkernel.config import MemKernelSettings
-from memkernel.core.models import ASK_MODES, Answer, MemoryType
+from memkernel.core.models import ASK_MODES, Answer, MemoryType, ReasonerError
 from memkernel.core.services import MemoryService
 from memkernel.retrieval.chunking import TokenChunker
 from memkernel.retrieval.reasoner import LocalReasoner
@@ -138,6 +138,18 @@ def test_ask_without_reasoner_raises() -> None:
     svc, _ = _build(with_reasoner=False)
     ref_id = svc.retain("fact", MemoryType.FACT)
     with pytest.raises(RuntimeError, match="ReasonerPort"):
+        svc.ask(ref_id, "q")
+
+
+class FailingReasoner:
+    def ask(self, content: str, question: str, mode: str) -> Answer:
+        raise ReasonerError("down")
+
+
+def test_ask_without_fallback_propagates_reasoner_error() -> None:
+    svc, _ = _build(reasoner=FailingReasoner())
+    ref_id = svc.retain("fact", MemoryType.FACT)
+    with pytest.raises(ReasonerError, match="down"):
         svc.ask(ref_id, "q")
 
 

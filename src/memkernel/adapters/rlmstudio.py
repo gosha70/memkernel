@@ -109,7 +109,15 @@ class RLMStudioReasoner:
     def ask(self, content: str, question: str, mode: str) -> Answer:
         """Pass ``mode`` through unchanged (direct | rag | rlm | auto); report the mode actually used.
 
-        Raises :class:`ReasonerError` when RLM Studio reports a failed run.
+        Raises :class:`ReasonerError` when RLM Studio reports a failed run or
+        when the call itself raises (provider down, timeout, budget exceeded):
+        callers degrade on that one exception type instead of on whatever the
+        provider stack throws.
         """
-        result = self._rlmstudio.interact(content, question, mode=mode)
+        try:
+            result = self._rlmstudio.interact(content, question, mode=mode)
+        except ReasonerError:
+            raise
+        except Exception as exc:
+            raise ReasonerError(f"rlmstudio {mode} run raised {type(exc).__name__}: {exc}") from exc
         return to_answer(result, mode)

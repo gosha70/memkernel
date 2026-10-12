@@ -236,14 +236,50 @@ def test_failed_interact_result_raises_instead_of_answering() -> None:
         to_answer({"answer": "Error: x", "success": False}, "rlm")
 
 
-def test_ask_surfaces_a_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ask_degrades_to_local_reasoner_on_failed_run(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     _fake(monkeypatch, _interact_result(answer="Error: boom", success=False, error="boom"))
     svc = build_service(
         _settings(reasoner="rlmstudio"), embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient()
     )
-    ref_id = svc.retain("a fact", MemoryType.FACT)
-    with pytest.raises(ReasonerError, match="boom"):
-        svc.ask(ref_id, "q?")
+    ref_id = svc.retain("a fact about arq", MemoryType.FACT)
+    with caplog.at_level(logging.WARNING, logger="memkernel.core.services"):
+        answer = svc.ask(ref_id, "arq?", mode="rlm")
+    assert answer is not None
+    assert answer.mode == "rag" and "arq" in answer.answer
+    assert answer.usage["fallback"] == 1
+    assert any("boom" in r.getMessage() for r in caplog.records)
+
+
+class ExplodingRLMStudio(types.ModuleType):
+    def __init__(self) -> None:
+        super().__init__("rlmstudio")
+
+    def interact(self, content: str, query: str, mode: str = "auto") -> Any:
+        raise ConnectionError("provider unreachable")
+
+
+def test_provider_exception_becomes_reasoner_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "rlmstudio", ExplodingRLMStudio())
+    with pytest.raises(ReasonerError, match="ConnectionError: provider unreachable"):
+        RLMStudioReasoner().ask("body", "q?", mode="auto")
+
+
+def test_provider_exception_degrades_ask_and_consolidate(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setitem(sys.modules, "rlmstudio", ExplodingRLMStudio())
+    svc = build_service(
+        _settings(reasoner="rlmstudio"), embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient()
+    )
+    ref_id = svc.retain("an observation about retries", MemoryType.OBSERVATION)
+    with caplog.at_level(logging.WARNING):
+        answer = svc.ask(ref_id, "retries?")
+        report = svc.consolidate(synthesize=True)
+    assert answer is not None and answer.usage["fallback"] == 1 and "retries" in answer.answer
+    assert report["suggested"] == [] and len(report["candidates"]) == 1
+    assert sum("provider unreachable" in r.getMessage() for r in caplog.records) == 2
 
 
 def test_consolidate_synthesize_ignores_failed_runs(

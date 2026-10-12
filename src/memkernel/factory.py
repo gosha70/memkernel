@@ -45,8 +45,9 @@ def build_service(
     lazily here so tests and lightweight callers can pass a mock instead).
     ``chunker`` defaults to the tree-sitter :class:`ASTChunker`.
     ``reasoner`` defaults to the one ``settings.reasoner`` names; the built-in
-    :class:`LocalReasoner` is the LLM-free fallback. Documents are stored in
-    the built-in :class:`LocalDocumentStore` (``settings.document_store``).
+    :class:`LocalReasoner` is the LLM-free fallback, both when the configured
+    one cannot be built and, at ask() time, when it fails. Documents are stored
+    in the built-in :class:`LocalDocumentStore` (``settings.document_store``).
     """
     resolved = settings or MemKernelSettings()
 
@@ -70,6 +71,7 @@ def build_service(
     )
     document_store = LocalDocumentStore(vector_store, embedding, sparse_index, resolved)
     resolved_reasoner = reasoner if reasoner is not None else _build_reasoner(resolved, embedding)
+    external = not isinstance(resolved_reasoner, LocalReasoner)
     service = MemoryService(
         vector_store=vector_store,
         embedding=embedding,
@@ -80,10 +82,12 @@ def build_service(
         document_store=document_store,
         document_chunker=TokenChunker(resolved),
         reasoner=resolved_reasoner,
+        # An external reasoner that fails at ask() time degrades to the local one.
+        fallback_reasoner=LocalReasoner(embedding, resolved) if external else None,
         # The local reasoner only retrieves; it cannot distil statements, so
         # consolidate(synthesize=True) gets a synthesizer only when an external
         # (LLM-backed) reasoner is in place.
-        synthesizer=None if isinstance(resolved_reasoner, LocalReasoner) else resolved_reasoner,
+        synthesizer=resolved_reasoner if external else None,
     )
     if rebuild_sparse_index:
         service.rebuild_sparse_index()
