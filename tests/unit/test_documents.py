@@ -379,3 +379,17 @@ def test_count_and_stats_exclude_document_parts() -> None:
     assert stats["by_type"] == {"document": 1, "fact": 1}
     assert stats["by_tier"] == {"long_term": 2}
     assert stats["growth"]["last_24h"] == 2
+
+
+def test_document_summary_outline_only_from_markdown_headings() -> None:
+    body = "# Title\n\n## Section one ##\n#hashtag not a heading\n   ### indented sub\ntext\n"
+    summary = _document_summary(body, "notes.md", 1, 1000)
+    assert "outline: Title, Section one, indented sub]" in summary
+    assert "hashtag" not in summary.split("[document")[1]
+    # same body as a code file: '#' lines are comments, no outline at all
+    code = "# Copyright (c) 2026\n# SPDX-License-Identifier: Apache-2.0\nimport os\n"
+    assert "outline" not in _document_summary(code, "src/app.py", 1, 1000)
+    assert "outline: Copyright (c) 2026, SPDX-License-Identifier: Apache-2.0]" in _document_summary(
+        code, "notes", 1, 1000
+    )
+    assert "outline" not in _document_summary(code, "settings.yaml", 1, 1000)

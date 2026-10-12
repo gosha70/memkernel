@@ -9,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -50,6 +51,8 @@ logger = logging.getLogger(__name__)
 _SUMMARY_OUTLINE_MAX_CHARS = 196
 _SUMMARY_SEPARATOR = "\n\n"
 _DEFAULT_DOCUMENT_NAME = "document"
+_MARKDOWN_SUFFIXES: frozenset[str] = frozenset({".md", ".markdown", ".mdx"})
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 
 # consolidate(synthesize=True): the fixed instruction sent once, over the
 # concatenated candidate contents, to an external reasoner (FR-009).
@@ -84,13 +87,24 @@ def _is_document_part(memory: Memory) -> bool:
     return DOCUMENT_BODY_TAG in memory.tags or DOCUMENT_CHUNK_TAG in memory.tags
 
 
+def _document_headings(lines: list[str], name: str) -> list[str]:
+    """Markdown headings (``#`` to ``######`` followed by a space) of a markdown or extension-less document.
+
+    Code and config files use ``#`` for comments, so they get no outline.
+    """
+    suffix = PurePosixPath(name).suffix.lower()
+    if suffix and suffix not in _MARKDOWN_SUFFIXES:
+        return []
+    return [m.group(1).strip() for ln in lines if (m := _MARKDOWN_HEADING_RE.match(ln)) and m.group(1).strip()]
+
+
 def _document_summary(content: str, name: str, chunk_count: int, max_chars: int) -> str:
     """First ``max_chars`` of the body plus one bounded line with line count and outline."""
     lines = content.splitlines()
-    headings = [ln.strip().lstrip("#").strip() for ln in lines if ln.lstrip().startswith("#")]
+    headings = _document_headings(lines, name)
     outline = f"[document {name}: {len(lines)} lines, {len(content)} chars, {chunk_count} chunks"
     if headings:
-        outline += "; outline: " + ", ".join(h for h in headings if h)
+        outline += "; outline: " + ", ".join(headings)
     outline = outline[: _SUMMARY_OUTLINE_MAX_CHARS - 1] + "…" if len(outline) > _SUMMARY_OUTLINE_MAX_CHARS else outline
     return content[:max_chars] + _SUMMARY_SEPARATOR + outline + "]"
 
