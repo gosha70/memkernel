@@ -300,8 +300,14 @@ class MemoryService:
         return ref_id
 
     def _document_owners(self, document_id: str) -> list[Memory]:
-        """The ``document`` summary records that own ``document_id`` (body and chunks excluded)."""
-        return [m for m in self._vector_store.list_all({"document_id": document_id}) if not _is_document_part(m)]
+        """The ``document`` summary records that own ``document_id``.
+
+        Filtered at the store: summaries are written with ``document_part: False``
+        (they are new in 0.3, so no legacy store lacks the key), so the body and
+        the chunk records are never loaded here.
+        """
+        where = {"$and": [{"document_id": document_id}, {DOCUMENT_PART_KEY: False}]}
+        return self._vector_store.list_all(where)
 
     def _retain_single(
         self,
@@ -354,6 +360,7 @@ class MemoryService:
             metadata["promoted_from"] = extra.promoted_from
         if extra.document_id:
             metadata["document_id"] = extra.document_id
+            metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
 
         # Authoritative store first
         self._vector_store.upsert(

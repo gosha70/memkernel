@@ -397,3 +397,24 @@ def test_document_summary_outline_only_from_markdown_headings() -> None:
         code, "notes", 1, 1000
     )
     assert "outline" not in _document_summary(code, "settings.yaml", 1, 1000)
+
+
+def test_owner_lookup_is_filtered_at_the_store_and_never_loads_chunks() -> None:
+    settings = _settings(chunk_size=60, chunk_overlap=10)
+    svc, _, store = _build(settings)
+    body = "\n".join(f"line {i}: some filler text to make a chunk" for i in range(130))
+    ref_id = svc.retain(body, MemoryType.DOCUMENT, source="big.md")
+    summary = svc.get(ref_id, touch=False)
+    assert summary is not None and summary.document_id is not None
+    doc_id = summary.document_id
+    assert store.count(where={"document_id": doc_id}) > 100  # body + 100-plus chunks + summary
+
+    owners = svc._document_owners(doc_id)  # noqa: SLF001
+    assert [m.ref_id for m in owners] == [ref_id]
+    # the same compound filter at the store level yields the summary alone
+    where = {"$and": [{"document_id": doc_id}, {"document_part": False}]}
+    assert [m.ref_id for m in store.list_all(where)] == [ref_id]
+    assert store.count(where=where) == 1
+    assert store.count(where={"$and": [{"document_id": doc_id}, {"document_part": True}]}) == (
+        store.count(where={"document_id": doc_id}) - 1
+    )
