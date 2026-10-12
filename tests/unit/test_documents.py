@@ -35,10 +35,24 @@ def _settings(**overrides: Any) -> MemKernelSettings:
     return MemKernelSettings(**base)
 
 
-def _build(settings: MemKernelSettings | None = None) -> tuple[MemoryService, LocalDocumentStore, ChromaVectorStore]:
+class CountingEmbedding(MockEmbedding):
+    """MockEmbedding that counts how many texts it was asked to embed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.texts = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.texts += len(texts)
+        return super().embed(texts)
+
+
+def _build(
+    settings: MemKernelSettings | None = None, embedding: MockEmbedding | None = None
+) -> tuple[MemoryService, LocalDocumentStore, ChromaVectorStore]:
     settings = settings or _settings()
     store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())
-    embedding = MockEmbedding()
+    embedding = embedding or MockEmbedding()
     sparse = BM25Index()
     search = HybridSearchService(store, embedding, sparse, settings)
     documents = LocalDocumentStore(store, embedding, sparse, settings)
@@ -418,3 +432,49 @@ def test_owner_lookup_is_filtered_at_the_store_and_never_loads_chunks() -> None:
     assert store.count(where={"$and": [{"document_id": doc_id}, {"document_part": True}]}) == (
         store.count(where={"document_id": doc_id}) - 1
     )
+
+
+def test_second_retain_of_the_same_document_embeds_nothing() -> None:
+    embedding = CountingEmbedding()
+    svc, documents, store = _build(embedding=embedding)
+    body = _long_document()
+    ref1 = svc.retain(body, MemoryType.DOCUMENT, source="x.md")
+    summary = svc.get(ref1, touch=False)
+    assert summary is not None and summary.document_id is not None
+    chunk_count = documents.indexed(summary.document_id)
+    assert chunk_count > 1
+    after_first = embedding.texts
+    assert after_first >= chunk_count + 2  # body probe + chunks + summary
+
+    ref2 = svc.retain(body, MemoryType.DOCUMENT, source="x.md", session_id="again")
+    assert ref2 == ref1
+    assert embedding.texts == after_first  # nothing chunked or embedded
+    assert documents.indexed(summary.document_id) == chunk_count
+
+    # same body under a new name: only the new summary record is embedded
+    ref3 = svc.retain(body, MemoryType.DOCUMENT, source="y.md")
+    assert ref3 != ref1
+    assert embedding.texts == after_first + 1
+    assert store.count(where={"document_id": summary.document_id}) == chunk_count + 3
+
+
+def test_lost_chunks_are_reindexed_on_the_next_retain() -> None:
+    embedding = CountingEmbedding()
+    svc, documents, store = _build(embedding=embedding)
+    body = _long_document()
+    ref_id = svc.retain(body, MemoryType.DOCUMENT, source="x.md")
+    summary = svc.get(ref_id, touch=False)
+    assert summary is not None and summary.document_id is not None
+    doc_id = summary.document_id
+    chunk_count = documents.indexed(doc_id)
+    # simulate a crash between put() and index(): the chunks are gone, the body and summary remain
+    for part in store.list_all({"$and": [{"document_id": doc_id}, {"chunk_index": {"$gte": 0}}]}):
+        store.delete(part.ref_id)
+    assert documents.indexed(doc_id) == 0
+    assert documents.indexed("doc-unknown") == 0
+    before = embedding.texts
+
+    assert svc.retain(body, MemoryType.DOCUMENT, source="x.md") == ref_id
+    assert documents.indexed(doc_id) == chunk_count
+    assert embedding.texts == before + chunk_count
+    assert [r.ref_id for r in svc.recall("QUETZALCOATL-7741", top_k=1)] == [ref_id]

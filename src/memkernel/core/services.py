@@ -285,19 +285,19 @@ class MemoryService:
         name = source or _DEFAULT_DOCUMENT_NAME
         resolved_session = session_id or self._settings.default_session_id
         doc_id = self._document_store.put(content, name)
-        chunks = self._document_chunker.chunk(content, {"source": name}) if self._document_chunker else [content]
-        indexed = self._document_store.index(doc_id, chunks)
-        summary = _document_summary(content, name, indexed, self._settings.document_summary_chars)
         doc_extra = replace(extra, document_id=doc_id)
+        indexed = self._document_store.indexed(doc_id)
         existing = next((owner for owner in self._document_owners(doc_id) if owner.source == source), None)
+        if indexed == 0:
+            # First time this body is seen — or its chunks were lost between put
+            # and index — so chunk and embed now. Otherwise nothing is embedded.
+            chunks = self._document_chunker.chunk(content, {"source": name}) if self._document_chunker else [content]
+            indexed = self._document_store.index(doc_id, chunks)
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, doc_extra)
-            ref_id = existing.ref_id
-        else:
-            ref_id = self._retain_single(
-                summary, MemoryType.DOCUMENT, session_id, checkpoint, source, doc_extra, dedup=False
-            )
-        return ref_id
+            return existing.ref_id
+        summary = _document_summary(content, name, indexed, self._settings.document_summary_chars)
+        return self._retain_single(summary, MemoryType.DOCUMENT, session_id, checkpoint, source, doc_extra, dedup=False)
 
     def _document_owners(self, document_id: str) -> list[Memory]:
         """The ``document`` summary records that own ``document_id``.

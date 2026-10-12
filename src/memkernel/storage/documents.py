@@ -114,6 +114,10 @@ class LocalDocumentStore:
                 self._sparse_index.mark_needs_rebuild()
         return len(chunks)
 
+    def indexed(self, doc_id: str) -> int:
+        """Count the chunk records of ``doc_id`` without loading them (chunks are the records with a chunk_index)."""
+        return self._vector_store.count(where={"$and": [{"document_id": doc_id}, {"chunk_index": {"$gte": 0}}]})
+
     def search(self, doc_id: str, query: str, top_k: int) -> list[str]:
         """Hybrid search (dense + BM25, RRF-fused) restricted to one document's chunks; best chunk texts first.
 

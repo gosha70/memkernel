@@ -113,6 +113,10 @@ class DocumentStorePort(Protocol):
         """Index the chunks of a stored document; returns the number of chunks indexed."""
         ...
 
+    def indexed(self, doc_id: str) -> int:
+        """Number of chunks currently indexed for ``doc_id`` (0 for an unknown or un-indexed body); ids-only."""
+        ...
+
     def search(self, doc_id: str, query: str, top_k: int) -> list[str]:
         """Return the top_k chunk texts of one document ranked against ``query``."""
         ...
