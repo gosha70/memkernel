@@ -366,3 +366,16 @@ def test_chunk_hit_never_resolves_to_a_summary_outside_the_requested_filters() -
     # tier/type filters that exclude `document` summaries must not be bypassed by a chunk hit
     assert ref_id not in {r.ref_id for r in svc.recall("QUETZALCOATL-7741", type=MemoryType.FACT, top_k=5)}
     assert ref_id not in {r.ref_id for r in svc.recall("QUETZALCOATL-7741", checkpoint_only=True, top_k=5)}
+
+
+def test_count_and_stats_exclude_document_parts() -> None:
+    svc, _, store = _build()
+    svc.retain(_long_document(), MemoryType.DOCUMENT, source="x.md")
+    svc.retain("a fact", MemoryType.FACT)
+    assert store.count() > 3  # body + chunks + summary + fact at the store level
+    assert svc.count() == 2
+    stats = svc.stats()
+    assert stats["total"] == 2
+    assert stats["by_type"] == {"document": 1, "fact": 1}
+    assert stats["by_tier"] == {"long_term": 2}
+    assert stats["growth"]["last_24h"] == 2

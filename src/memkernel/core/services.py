@@ -17,6 +17,7 @@ from memkernel.core.models import (
     DEFAULT_IMPORTANCE,
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
+    DOCUMENT_PART_KEY,
     Answer,
     ArtifactRef,
     Memory,
@@ -475,8 +476,9 @@ class MemoryService:
         )
 
     def count(self) -> int:
-        """Return the total number of memories stored in this project."""
-        return self._vector_store.count()
+        """Return the number of memories in this project (document bodies and chunks excluded)."""
+        hidden = len(self._vector_store.list_all({DOCUMENT_PART_KEY: True}))
+        return self._vector_store.count() - hidden
 
     def list_memories(
         self,
@@ -510,8 +512,12 @@ class MemoryService:
         return self._settings.project_id
 
     def stats(self) -> dict[str, object]:
-        """Return total count, per-type breakdown, memory growth, and last recall timing."""
-        all_memories = self._vector_store.list_all()
+        """Return total count, per-type breakdown, memory growth, and last recall timing.
+
+        Document bodies and chunks are implementation records of one ``document``
+        memory and are not counted.
+        """
+        all_memories = [m for m in self._vector_store.list_all() if not _is_document_part(m)]
         now = datetime.now(UTC)
         by_type: dict[str, int] = {}
         by_tier: dict[str, int] = {}
