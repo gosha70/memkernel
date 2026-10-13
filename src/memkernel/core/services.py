@@ -298,10 +298,14 @@ class MemoryService:
         """Store a code snapshot: canonical record plus owner-specific chunk records.
 
         Identity is ``(source, content_hash)`` for a sourced file and the content
-        hash alone otherwise. A dedup hit refreshes the record and embeds nothing.
-        A changed file supersedes every live canonical for the same ``source``:
-        the new record carries ``supersedes``, each old one gets ``superseded_by``
-        and loses its owned chunk records, and stays as a hidden record.
+        hash alone otherwise. A dedup hit refreshes the record, embeds nothing
+        and *finishes* anything an earlier interrupted retain left undone
+        (missing chunk records, live older snapshots), so a retry always
+        converges. A changed file supersedes every live canonical for the same
+        ``source``: the new record carries ``supersedes``, each old one gets
+        ``superseded_by`` and loses its owned chunk records, and stays as a
+        hidden record. If indexing the new snapshot's chunks fails, the
+        half-written canonical is removed again before the error propagates.
         """
         resolved_session = session_id or self._settings.default_session_id
         content_hash = compute_content_hash(content)
@@ -309,23 +313,53 @@ class MemoryService:
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             self._refresh_owned_chunks(existing.ref_id, resolved_session, checkpoint)
+            self._index_missing_chunks(existing.ref_id, content, resolved_session, checkpoint, source, extra)
+            self._supersede_other_snapshots(existing.ref_id, source)
             return existing.ref_id
 
-        old_canonicals = self._live_code_canonicals(source) if source else []
-        if old_canonicals and not extra.supersedes:
-            newest = max(old_canonicals, key=lambda m: m.timestamp)
-            extra = replace(extra, supersedes=newest.ref_id)
         ref_id = self._retain_single(content, MemoryType.CODE, session_id, checkpoint, source, extra, dedup=False)
+        try:
+            self._index_missing_chunks(ref_id, content, resolved_session, checkpoint, source, extra)
+        except Exception:
+            # Compensate: a canonical without its index entries must not stay findable.
+            for chunk in self._owned_chunks(ref_id):
+                self._delete_record(chunk.ref_id)
+            self._delete_record(ref_id)
+            raise
+        self._supersede_other_snapshots(ref_id, source)
+        return ref_id
 
-        chunks = self._chunker.chunk(content, {"source": source}) if self._chunker is not None else []
-        chunk_ids = self._index_code_chunks(ref_id, chunks, resolved_session, checkpoint, source, extra)
+    def _index_missing_chunks(
+        self, ref_id: str, content: str, session_id: str, checkpoint: bool, source: str, extra: _ExtraMeta
+    ) -> None:
+        """Write the owned chunk records of ``ref_id`` unless they already exist (idempotent)."""
+        if self._chunker is None or self._owned_chunks(ref_id):
+            return
+        chunks = self._chunker.chunk(content, {"source": source})
+        chunk_ids = self._index_code_chunks(ref_id, chunks, session_id, checkpoint, source, extra)
         if chunk_ids:
             self._vector_store.update_metadata(ref_id, {"chunk_refs": ",".join(chunk_ids)})
 
-        for old in old_canonicals:
+    def _supersede_other_snapshots(self, ref_id: str, source: str) -> None:
+        """Make ``ref_id`` the only live snapshot of ``source`` (idempotent; a no-op without a source).
+
+        Every other live canonical is marked first, then loses its owned chunk
+        records, so an interruption between the two steps leaves a state a
+        retry completes rather than one with two live snapshots.
+        """
+        if not source:
+            return
+        others = [m for m in self._live_code_canonicals(source) if m.ref_id != ref_id]
+        if not others:
+            return
+        canonical = self._vector_store.get_by_id(ref_id)
+        if canonical is not None and not canonical.supersedes:
+            newest = max(others, key=lambda m: m.timestamp)
+            self._vector_store.update_metadata(ref_id, {"supersedes": newest.ref_id})
+        for old in others:
             self._mark_superseded(old.ref_id, ref_id)
+        for old in others:
             self._delete_owned_chunks(old)
-        return ref_id
 
     def _live_code_canonicals(self, source: str) -> list[Memory]:
         """Live (not superseded) canonical `code` records for ``source``, chunk records excluded."""

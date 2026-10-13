@@ -349,3 +349,65 @@ def test_chunk_hit_must_satisfy_the_query_through_its_owner() -> None:
         store.update_metadata(chunk.ref_id, {"session_id": "other"})
     hits = {r.ref_id for r in svc.recall("OLDMARKER-7731", session_id="other", top_k=5)}
     assert not any(r.startswith(f"{ref}-chunk-") for r in hits)
+
+
+class FlakyEmbedding(MockEmbedding):
+    """Fails on batches (the chunk index) while ``fail`` is set; single texts (the canonical) always succeed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail = False
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if self.fail and len(texts) > 1:
+            raise RuntimeError("embedding backend down")
+        return super().embed(texts)
+
+
+def test_failed_chunk_index_is_compensated_and_a_retry_converges() -> None:
+    embedding = FlakyEmbedding()
+    svc, store, _ = _build(embedding=embedding)
+    v1 = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    before = store.count()
+    embedding.fail = True
+    with pytest.raises(RuntimeError, match="backend down"):
+        svc.retain(V2, MemoryType.CODE, source="src/a.py")
+    # nothing half-written: v1 is still the only live snapshot, with its chunks
+    assert store.count() == before
+    assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [v1]  # noqa: SLF001
+    assert len(_chunks_of(store, v1)) == 2
+    embedding.fail = False
+    v2 = svc.retain(V2, MemoryType.CODE, source="src/a.py")
+    assert v2 != v1
+    assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [v2]  # noqa: SLF001
+    assert (svc.get(v1, touch=False) or None) is not None and svc.get(v1, touch=False).superseded_by == v2  # type: ignore[union-attr]
+    assert len(_chunks_of(store, v2)) == 2 and _chunks_of(store, v1) == []
+
+
+def test_dedup_hit_finishes_an_interrupted_retain() -> None:
+    """A canonical written without chunks or supersession (crash mid-retain) is completed by the next retain."""
+    svc, store, _ = _build()
+    v1 = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    sample = store.list_all()[0]
+    half = "half-written-v2"
+    store.upsert(
+        ref_id=half,
+        content=V2,
+        embedding=MockEmbedding().embed([V2])[0],
+        metadata={
+            "project_id": sample.project_id,
+            "session_id": "default",
+            "timestamp": sample.timestamp.isoformat(),
+            "type": "code",
+            "source": "src/a.py",
+            "hash": __import__("memkernel.memory.dedup", fromlist=["compute_content_hash"]).compute_content_hash(V2),
+            "token_count": 1,
+        },
+    )
+    assert {m.ref_id for m in svc._live_code_canonicals("src/a.py")} == {v1, half}  # noqa: SLF001
+    assert svc.retain(V2, MemoryType.CODE, source="src/a.py") == half
+    assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [half]  # noqa: SLF001
+    assert len(_chunks_of(store, half)) == 2 and _chunks_of(store, v1) == []
+    half_memory, v1_memory = svc.get(half, touch=False), svc.get(v1, touch=False)
+    assert half_memory is not None and half_memory.supersedes == v1 and half_memory.chunk_refs
+    assert v1_memory is not None and v1_memory.superseded_by == half
