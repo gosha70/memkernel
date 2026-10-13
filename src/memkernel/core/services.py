@@ -22,6 +22,15 @@ from memkernel.core.models import (
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    HEALTH_CATEGORIES,
+    HEALTH_DANGLING_LINKS,
+    HEALTH_EXPIRED_PRESENT,
+    HEALTH_NEAR_DUPLICATES,
+    HEALTH_NEEDS_REVIEW,
+    HEALTH_ORPHANS,
+    HEALTH_STALE_SOURCES,
+    HEALTH_UNMARKED_SUPERSESSIONS,
+    LONG_TERM_TYPE_VALUES,
     NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
     REVIEW_REASON_CHANGED,
@@ -30,6 +39,8 @@ from memkernel.core.models import (
     SUPERSEDED_BY_KEY,
     Answer,
     ArtifactRef,
+    HealthItem,
+    HealthReport,
     Memory,
     MemoryTier,
     MemoryType,
@@ -886,7 +897,106 @@ class MemoryService:
         }
         if revalidated is not None:
             report["revalidated"] = revalidated
+        report["health"] = self.health(full=False).summary
         return report
+
+    # ------------------------------------------------------------------
+    # Store health (0.4) — read-only
+    # ------------------------------------------------------------------
+
+    def health(self, full: bool = True) -> HealthReport:
+        """Audit the store without changing it.
+
+        Quick mode (``full=False``) reads ids and metadata only and reports
+        orphans, dangling links, unmarked supersessions, stale sources,
+        needs-review and expired-but-present records. Full mode also loads
+        content to find near-duplicate pairs among the most recent live
+        long-term memories (bounded by ``health_duplicate_limit``).
+        """
+        limit = self._settings.health_report_limit
+        records = self._vector_store.list_all(include_content=full)
+        by_id = {m.ref_id: m for m in records}
+        referenced = frozenset(ref for m in records for ref in m.chunk_refs)
+        counts: dict[str, int] = dict.fromkeys(HEALTH_CATEGORIES, 0)
+        items: dict[str, list[HealthItem]] = {category: [] for category in HEALTH_CATEGORIES}
+
+        def add(category: str, ref_id: str, detail: str) -> None:
+            counts[category] += 1
+            if len(items[category]) < limit:
+                items[category].append(HealthItem(ref_id=ref_id, detail=detail))
+
+        owners = {m.document_id for m in records if m.document_id and not _is_document_part(m)}
+        for m in records:
+            if _is_document_part(m) and m.document_id not in owners:
+                add(HEALTH_ORPHANS, m.ref_id, f"document part of {m.document_id} with no owning summary")
+            elif m.parent_ref and m.parent_ref not in by_id:
+                add(HEALTH_ORPHANS, m.ref_id, f"code chunk of missing canonical {m.parent_ref}")
+            for name in ("supersedes", "superseded_by", "promoted_from", "parent_ref"):
+                target = getattr(m, name)
+                if target and target not in by_id:
+                    add(HEALTH_DANGLING_LINKS, m.ref_id, f"{name} -> {target} (missing)")
+            if m.supersedes and m.supersedes in by_id and by_id[m.supersedes].superseded_by is None:
+                add(HEALTH_UNMARKED_SUPERSESSIONS, m.supersedes, f"superseded by {m.ref_id} without superseded_by")
+            is_chunk = _is_code_chunk(m, referenced)
+            if m.type == MemoryType.CODE and m.source and not is_chunk and m.superseded_by is None:
+                path = self._resolve_source(m.source)
+                if path is not None and not path.is_file():
+                    add(HEALTH_STALE_SOURCES, m.ref_id, f"{m.source} does not exist")
+            if m.needs_review and not is_chunk and not _is_document_part(m):
+                add(HEALTH_NEEDS_REVIEW, m.ref_id, f"{m.source or m.type.value}: {m.review_reason}")
+            if m.tier != MemoryTier.LONG_TERM and memory_is_expired(m, self._settings):
+                add(HEALTH_EXPIRED_PRESENT, m.ref_id, f"{m.type.value} expired, not yet purged")
+
+        if full:
+            for first, second, similarity in self._near_duplicates(records, referenced):
+                add(HEALTH_NEAR_DUPLICATES, first, f"~ {second} (cosine {similarity:.3f})")
+
+        return HealthReport(full=full, counts=counts, **items)
+
+    def _near_duplicates(self, records: list[Memory], referenced: frozenset[str]) -> list[tuple[str, str, float]]:
+        """Pairs of live long-term memories (chunks and parts excluded) above the similarity threshold.
+
+        Each candidate is re-embedded and queried against the long-term *type
+        values* (records written before 0.2 carry no tier label); neighbours
+        outside the candidate set and pairs already linked by supersedes,
+        superseded_by or promoted_from are ignored. Complete within the set.
+        """
+        candidates = [
+            m
+            for m in records
+            if m.tier == MemoryTier.LONG_TERM
+            and m.superseded_by is None
+            and not _is_document_part(m)
+            and not _is_code_chunk(m, referenced)
+            and m.content
+        ]
+        candidates.sort(key=lambda m: m.timestamp, reverse=True)
+        candidates = candidates[: self._settings.health_duplicate_limit]
+        if len(candidates) < 2:
+            return []
+        in_set = {m.ref_id for m in candidates}
+        linked: set[frozenset[str]] = set()
+        for m in records:
+            for target in (m.supersedes, m.superseded_by, m.promoted_from):
+                if target:
+                    linked.add(frozenset((m.ref_id, target)))
+        threshold = self._settings.health_duplicate_threshold
+        where: dict[str, Any] = {"type": {"$in": list(LONG_TERM_TYPE_VALUES)}}
+        # Every long-term record (superseded ones, chunks, parts) competes for
+        # result slots, so ask for all of them: completeness within the
+        # candidate set needs the whole neighbourhood, not the top few.
+        top_k = max(2, self._vector_store.count(where=where))
+        embeddings = self._embedding.embed([m.content for m in candidates])
+        pairs: dict[frozenset[str], float] = {}
+        for memory, embedding in zip(candidates, embeddings, strict=True):
+            for hit in self._vector_store.search_dense(embedding, top_k, where):
+                if hit.ref_id == memory.ref_id or hit.ref_id not in in_set or hit.score < threshold:
+                    continue
+                key = frozenset((memory.ref_id, hit.ref_id))
+                if key in linked:
+                    continue
+                pairs[key] = max(pairs.get(key, 0.0), hit.score)
+        return sorted((min(k), max(k), score) for k, score in pairs.items())
 
     # ------------------------------------------------------------------
     # Revalidation of code memories (0.4)

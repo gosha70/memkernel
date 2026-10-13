@@ -42,6 +42,7 @@ HEADING_CHECKPOINT = "### Latest checkpoint"
 HEADING_CONTEXT = "### Long-term context"
 HEADING_CANDIDATES = "### Promotion candidates (short-term memories worth keeping)"
 HEADING_NEEDS_REVIEW = "### Needs review"
+HEADING_STORE_HEALTH = "### Store health"
 HEADING_WIKI = "### Wiki"
 SEPARATOR = "---"
 
@@ -90,6 +91,7 @@ class MemoryLifecycle:
         ]
         lines.extend(_candidates_block(report["candidates"]))
         lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
+        lines.extend(_store_health_block(report.get("health", {})))
         wiki_index = Path(self._settings.wiki_dir) / "index.md" if self._settings.wiki_dir else None
         if wiki_index is not None and wiki_index.is_file():
             lines.extend(
@@ -190,6 +192,22 @@ def _needs_review_block(flagged: list[dict[str, Any]]) -> list[str]:
         *(f"- {f['source']} — {f['reason']} — {f['ref_id']}" for f in flagged),
         _REVIEW_HINT,
     ]
+
+
+_HEALTH_LABELS: tuple[tuple[str, str], ...] = (
+    ("orphans", "orphans"),
+    ("dangling_links", "dangling links"),
+    ("unmarked_supersessions", "unmarked supersessions"),
+    ("stale_sources", "stale sources"),
+    ("needs_review", "needs review"),
+    ("expired_present", "expired"),
+)
+
+
+def _store_health_block(summary: dict[str, int]) -> list[str]:
+    if not any(summary.get(key, 0) for key, _ in _HEALTH_LABELS):
+        return []
+    return ["", HEADING_STORE_HEALTH, ", ".join(f"{label} {summary.get(key, 0)}" for key, label in _HEALTH_LABELS)]
 
 
 def _candidates_block(candidates: list[dict[str, Any]]) -> list[str]:

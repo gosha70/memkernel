@@ -42,14 +42,14 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 13 | | `HealthReport` / `HealthItem` models; `MemoryService.health(full=True)` with the seven categories (incl. `unmarked_supersessions`; stale sources: code only; orphans: document parts and tagged code chunks), bounded items, quick/full split using `list_all(include_content=False)`, near-duplicates over non-chunk candidates filtered on long-term type values with already-linked pairs excluded, complete within the candidate set (FR-009) | `src/memkernel/core/models.py`, `src/memkernel/core/services.py` | build | [ ] |
-| 14 | [P] | `GET /health/store`; `/health` unchanged (FR-010) | `src/memkernel/api/routes/admin.py` | build | [ ] |
-| 15 | [P] | `"health"` summary in `memory://status` and in the `consolidate()` report; `### Store health` line at session start (FR-011, FR-012) | `src/memkernel/mcp/server.py`, `src/memkernel/core/services.py`, `src/memkernel/lifecycle.py` | build | [ ] |
-| 16 | | Unit tests: one seeded defect per category incl. an unmarked legacy supersession and a pre-0.2 record without a tier label found as a neighbour, quick vs full, chunk/part exclusion and linked-pair exclusion from near-duplicates, endpoint, resource, consolidate summary, lifecycle line (FR-014) | `tests/unit/test_health.py`, `tests/unit/test_admin_api.py`, `tests/unit/test_lifecycle_component.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
+| 13 | | `HealthReport` / `HealthItem` models; `MemoryService.health(full=True)` with the seven categories (incl. `unmarked_supersessions`; stale sources: code only; orphans: document parts and tagged code chunks), bounded items, quick/full split using `list_all(include_content=False)`, near-duplicates over non-chunk candidates filtered on long-term type values with already-linked pairs excluded, complete within the candidate set (FR-009) | `src/memkernel/core/models.py`, `src/memkernel/core/services.py` | build | [x] |
+| 14 | [P] | `GET /health/store`; `/health` unchanged (FR-010) | `src/memkernel/api/routes/admin.py` | build | [x] |
+| 15 | [P] | `"health"` summary in `memory://status` and in the `consolidate()` report; `### Store health` line at session start (FR-011, FR-012) | `src/memkernel/mcp/server.py`, `src/memkernel/core/services.py`, `src/memkernel/lifecycle.py` | build | [x] |
+| 16 | | Unit tests: one seeded defect per category incl. an unmarked legacy supersession and a pre-0.2 record without a tier label found as a neighbour, quick vs full, chunk/part exclusion and linked-pair exclusion from near-duplicates, endpoint, resource, consolidate summary, lifecycle line (FR-014) | `tests/unit/test_health.py`, `tests/unit/test_admin_api.py`, `tests/unit/test_lifecycle_component.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [x] |
 
 **Checkpoint US3** — verify before continuing:
-- [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
-- [ ] `health(full=False)` on a 500-memory store completes without embedding calls and without loading content (assert on a counting MockEmbedding and a recording store); `health()` finds all three pairs among three near-identical memories
+- [x] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
+- [x] `health(full=False)` on a 500-memory store completes without embedding calls and without loading content (assert on a counting MockEmbedding and a recording store); `health()` finds all three pairs among three near-identical memories
 
 ---
 

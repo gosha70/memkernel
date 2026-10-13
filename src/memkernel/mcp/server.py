@@ -9,13 +9,12 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.server import Context  # noqa: TC002 — runtime import for introspection
 
 from memkernel.config import MemKernelSettings
 from memkernel.factory import build_service
@@ -68,16 +67,21 @@ def create_server(
 
 
 def _register_health_resource(server: FastMCP[MemKernelContext]) -> None:
+    # No parameters: FastMCP registers any function with parameters (a
+    # `ctx` included) as a URI *template*, which made memory://status
+    # unreadable as a concrete resource in 0.1–0.3. The request-scoped
+    # context comes from server.get_context() instead.
     @server.resource("memory://status")
-    async def status(ctx: Context[Any, MemKernelContext]) -> str:
-        """Server health and memory statistics."""
-        app_ctx: MemKernelContext = ctx.request_context.lifespan_context
+    async def status() -> str:
+        """Server health, memory count and the quick store-health summary."""
+        app_ctx: MemKernelContext = server.get_context().request_context.lifespan_context
         count = app_ctx.memory_service.count()
         return json.dumps(
             {
                 "status": "ok",
                 "project_id": app_ctx.settings.project_id,
                 "memory_count": count,
+                "health": app_ctx.memory_service.health(full=False).summary,
             }
         )
 

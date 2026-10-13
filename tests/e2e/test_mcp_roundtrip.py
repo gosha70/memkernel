@@ -458,3 +458,27 @@ async def test_code_reretain_supersedes_previous_snapshot() -> None:
         assert old_record["content"] == v1 and old_record["superseded_by"] == new
         r = await client.call_tool("get", arguments={"ref_id": new})
         assert json.loads(_text(r))["supersedes"] == old
+
+
+@pytest.mark.e2e
+async def test_status_resource_carries_health_summary() -> None:
+    """US3 (0.4): memory://status reports the quick health summary; the tool set stays at nine."""
+    settings = _test_settings()
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+    async with create_connected_server_and_client_session(server) as client:
+        await client.call_tool("retain", arguments={"content": "Use arq", "type": "decision", "supersedes": "ghost"})
+        resource = await client.read_resource("memory://status")
+        payload = json.loads(resource.contents[0].text)  # type: ignore[union-attr]
+        assert payload["status"] == "ok"
+        assert payload["health"]["dangling_links"] == 1
+        assert set(payload["health"]) >= {
+            "orphans",
+            "stale_sources",
+            "needs_review",
+            "expired_present",
+            "near_duplicates",
+        }
+        r = await client.call_tool("consolidate", arguments={})
+        assert json.loads(_text(r))["health"]["dangling_links"] == 1
+        tools = await client.list_tools()
+        assert len(tools.tools) == 9
