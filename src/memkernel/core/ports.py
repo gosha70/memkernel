@@ -37,10 +37,16 @@ class VectorStorePort(Protocol):
 
     def delete(self, ref_id: str) -> bool: ...
 
-    def list_all(self, where: dict[str, Any] | None = None) -> list[Memory]: ...
+    def list_all(self, where: dict[str, Any] | None = None, include_content: bool = True) -> list[Memory]:
+        """All records matching ``where``; ``include_content=False`` fetches ids and metadata only (content empty)."""
+        ...
 
-    def find_by_hash(self, content_hash: str, memory_type: str) -> Memory | None:
-        """Find by content_hash + type (dedup key per ADR-5)."""
+    def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
+        """Find by content_hash + type, optionally + source (dedup key per ADR-5 / 0.4 sourced-code identity).
+
+        Never returns a code chunk record (a single-chunk file cannot shadow its
+        canonical) nor a superseded record (history is not a dedup hit).
+        """
         ...
 
     def update_metadata(self, ref_id: str, metadata: dict[str, Any]) -> None:

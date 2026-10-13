@@ -40,6 +40,14 @@ class MemKernelSettings(BaseSettings):
     reasoner: Literal["local", "rlmstudio"] = "local"  # ReasonerPort behind ask(); falls back to local
     ask_top_k: int = 5  # chunks the local reasoner returns per ask()
 
+    # Sources, revalidation and store health (0.4)
+    project_root: str = "."  # relative `source` paths resolve under this directory; nothing outside it is read
+    health_duplicate_threshold: float = (
+        0.95  # cosine similarity in [0, 1] from which two long-term memories are near-duplicates
+    )
+    health_duplicate_limit: int = 500  # most recent long-term memories checked for near-duplicates
+    health_report_limit: int = 20  # items listed per health category
+
     # Lifecycle / decay (see docs/architecture/memory-tiers.md)
     episode_ttl_days: int = 30  # base TTL for short-term `episode` memories
     observation_ttl_days: int = 7  # base TTL for short-term `observation` memories

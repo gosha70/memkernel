@@ -428,3 +428,57 @@ async def test_document_roundtrip_retain_ask_recall() -> None:
         result = await client.call_tool("recall", arguments={"query": "QUETZALCOATL-7741", "tier": "long_term"})
         refs = json.loads(_text(result))
         assert [r["ref_id"] for r in refs] == [ref_id]
+
+
+@pytest.mark.e2e
+async def test_code_reretain_supersedes_previous_snapshot() -> None:
+    """US1 (0.4): re-retaining a changed file replaces the old snapshot in recall; the old record survives, hidden."""
+    settings = _test_settings()
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+    v1 = "def shared():\n    return 1\n\ndef only_v1():\n    return 'OLDMARKER-7731'\n"
+    v2 = "def shared():\n    return 1\n\ndef only_v2():\n    return 'NEWMARKER-9902'\n"
+
+    async with create_connected_server_and_client_session(server) as client:
+        r = await client.call_tool("retain", arguments={"content": v1, "type": "code", "source": "src/app.py"})
+        old = json.loads(_text(r))["ref_id"]
+        r = await client.call_tool("retain", arguments={"content": v1, "type": "code", "source": "src/app.py"})
+        assert json.loads(_text(r))["ref_id"] == old  # identical content, same path: same record
+        r = await client.call_tool("retain", arguments={"content": v2, "type": "code", "source": "src/app.py"})
+        new = json.loads(_text(r))["ref_id"]
+        assert new != old
+
+        r = await client.call_tool("recall", arguments={"query": "OLDMARKER-7731", "top_k": 5})
+        assert old not in {x["ref_id"] for x in json.loads(_text(r))}
+        r = await client.call_tool("recall", arguments={"query": "NEWMARKER-9902", "type": "code", "top_k": 5})
+        hits = [x["ref_id"] for x in json.loads(_text(r))]
+        assert hits and all(h == new or h.startswith(f"{new}-chunk-") for h in hits)
+
+        r = await client.call_tool("get", arguments={"ref_id": old})
+        old_record = json.loads(_text(r))
+        assert old_record["content"] == v1 and old_record["superseded_by"] == new
+        r = await client.call_tool("get", arguments={"ref_id": new})
+        assert json.loads(_text(r))["supersedes"] == old
+
+
+@pytest.mark.e2e
+async def test_status_resource_carries_health_summary() -> None:
+    """US3 (0.4): memory://status reports the quick health summary; the tool set stays at nine."""
+    settings = _test_settings()
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+    async with create_connected_server_and_client_session(server) as client:
+        await client.call_tool("retain", arguments={"content": "Use arq", "type": "decision", "supersedes": "ghost"})
+        resource = await client.read_resource("memory://status")
+        payload = json.loads(resource.contents[0].text)  # type: ignore[union-attr]
+        assert payload["status"] == "ok"
+        assert payload["health"]["dangling_links"] == 1
+        assert set(payload["health"]) >= {
+            "orphans",
+            "stale_sources",
+            "needs_review",
+            "expired_present",
+            "near_duplicates",
+        }
+        r = await client.call_tool("consolidate", arguments={})
+        assert json.loads(_text(r))["health"]["dangling_links"] == 1
+        tools = await client.list_tools()
+        assert len(tools.tools) == 9

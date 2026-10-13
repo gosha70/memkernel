@@ -98,16 +98,15 @@ class WikiExporter:
         """Write one page per exportable memory that is not already a wiki page.
 
         Memories that came from the wiki (tagged ``wiki``), chunk records, or
-        memories a newer memory supersedes are skipped. Existing pages with
+        memories a newer memory supersedes (``superseded_by`` set) are skipped. Existing pages with
         the same slug are left untouched: the wiki, once written, is curated
         by humans/agents, not overwritten by the store.
         """
         report = ExportReport()
         candidates = memories if memories is not None else self._service.list_memories(tier=MemoryTier.LONG_TERM)
-        superseded = {m.supersedes for m in candidates if m.supersedes}
         for memory in candidates:
             mapping = EXPORT_MAP.get(memory.type)
-            if mapping is None or WIKI_TAG in memory.tags or memory.ref_id in superseded or memory.chunk_refs:
+            if mapping is None or WIKI_TAG in memory.tags or memory.superseded_by or memory.chunk_refs:
                 report.skipped += 1
                 continue
             page_type, directory = mapping

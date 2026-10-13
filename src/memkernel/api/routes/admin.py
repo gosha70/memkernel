@@ -1,6 +1,6 @@
 # Copyright (c) 2026 EGOGE
 # SPDX-License-Identifier: Apache-2.0
-"""Admin API route handlers: /health, /stats, /collections."""
+"""Admin API route handlers: /health, /health/store, /stats, /collections, /revalidate."""
 
 from __future__ import annotations
 
@@ -30,6 +30,14 @@ async def health(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/health/store")
+async def health_store(request: Request) -> dict[str, Any]:
+    """Read-only store health report: orphans, dangling links, stale sources, near-duplicates and more."""
+    svc = _svc(request)
+    report = svc.health()
+    return {**report.model_dump(mode="json"), "summary": report.summary}
+
+
 @router.get("/stats")
 async def stats(request: Request) -> dict[str, Any]:
     """Memory metrics: per-type breakdown, growth by time window, last recall latency."""
@@ -42,3 +50,10 @@ async def collections(request: Request) -> list[dict[str, Any]]:
     """List all project collections with record counts."""
     svc = _svc(request)
     return svc.list_collections()
+
+
+@router.post("/revalidate")
+async def revalidate(request: Request) -> dict[str, Any]:
+    """Check every code memory against its source file; flag changed or missing ones (needs_review)."""
+    svc = _svc(request)
+    return svc.revalidate()

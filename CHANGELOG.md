@@ -6,12 +6,58 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
 ### Added
 
+- Revalidation of `code` memories: `MemoryService.revalidate()` hashes each
+  live snapshot's whole source file (inside the `MEMKERNEL_PROJECT_ROOT`
+  boundary) against the stored content hash and flags `needs_review` with
+  reason `changed` or `missing`; a matching file clears the flag. Flagged
+  memories leave default `recall` (`include_needs_review=true` shows them).
+  Runs from `consolidate(revalidate=true)`, at session start
+  (`### Needs review` section) and from `POST /revalidate`.
+- Read-only store health pass: `MemoryService.health()` reports orphans,
+  dangling links, unmarked supersessions, stale sources, needs-review,
+  expired-but-present records and, in full mode, near-duplicate pairs among
+  recent long-term memories. Exposed as `GET /health/store`, as a counts
+  summary in `memory://status` and in every `consolidate()` report, and as a
+  `### Store health` line at session start.
+- Durable supersession: a replaced record carries `superseded_by`, which
+  recall, `list_memories`, `consolidate` and the wiki exporter honour
+  regardless of the search window; owner-specific code chunk records
+  (`<canonical>-chunk-<n>`, `code_chunk`, `parent_ref`).
+- Port additions for adapter authors: `VectorStorePort.find_by_hash(...,
+  source=None)` (never returns a chunk record) and
+  `VectorStorePort.list_all(..., include_content=True)`.
+- Settings `MEMKERNEL_PROJECT_ROOT`, `MEMKERNEL_HEALTH_DUPLICATE_THRESHOLD`,
+  `MEMKERNEL_HEALTH_DUPLICATE_LIMIT`, `MEMKERNEL_HEALTH_REPORT_LIMIT`;
+  `Memory.needs_review`, `review_reason`, `superseded_by`, `parent_ref`
+  (older stores load with defaults).
 - `templates/kiro/`: MCP server entry, always-on steering file and lifecycle
   hooks (`SessionStart`, `Stop`, manual checkpoint) for Kiro and the Kiro CLI,
   with a README covering custom agents and the legacy Amazon Q Developer CLI;
   README section "Add to Kiro".
+
+### Changed
+
+- `retain(type="code")` behaviour: a sourced snapshot is identified by
+  `(source, content_hash)`, so identical content under another path is its
+  own record, and retaining a changed file **supersedes** every live snapshot
+  of that path instead of adding a second live record (the old record stays,
+  hidden; its chunk records are removed). A dedup hit embeds nothing.
+- `recall` gains `include_needs_review`; `consolidate` gains `revalidate`
+  and its report always carries `health` (counts) and, when requested,
+  `revalidated`; `list_memories` hides superseded records unless
+  `include_superseded=True`.
+- Hook templates and `templates/kiro/settings/mcp.json` set
+  `MEMKERNEL_PROJECT_ROOT`.
+
+### Fixed
+
+- `memory://status` was registered as a URI template since 0.1 (its handler
+  took a `ctx` parameter) and could not be read as a resource; it is now a
+  concrete resource.
 
 ## [0.3.0] - 2026-10-11
 

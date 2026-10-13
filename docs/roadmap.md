@@ -39,7 +39,8 @@ Updated 2026-10-11. Ordered by dependency, not by date.
       (document-assistant `context_firewall`)
 - [ ] Token-budgeted hook output (rlm-studio `history_context`)
 - [ ] Near-duplicate merge by embedding distance at `retain` time
-      (the cheap "surprise" gate; Titans / JEPA proxy)
+      (the cheap "surprise" gate; Titans / JEPA proxy) — 0.4 reports pairs
+      read-only in `health()`; the merge gate is still open
 - [ ] Optional cross-encoder reranker behind a port
 - [ ] `memkernel retain|recall|consolidate --json` CLI for non-MCP harnesses
       (Pi, Codex, haa scripts)
@@ -64,7 +65,20 @@ Order is by dependency. A step starts when the one it depends on has a
 Steps 2 and 3 run in parallel with 1. Step 8 is last because nothing above
 is blocked on it.
 
-## 0.4 — ecosystem
+## 0.4 — code revalidation, store health (shipped)
+
+- [x] `MemoryService.revalidate()`: whole-file hash check of `code` snapshots,
+      `needs_review` flag, recall exclusion, `consolidate(revalidate=True)`,
+      session-start section, `POST /revalidate`
+- [x] Sourced-code identity `(source, hash)`, owner-specific chunk records,
+      automatic supersession by path with a durable `superseded_by` marker
+- [x] `MemoryService.health()`: orphans, dangling links, unmarked supersessions,
+      stale sources, needs-review, expired-but-present, near-duplicates;
+      `GET /health/store`, summary in `memory://status` and `consolidate()`
+- [ ] Health fix mode (first action: backfill `superseded_by` for 0.2/0.3 links)
+- [ ] Per-chunk range invalidation (0.4 hashes whole files)
+
+## 0.5 — ecosystem
 
 - [ ] `ai-wiki`: extract CCT's `knowledge/wiki/schema`, linter and
       `scripts/wiki_ingest` into a stdlib-only package; `memkernel[wiki]`
@@ -82,7 +96,8 @@ is blocked on it.
       consolidation (Letta) — opt-in extra, never required
 - [ ] Bi-temporal validity intervals (`valid_from`/`valid_to`) beyond the
       single `supersedes` link (Zep/Graphiti)
-- [ ] Git-diff-driven invalidation of `code` memories
+- [x] Git-diff-driven invalidation of `code` memories — shipped in 0.4 as
+      whole-file hash revalidation (no git dependency); per-chunk ranges open
 - [ ] Graph layer with passage nodes and Personalized PageRank for multi-hop
       recall (HippoRAG 2) — only if flat recall shows multi-hop failures
 - [ ] Next-state-embedding predictor over harness traces for retrieval

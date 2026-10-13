@@ -63,12 +63,15 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         session_id: str | None = None,
         checkpoint_only: bool = False,
         top_k: int | None = None,
+        include_needs_review: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Search memories by query. Returns ref_id + preview pairs ranked by relevance,
         recency and importance. Use get(ref_id) for full content.
 
         tier: working | short_term | long_term to restrict the search to one tier.
+        include_needs_review: also return code memories whose source file changed or
+        vanished since they were retained (flagged by revalidation; hidden by default).
         """
         svc = _service(ctx)
         results = svc.recall(
@@ -78,6 +81,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
             session_id=session_id,
             checkpoint_only=checkpoint_only,
             top_k=top_k,
+            include_needs_review=include_needs_review,
         )
         return json.dumps([ref.model_dump(mode="json") for ref in results])
 
@@ -133,6 +137,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         session_id: str | None = None,
         limit: int = 20,
         synthesize: bool = False,
+        revalidate: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Run a consolidation pass: purge expired short-term memories and return the
@@ -140,9 +145,13 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         often they were recalled). Call promote(ref_id, type, content) for the keepers.
         synthesize=true also asks the configured external reasoner to draft long-term
         statements under "suggested" (empty with the built-in local reasoner).
+        revalidate=true first checks every code memory against its source file and
+        flags changed or missing ones (report under "revalidated").
         """
         svc = _service(ctx)
-        return json.dumps(svc.consolidate(session_id=session_id, limit=limit, synthesize=synthesize))
+        return json.dumps(
+            svc.consolidate(session_id=session_id, limit=limit, synthesize=synthesize, revalidate=revalidate)
+        )
 
     @server.tool()
     async def ask(

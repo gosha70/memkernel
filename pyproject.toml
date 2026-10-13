@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "memkernel"
-version = "0.3.0"
+version = "0.4.0"
 description = "Code-aware memory server for AI coding copilots"
 authors = ["EGOGE"]
 license = "Apache-2.0"

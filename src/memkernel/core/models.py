@@ -95,10 +95,46 @@ DOCUMENT_PART_KEY = "document_part"
 ASK_MODES: tuple[str, ...] = ("direct", "rag", "rlm", "auto")
 DEFAULT_ASK_MODE = "auto"
 
+# Chunk records of a `code` memory (0.4): owner-specific index entries, never
+# deduplicated by content, tagged and linked to their canonical record.
+CODE_CHUNK_TAG = "code_chunk"
+CODE_CHUNK_KEY = "code_chunk"  # boolean metadata so adapters can skip chunk records
+PARENT_REF_KEY = "parent_ref"
+# Durable liveness marker (0.4): set on a record that another record replaced.
+SUPERSEDED_BY_KEY = "superseded_by"
+# Revalidation flags (0.4).
+NEEDS_REVIEW_KEY = "needs_review"
+REVIEW_REASON_KEY = "review_reason"
+REVIEW_REASON_CHANGED = "changed"
+REVIEW_REASON_MISSING = "missing"
+
 
 def tier_of(memory_type: MemoryType) -> MemoryTier:
     """Return the tier a memory type belongs to."""
     return TYPE_TIER[memory_type]
+
+
+# Type values of the long-term tier: the health pass filters neighbours on
+# these, never on the `tier` key, which records written before 0.2 lack.
+LONG_TERM_TYPE_VALUES: tuple[str, ...] = tuple(t.value for t, tier in TYPE_TIER.items() if tier == MemoryTier.LONG_TERM)
+
+# Health report categories (0.4), in report order.
+HEALTH_ORPHANS = "orphans"
+HEALTH_DANGLING_LINKS = "dangling_links"
+HEALTH_UNMARKED_SUPERSESSIONS = "unmarked_supersessions"
+HEALTH_STALE_SOURCES = "stale_sources"
+HEALTH_NEEDS_REVIEW = "needs_review"
+HEALTH_EXPIRED_PRESENT = "expired_present"
+HEALTH_NEAR_DUPLICATES = "near_duplicates"
+HEALTH_CATEGORIES: tuple[str, ...] = (
+    HEALTH_ORPHANS,
+    HEALTH_DANGLING_LINKS,
+    HEALTH_UNMARKED_SUPERSESSIONS,
+    HEALTH_STALE_SOURCES,
+    HEALTH_NEEDS_REVIEW,
+    HEALTH_EXPIRED_PRESENT,
+    HEALTH_NEAR_DUPLICATES,
+)
 
 
 class Memory(BaseModel):
@@ -127,6 +163,43 @@ class Memory(BaseModel):
     # Set on a ``document`` summary record and on the body/chunk records the
     # document store keeps for it (ADR-009).
     document_id: str | None = None
+    # 0.4: durable marker on a replaced record; owner link on a code chunk
+    # record; revalidation flags. All load with defaults from older stores.
+    superseded_by: str | None = None
+    parent_ref: str | None = None
+    needs_review: bool = False
+    review_reason: str = ""
+
+
+class HealthItem(BaseModel):
+    """One finding of the store health pass.
+
+    For ``near_duplicates`` an item is one pair: ``ref_id`` is the
+    lexicographically smaller id and ``detail`` is ``"~ <other id> (cosine x)"``;
+    neither side is "the original".
+    """
+
+    ref_id: str
+    detail: str
+
+
+class HealthReport(BaseModel):
+    """Read-only store health report: per category, every finding counted and up to a bounded number listed."""
+
+    full: bool = True
+    counts: dict[str, int] = {}
+    orphans: list[HealthItem] = []
+    dangling_links: list[HealthItem] = []
+    unmarked_supersessions: list[HealthItem] = []
+    stale_sources: list[HealthItem] = []
+    needs_review: list[HealthItem] = []
+    expired_present: list[HealthItem] = []
+    near_duplicates: list[HealthItem] = []
+
+    @property
+    def summary(self) -> dict[str, int]:
+        """``{category: count}`` — the counts-only view used by the status resource and consolidate reports."""
+        return dict(self.counts)
 
 
 class ReasonerError(RuntimeError):
