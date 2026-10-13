@@ -44,7 +44,8 @@ class VectorStorePort(Protocol):
     def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
         """Find by content_hash + type, optionally + source (dedup key per ADR-5 / 0.4 sourced-code identity).
 
-        Never returns a code chunk record, so a single-chunk file cannot shadow its canonical.
+        Never returns a code chunk record (a single-chunk file cannot shadow its
+        canonical) nor a superseded record (history is not a dedup hit).
         """
         ...
 

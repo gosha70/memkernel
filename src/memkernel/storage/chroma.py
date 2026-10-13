@@ -231,10 +231,12 @@ class ChromaVectorStore:
         return [_memory_from_chroma(ids, documents, metadatas, i) for i in range(len(ids))]
 
     def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
-        """Find a memory by content hash + type (+ source). Returns the first non-chunk match or None.
+        """Find a memory by content hash + type (+ source). Returns the first live non-chunk match or None.
 
         Code chunk records (``code_chunk: true``) are skipped so that a file
-        whose single chunk equals the whole file cannot shadow its canonical.
+        whose single chunk equals the whole file cannot shadow its canonical;
+        superseded records (``superseded_by`` set) are history, not dedup hits,
+        so re-retaining reverted content creates a new live record.
         """
         conditions: list[dict[str, Any]] = [{"hash": content_hash}, {"type": memory_type}]
         if source is not None:
@@ -247,8 +249,8 @@ class ChromaVectorStore:
         metadatas: list[Mapping[str, Any]] = list(raw_metas) if raw_metas is not None else []
 
         for index, meta in enumerate(metadatas):
-            if meta.get(CODE_CHUNK_KEY) is True:
-                continue
+            if meta.get(CODE_CHUNK_KEY) is True or meta.get(SUPERSEDED_BY_KEY):
+                continue  # chunk records and superseded (historical) records are never dedup hits
             return _memory_from_chroma(ids, documents, metadatas, index)
         return None
 
