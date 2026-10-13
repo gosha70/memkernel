@@ -292,3 +292,37 @@ def test_retain_code_without_chunker_has_no_chunks() -> None:
     assert store.count() == 1
     memory = svc.get(ref, touch=False)
     assert memory is not None and memory.chunk_refs == [] and memory.tier == MemoryTier.LONG_TERM
+
+
+# --------------------------------------------------------------------------
+# PR #12 round 2: reverted content, dedup refresh, split-brain, superseded owners
+# --------------------------------------------------------------------------
+
+
+def test_reverting_a_file_creates_a_new_live_record_not_the_superseded_one() -> None:
+    svc, store, _ = _build()
+    v1 = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    v2 = svc.retain(V2, MemoryType.CODE, source="src/a.py")
+    back = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    assert back not in (v1, v2)
+    live = [m.ref_id for m in svc._live_code_canonicals("src/a.py")]  # noqa: SLF001
+    assert live == [back]
+    # provenance chain: v1 was replaced by v2, v2 by the reverted record
+    v1_memory, v2_memory = svc.get(v1, touch=False), svc.get(v2, touch=False)
+    assert v1_memory is not None and v1_memory.superseded_by == v2
+    assert v2_memory is not None and v2_memory.superseded_by == back
+    assert (svc.get(back, touch=False) or None) is not None and svc.get(back, touch=False).supersedes == v2  # type: ignore[union-attr]
+    assert len(_chunks_of(store, back)) == 2 and _chunks_of(store, v1) == [] and _chunks_of(store, v2) == []
+    hits = {r.ref_id for r in svc.recall("OLDMARKER-7731", top_k=5)}
+    assert hits and all(h == back or h.startswith(f"{back}-chunk-") for h in hits)
+
+
+def test_superseded_record_of_any_type_is_not_a_dedup_hit() -> None:
+    svc, _, _ = _build()
+    old = svc.retain("Use Celery", MemoryType.DECISION)
+    new = svc.retain("Use arq", MemoryType.DECISION, supersedes=old)
+    again = svc.retain("Use Celery", MemoryType.DECISION)
+    assert again != old
+    memory = svc.get(again, touch=False)
+    assert memory is not None and memory.superseded_by is None
+    assert (svc.get(old, touch=False) or None) is not None and svc.get(old, touch=False).superseded_by == new  # type: ignore[union-attr]
