@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import zlib
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -40,7 +41,9 @@ class SlotEmbedding(MockEmbedding):
         self.calls += len(texts)
         out = []
         for text in texts:
-            slot = (hash(text.split(" ", 1)[0]) if text else 0) % 8
+            # zlib.crc32, not hash(): the built-in is salted per process, so
+            # two words could share a slot on one CI run and not the next.
+            slot = (zlib.crc32(text.split(" ", 1)[0].encode()) if text else 0) % 8
             out.append([1.0 if i == slot else 0.0 for i in range(8)])
         return out
 

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/gosha70/memkernel/main/docs/assets/memkernel-logo.png" alt="MemKernel logo: a glowing memory core on three stacked tiers" width="220">
+</p>
+
 # MemKernel
 
 [![CI](https://github.com/gosha70/memkernel/actions/workflows/ci.yml/badge.svg)](https://github.com/gosha70/memkernel/actions/workflows/ci.yml)
@@ -19,22 +23,32 @@ MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory a
 
 ## Requirements
 
-- Python 3.11 – 3.13
+- Python 3.11 – 3.13 (the package declares `Requires-Python >=3.11,<3.14`; pip reports "from versions: none" when the installing interpreter is outside that range)
 - [Poetry](https://python-poetry.org) (for development installs)
 
 ---
 
 ## Install
 
-```bash
-pip install memkernel
-```
+MemKernel is a Python package on PyPI. Its `memkernel` command is the MCP server. There is no npm package: an `npx` install someone suggests is a hallucination.
 
-Or with Poetry:
+**Recommended: an isolated install with [pipx](https://pipx.pypa.io)**, which puts the `memkernel` command on your PATH without touching any other Python environment:
 
 ```bash
-poetry add memkernel
+pipx install memkernel
+# if pipx's default interpreter is outside 3.11–3.13:
+pipx install --python python3.11 memkernel
 ```
+
+**As a library inside a project**, install it into that project's virtual environment:
+
+```bash
+pip install memkernel        # or: poetry add memkernel
+```
+
+Avoid a plain `pip install memkernel` into a shared or system interpreter (Homebrew's `python3`, for example). MemKernel pins `chromadb` 1.x and recent `cffi`, so pip will replace older copies and can break unrelated tools that need them.
+
+Verify the install with `pipx list` or `which memkernel`. Running `memkernel` with no arguments starts the MCP server on stdio and waits for a client; `memkernel --version` and `memkernel --help` print and exit.
 
 ---
 
@@ -48,17 +62,29 @@ Add MemKernel to `.claude/settings.json` in your project:
 {
   "mcpServers": {
     "memkernel": {
-      "command": "memkernel",
+      "command": "/Users/you/.local/bin/memkernel",
       "args": [],
       "env": {
-        "MEMKERNEL_PROJECT_ID": "my-project"
+        "MEMKERNEL_PROJECT_ID": "my-project",
+        "MEMKERNEL_CHROMA_PERSIST_PATH": "/Users/you/.memkernel/my-project"
       }
     }
   }
 }
 ```
 
-Replace `my-project` with a short identifier for the project — memories are isolated per project.
+Replace `my-project` with a short identifier for the project — memories are isolated per project. Use the absolute path of the command (`which memkernel` prints it) because Claude Code does not necessarily see the PATH changes your shell profile makes, and an absolute `MEMKERNEL_CHROMA_PERSIST_PATH` keeps the store outside the repository. On first server initialization, MemKernel downloads the embedding model (about 90 MB) if it is not already cached: `build_service()` loads the sentence-transformers model when the MCP server starts, before any tool call, so the first connection can take a minute. Later starts and every tool call are fast.
+
+<details>
+<summary>Troubleshooting the install</summary>
+
+- **`pipx install memkernel` says "No matching distribution found"** — pipx used an interpreter outside 3.11–3.13. Pass one explicitly: `pipx install --python /opt/homebrew/opt/python@3.11/bin/python3.11 memkernel`.
+- **`bash: /some/old/path/memkernel: No such file or directory`** right after reinstalling — the shell cached the old location. Run `hash -r` (bash) or `rehash` (zsh), then `which memkernel`.
+- **`memkernel --help` seems to hang** on versions before 0.4.0 — the command had no flags and started the server; press Ctrl-C. From 0.4.0 on, `--help` and `--version` print and exit.
+- **The first MCP connection is slow or times out** — the server is downloading the embedding model at startup (see above). Wait for it once, or pre-warm it with `python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"` in the same environment.
+- **A global pip install broke another tool** (for example `langchain-chroma` wanting `chromadb < 0.6`) — uninstall memkernel from that interpreter, reinstall the versions the other tool needs, and install memkernel with pipx instead.
+
+</details>
 
 ### 2. Add memory instructions to CLAUDE.md
 
