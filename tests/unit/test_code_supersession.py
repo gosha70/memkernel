@@ -483,3 +483,22 @@ def test_interrupted_old_chunk_cleanup_is_finished_by_the_retry() -> None:
     assert _chunks_of(store, v1) == []
     assert len(_chunks_of(store, v2)) == 2
     assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [v2]  # noqa: SLF001
+
+
+def test_dedup_refresh_propagates_importance_and_tags_to_owned_chunks() -> None:
+    embedding = CountingEmbedding()
+    svc, store, _ = _build(embedding=embedding)
+    ref = svc.retain(V1, MemoryType.CODE, source="src/a.py", importance=0.5, tags=["a"])
+    chunks = _chunks_of(store, ref)
+    assert {c.importance for c in chunks} == {0.5} and all(c.tags == ["a", "code_chunk"] for c in chunks)
+    embedded = embedding.texts
+    assert svc.retain(V1, MemoryType.CODE, source="src/a.py", importance=1.0, tags=["b"]) == ref
+    assert embedding.texts == embedded  # metadata only, nothing re-embedded
+    canonical = svc.get(ref, touch=False)
+    assert canonical is not None and canonical.importance == 1.0 and canonical.tags == ["a", "b"]
+    chunks = _chunks_of(store, ref)
+    assert {c.importance for c in chunks} == {1.0}
+    assert all(c.tags == ["a", "b", "code_chunk"] for c in chunks)
+    # recall hits on the chunks rank with the new importance
+    hits = [r for r in svc.recall("OLDMARKER-7731", top_k=5) if r.ref_id.startswith(f"{ref}-chunk-")]
+    assert hits and all(r.importance == 1.0 for r in hits)

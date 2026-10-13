@@ -424,10 +424,30 @@ class MemoryService:
         return self._vector_store.list_all({PARENT_REF_KEY: parent_ref}, include_content=False)
 
     def _refresh_owned_chunks(self, parent_ref: str, session_id: str, checkpoint: bool) -> None:
-        """A dedup refresh moves the canonical to the new session: its owned chunks follow."""
-        update = {"session_id": session_id, "timestamp": datetime.now(UTC).isoformat(), "checkpoint": checkpoint}
+        """A dedup refresh of a canonical is mirrored on its owned chunks, without re-embedding.
+
+        Chunks are recall hits in their own right and their ``importance`` and
+        ``tags`` take part in ranking, so they follow the canonical's merged
+        values as well as its session, timestamp and checkpoint.
+        """
+        canonical = self._vector_store.get_by_id(parent_ref)
+        if canonical is None:
+            return
+        tags = ",".join(dict.fromkeys([*canonical.tags, CODE_CHUNK_TAG]))
+        update: dict[str, Any] = {
+            "session_id": session_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "checkpoint": checkpoint,
+            "importance": canonical.importance,
+            "tags": tags,
+        }
         for chunk in self._owned_chunks(parent_ref):
-            if chunk.session_id != session_id or chunk.checkpoint != checkpoint:
+            if (
+                chunk.session_id != session_id
+                or chunk.checkpoint != checkpoint
+                or chunk.importance != canonical.importance
+                or ",".join(chunk.tags) != tags
+            ):
                 self._vector_store.update_metadata(chunk.ref_id, update)
 
     def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
