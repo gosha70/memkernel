@@ -64,7 +64,7 @@ status resource. No new MCP tool.
 
 **Context**: issue #9 and the roadmap speak of git-diff-driven invalidation; `code` memories already store `content_hash` of the retained file text.
 **Decision**: compare the current file's hash with `content_hash`; no git dependency, works in any checkout or none.
-**Consequences**: a reformat counts as a change (acceptable: the snapshot is stale either way). `project_root` is a security boundary: sources are resolved with symlinks followed and `..` normalised and must lie under the resolved root; anything else is `unknown` and never read.
+**Consequences**: a reformat counts as a change (acceptable: the snapshot is stale either way); 0.4 hashes whole files, per-chunk range invalidation is a named follow-up. `project_root` is a security boundary: sources are resolved with symlinks followed and `..` normalised and must lie under the resolved root; anything else is `unknown` and never read.
 
 ### ADR-2: `needs_review` is a flag, not a tier
 
@@ -125,7 +125,7 @@ README.md, CHANGELOG.md, pyproject.toml, src/memkernel/__init__.py, docs/roadmap
 
 ### Task 4: Release hygiene (US4)
 
-**Files**: `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `README.md`, `docs/roadmap.md`, `docs/architecture/memory-tiers.md`, `templates/claude-memory-instructions.md`
+**Files**: `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `README.md`, `docs/roadmap.md`, `docs/architecture/memory-tiers.md`, `docs/adr/ADR-007-tiered-memory.md` (supersession note only), `templates/claude-memory-instructions.md`
 **Acceptance criteria**:
 - [ ] FR-013, FR-014 (coverage), FR-015 satisfied
 - [ ] Full fast suite, ruff, ruff format, mypy green; `poetry build` succeeds

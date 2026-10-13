@@ -55,7 +55,7 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 15 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section (FR-013) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [ ] |
+| 15 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section incl. the `Changed` line for auto-supersession on `retain(type="code")` and sourced-code identity; ADR-007 supersession note (FR-013, FR-015) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `docs/adr/ADR-007-tiered-memory.md` | build | [ ] |
 | 16 | [P] | README: revalidation, auto-supersession, health pass, settings, flags, endpoints; CLAUDE.md template: `needs_review` guidance (FR-013) | `README.md`, `templates/claude-memory-instructions.md` | build | [ ] |
 | 17 | [P] | Roadmap: tick revalidation and health, relabel ecosystem 0.5; memory-tiers.md rows for revalidation and health (FR-013) | `docs/roadmap.md`, `docs/architecture/memory-tiers.md` | build | [ ] |
 
@@ -72,4 +72,4 @@
 - [ ] All existing tests pass
 - [ ] No [NEEDS CLARIFICATION] markers remain in spec.md
 - [ ] Registered MCP tools are exactly: retain, recall, get, forget, promote, consolidate, ask, wiki_export, wiki_import
-- [ ] `.github/workflows/ci.yml` unchanged; no dependency added
+- [ ] `.github/workflows/ci.yml` unchanged; no dependency added; `docs/adr/` untouched except the ADR-007 note
