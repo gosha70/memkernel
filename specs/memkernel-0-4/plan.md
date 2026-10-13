@@ -3,7 +3,7 @@ spec_mode: full
 feature_id: memkernel-0-4
 risk_category: feature
 justification: "Two new public behaviours (revalidation with recall exclusion, read-only health pass) across core, storage metadata, MCP, admin API, lifecycle and templates; a full spec keeps the unattended build bounded."
-status: draft
+status: approved
 date: 2026-10-12
 collaboration_mode: single
 origin:
