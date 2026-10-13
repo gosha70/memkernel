@@ -75,14 +75,14 @@ status resource. No new MCP tool.
 ### ADR-3: Sourced code identity is (source, hash); chunk records are owner-specific; supersession is durable
 
 **Context**: today `code` records and their chunks are deduplicated globally by content hash, so two paths with the same content share one record and an unchanged function is one chunk shared by old and new versions; and `_filter_live` only hides a superseded record when its successor is in the same result window.
-**Decision**: `find_by_hash` gains a `source` filter and sourced code dedups per path; chunk records get ids `<canonical>-chunk-<n>`, the `code_chunk` tag and `parent_ref`, and are written without dedup; the new canonical gets `supersedes=<old>` and every replaced canonical gets `superseded_by=<new>`, which `_filter_live` honours independently of the window; `revalidate()` backfills the marker for 0.2/0.3 links. Old canonicals stay (hidden); only their owned chunks are deleted.
+**Decision**: `find_by_hash` gains a `source` filter and sourced code dedups per path; chunk records get ids `<canonical>-chunk-<n>`, the `code_chunk` tag and `parent_ref`, and are written without dedup; the new canonical gets `supersedes=<old>` and every replaced canonical gets `superseded_by=<new>`, which `_filter_live`, `list_memories`, `consolidate` and `WikiExporter` honour independently of the fetched set; `revalidate()` writes review flags only, and unmarked 0.2/0.3 links are reported by health as `unmarked_supersessions`. Old canonicals stay (hidden); only their owned chunks are deleted.
 **Consequences**: provenance survives, recall stays clean for any query, flags and deletions can never touch another owner's chunks; the store holds one chunk record per owner (bounded by the number of live snapshots since replaced owners lose theirs). Legacy shared chunks are left as they are and documented.
 
 ### ADR-4: Health is read-only and split into quick and full
 
 **Context**: near-duplicate detection re-embeds and queries each long-term memory; the status resource and `consolidate` must stay cheap; the pass must be complete within its candidate set.
-**Decision**: `health(full=False)` for the summary paths (status, consolidate, session start); `health()` for the admin endpoint and curators. Near-duplicates query each candidate with `top_k = health_duplicate_limit` restricted to the long-term tier and keep only neighbours inside the candidate set, so every qualifying pair in the set is found. `stale_sources` covers `code` memories only: a `document` source is a name, not a path.
-**Consequences**: the hooks cost O(n) metadata reads, not O(n) embeddings; the full pass is O(n) queries bounded by the limit; a fix mode is a later feature.
+**Decision**: `health(full=False)` for the summary paths (status, consolidate, session start); `health()` for the admin endpoint and curators. `VectorStorePort.list_all` gains `include_content=False` so the quick report, `stale_sources` and `expired_present` read ids and metadata only. Near-duplicates query each candidate with `top_k = health_duplicate_limit`, filter neighbours on the long-term type values (never the `tier` key, which pre-0.2 records lack) and keep only neighbours inside the candidate set, so every qualifying pair in the set is found. `stale_sources` covers `code` memories only: a `document` source is a name, not a path.
+**Consequences**: the hooks cost O(n) metadata reads, not O(n) embeddings or O(n) document loads; the full pass is O(n) queries bounded by the limit; a fix mode is a later feature.
 
 ## Project Structure
 
@@ -90,31 +90,32 @@ status resource. No new MCP tool.
 src/memkernel/config.py                   — project_root, health_* settings
 src/memkernel/core/models.py              — needs_review/review_reason/superseded_by on Memory; CODE_CHUNK_TAG, PARENT_REF_KEY; review reasons; HealthReport, HealthItem
 src/memkernel/core/services.py            — revalidate(), auto-supersession in retain(code), recall include_needs_review, consolidate(revalidate, health), health()
-src/memkernel/storage/chroma.py           — load needs_review / review_reason / superseded_by; find_by_hash(source)
+src/memkernel/core/ports.py               — find_by_hash(source), list_all(include_content)
+src/memkernel/storage/chroma.py           — load every new key with its default; find_by_hash(source) skipping chunk records; list_all(include_content=False)
 src/memkernel/lifecycle.py                — Needs review + Store health sections at session start
 src/memkernel/mcp/tools/memory.py         — recall include_needs_review, consolidate revalidate
 src/memkernel/mcp/server.py               — health summary in memory://status
 src/memkernel/api/routes/admin.py         — POST /revalidate, GET /health/store
 tests/unit/test_revalidation.py, test_code_supersession.py, test_health.py; test_admin_api.py, test_lifecycle_component.py additions
 tests/e2e/test_mcp_roundtrip.py           — code revalidation round trip
-README.md, CHANGELOG.md, pyproject.toml, src/memkernel/__init__.py, docs/roadmap.md, docs/architecture/memory-tiers.md, templates/claude-memory-instructions.md
+README.md, CHANGELOG.md, pyproject.toml, src/memkernel/__init__.py, docs/roadmap.md, docs/architecture/memory-tiers.md, templates/claude-memory-instructions.md, templates/hooks/*.py, templates/kiro/settings/mcp.json (MEMKERNEL_PROJECT_ROOT)
 ```
 
 ## Scope
 
-### Task 1: Revalidation (US1)
+### Task 1: Code identity, owner-specific chunks, durable supersession (US1)
 
-**Files**: `config.py`, `core/models.py`, `storage/chroma.py`, `core/services.py`, `lifecycle.py`, `mcp/tools/memory.py`, `api/routes/admin.py`, tests
+**Files**: `config.py`, `core/ports.py`, `storage/chroma.py`, `core/models.py`, `core/services.py`, `wiki/sync.py`, tests
 **Acceptance criteria**:
-- [ ] FR-001, FR-002, FR-003, FR-004, FR-005, FR-006 implemented
-- [ ] `tests/unit/test_revalidation.py` covers changed / missing / cleared / unknown, chunk propagation, recall exclusion and flag, consolidate report, lifecycle section, admin endpoint
-
-### Task 2: Code identity, owner-specific chunks, durable supersession (US2)
-
-**Files**: `core/ports.py`, `storage/chroma.py`, `core/models.py`, `core/services.py`, tests
-**Acceptance criteria**:
-- [ ] FR-007, FR-008 implemented; `_filter_live` honours `superseded_by` (FR-004)
+- [ ] FR-001, FR-002, FR-007, FR-008 implemented; `_filter_live`, `list_memories`, `consolidate`, `WikiExporter` honour `superseded_by` (FR-004)
 - [ ] `tests/unit/test_code_supersession.py` covers changed content, identical content same path, identical content other path, empty source, shared-by-content chunk kept under the new owner, old-only phrase hidden after supersession, several pre-0.4 live canonicals, legacy `chunk_refs` deletion rule, explicit `supersedes` sets the marker; e2e round trip added
+
+### Task 2: Revalidation (US2)
+
+**Files**: `core/services.py`, `lifecycle.py`, `mcp/tools/memory.py`, `api/routes/admin.py`, tests
+**Acceptance criteria**:
+- [ ] FR-003, FR-004 (needs_review exclusion), FR-005, FR-006 implemented
+- [ ] `tests/unit/test_revalidation.py` covers changed / missing / cleared / unknown, chunk propagation, recall exclusion and flag, consolidate report, lifecycle section, admin endpoint
 
 ### Task 3: Health pass (US3)
 

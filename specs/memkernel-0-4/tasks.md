@@ -1,37 +1,39 @@
 # Tasks: memkernel 0.4 — code revalidation, store health pass
 
 <!-- One `## US<n>:` group = one auto-build phase. [US#] tags trace to spec.md. -->
-<!-- Run per phase: poetry run ruff check src/ tests/ templates/ && poetry run ruff format --check src/ tests/ && poetry run mypy src/ && poetry run pytest -m "not slow" -q -p no:cacheprovider -->
+<!-- Run per phase: poetry run ruff check src/ tests/ templates/ && poetry run ruff format --check src/ tests/ templates/ && poetry run mypy src/ && poetry run pytest -m "not slow" -q -p no:cacheprovider -->
 
-## US1: Stale `code` memories are detected and kept out of recall
+## US1: Code memories have a source-bound identity and a changed file replaces the old snapshot
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 1 | [P] | Settings `project_root`, `health_duplicate_threshold`, `health_duplicate_limit`, `health_report_limit` (FR-001); README configuration rows | `src/memkernel/config.py`, `README.md` | build | [ ] |
-| 2 | [P] | `Memory.needs_review` / `review_reason` / `superseded_by` / `parent_ref` with defaults; review-reason constants; adapter loads every new key with its default (FR-002, FR-008 README rows for every new setting) | `src/memkernel/core/models.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
-| 3 | | `MemoryService.revalidate()`: resolve `source` inside the `project_root` boundary (symlinks, `..`), hash-compare, flag/clear canonical and owned chunk records, report; writes nothing else (FR-001, FR-003) | `src/memkernel/core/services.py` | build | [ ] |
-| 4 | | `recall(include_needs_review=False)` exclusion applied in Python in `_filter_live` incl. chunk hits; drop chunks with a dead `parent_ref`; `recall` MCP flag; test that a record without the key is still recalled (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [ ] |
-| 5 | | `consolidate(revalidate=False)` with `"revalidated"` report; MCP flag; `on_session_start` runs it and prints `### Needs review` only when non-empty (FR-005) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py`, `src/memkernel/lifecycle.py` | build | [ ] |
-| 6 | [P] | `POST /revalidate` admin endpoint (FR-006) | `src/memkernel/api/routes/admin.py` | build | [ ] |
-| 7 | | Unit tests for revalidation (changed / missing / cleared / unknown / boundary escape), recall exclusion incl. missing-key record, consolidate, lifecycle section, endpoint (FR-014) | `tests/unit/test_revalidation.py`, `tests/unit/test_lifecycle_component.py`, `tests/unit/test_admin_api.py` | build | [ ] |
+| 1 | [P] | Settings `project_root`, `health_duplicate_threshold`, `health_duplicate_limit`, `health_report_limit`; README configuration rows for every new `MEMKERNEL_*` setting (FR-001) | `src/memkernel/config.py`, `README.md` | build | [ ] |
+| 2 | [P] | `Memory.needs_review` / `review_reason` / `superseded_by` / `parent_ref`; constants (`CODE_CHUNK_TAG`, `CODE_CHUNK_KEY`, `PARENT_REF_KEY`, review reasons); adapter loads every new key with its default (FR-002) | `src/memkernel/core/models.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
+| 3 | | `VectorStorePort.find_by_hash(content_hash, memory_type, source=None)` never returning a chunk record; `list_all(where=None, include_content=True)` with an ids-and-metadata-only path (FR-008, FR-009) | `src/memkernel/core/ports.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
+| 4 | | Owner-specific code chunk records: ids `<canonical>-chunk-<n>`, `code_chunk` tag + boolean key, `parent_ref`, no dedup; `superseded_by` / `needs_review` propagate to owned chunks; `forget` deletes owned chunks and legacy `chunk_refs` targets only when unreferenced (FR-007) | `src/memkernel/core/services.py` | build | [ ] |
+| 5 | | Sourced code identity `(source, hash)`: canonical lookup before chunking so a dedup hit embeds nothing; auto-supersession sets `supersedes` on the new and `superseded_by` on every live old canonical (and their chunks), deletes their owned chunks, keeps them; explicit `supersedes` sets the marker (FR-008) | `src/memkernel/core/services.py` | build | [ ] |
+| 6 | | `_filter_live` drops `superseded_by` records and chunks with a dead `parent_ref` (window check kept as fallback); `list_memories(include_superseded=False)`, `consolidate` and `WikiExporter.export` derive superseded from `superseded_by` (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/wiki/sync.py` | build | [ ] |
+| 7 | [P] | Unit tests (identity per path, single-chunk file cannot shadow its canonical, dedup hit embeds nothing, shared-by-content chunks, old-only phrase hidden, pre-0.4 multiple canonicals, legacy chunk_refs rule, list_memories / consolidate / WikiExporter honour the marker, adapter defaults for missing keys, `list_all(include_content=False)`) and the e2e code round trip (FR-014) | `tests/unit/test_code_supersession.py`, `tests/unit/test_chroma.py`, `tests/unit/test_wiki.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
 
 **Checkpoint US1** — verify before continuing:
 - [ ] `poetry run mypy src/` clean; `poetry run ruff check src/ tests/ templates/` clean
-- [ ] `poetry run pytest tests/unit/test_revalidation.py tests/unit/test_lifecycle_component.py tests/unit/test_admin_api.py -q` green
+- [ ] `poetry run pytest tests/unit/test_code_supersession.py tests/unit/test_chroma.py tests/unit/test_wiki.py tests/e2e -q` green with exactly nine tools listed
 - [ ] Existing 0.3 tests still pass unchanged
 
 ---
 
-## US2: Re-retaining a changed file replaces the old snapshot
+## US2: Stale `code` memories are detected and kept out of recall
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 8 | | Owner-specific code chunk records: ids `<canonical>-chunk-<n>`, `code_chunk` tag + boolean key, `parent_ref`, no dedup; `superseded_by` / `needs_review` propagate to owned chunks; `forget` deletes owned chunks and legacy `chunk_refs` targets only when unreferenced (FR-007) | `src/memkernel/core/models.py`, `src/memkernel/core/services.py` | build | [ ] |
-| 9 | | `find_by_hash(source=...)` on the port and adapter, never returning a chunk record; canonical lookup before chunking so a dedup hit embeds nothing; auto-supersession sets `supersedes` on the new and `superseded_by` on every live old canonical (and their chunks), deletes their owned chunks, keeps them; explicit `supersedes` sets the marker; `_filter_live`, `list_memories(include_superseded=False)`, `consolidate` and `WikiExporter.export` derive superseded from `superseded_by` (FR-004, FR-008) | `src/memkernel/core/ports.py`, `src/memkernel/storage/chroma.py`, `src/memkernel/core/services.py` | build | [ ] |
-| 10 | [P] | Unit tests (identity per path, single-chunk file cannot shadow its canonical, dedup hit embeds nothing, shared-by-content chunks, old-only phrase hidden, pre-0.4 multiple canonicals, legacy chunk_refs rule, list_memories / consolidate / WikiExporter honour the marker) and the e2e code round trip (FR-014) | `tests/unit/test_code_supersession.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
+| 8 | | `MemoryService.revalidate()`: resolve `source` inside the `project_root` boundary (symlinks, `..`), whole-file hash compare, flag/clear canonical and owned chunk records, report; writes nothing else (FR-001, FR-003) | `src/memkernel/core/services.py` | build | [ ] |
+| 9 | | `recall(include_needs_review=False)` exclusion applied in Python in `_filter_live` incl. chunk hits whose owner is flagged; `recall` MCP flag; test that a record without the key is still recalled (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [ ] |
+| 10 | | `consolidate(revalidate=False)` with `"revalidated"` report; MCP flag; `on_session_start` runs it and prints `### Needs review` only when non-empty (FR-005) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py`, `src/memkernel/lifecycle.py` | build | [ ] |
+| 11 | [P] | `POST /revalidate` admin endpoint (FR-006) | `src/memkernel/api/routes/admin.py` | build | [ ] |
+| 12 | | Unit tests for revalidation (changed / missing / cleared / unknown / boundary escape / owned-chunk propagation), recall exclusion incl. missing-key record, consolidate report, lifecycle section, endpoint (FR-014) | `tests/unit/test_revalidation.py`, `tests/unit/test_lifecycle_component.py`, `tests/unit/test_admin_api.py` | build | [ ] |
 
 **Checkpoint US2** — verify before continuing:
-- [ ] `tests/e2e/test_mcp_roundtrip.py` passes with exactly nine tools listed
+- [ ] `poetry run pytest tests/unit/test_revalidation.py tests/unit/test_lifecycle_component.py tests/unit/test_admin_api.py -q` green
 - [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
 
 ---
@@ -40,14 +42,14 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 11 | | `HealthReport` / `HealthItem` models; `MemoryService.health(full=True)` with the seven categories (incl. `unmarked_supersessions`; stale sources: code only; orphans: document parts and tagged code chunks), bounded items, quick/full split, near-duplicates over non-chunk candidates with already-linked pairs excluded, complete within the candidate set (FR-009) | `src/memkernel/core/models.py`, `src/memkernel/core/services.py` | build | [ ] |
-| 12 | [P] | `GET /health/store`; `/health` unchanged (FR-010) | `src/memkernel/api/routes/admin.py` | build | [ ] |
-| 13 | [P] | `"health"` summary in `memory://status` and in the `consolidate()` report; `### Store health` line at session start (FR-011, FR-012) | `src/memkernel/mcp/server.py`, `src/memkernel/core/services.py`, `src/memkernel/lifecycle.py` | build | [ ] |
-| 14 | | Unit tests: one seeded defect per category incl. an unmarked legacy supersession, quick vs full, chunk/part exclusion and linked-pair exclusion from near-duplicates, endpoint, resource, consolidate summary, lifecycle line (FR-014) | `tests/unit/test_health.py`, `tests/unit/test_admin_api.py`, `tests/unit/test_lifecycle_component.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
+| 13 | | `HealthReport` / `HealthItem` models; `MemoryService.health(full=True)` with the seven categories (incl. `unmarked_supersessions`; stale sources: code only; orphans: document parts and tagged code chunks), bounded items, quick/full split using `list_all(include_content=False)`, near-duplicates over non-chunk candidates filtered on long-term type values with already-linked pairs excluded, complete within the candidate set (FR-009) | `src/memkernel/core/models.py`, `src/memkernel/core/services.py` | build | [ ] |
+| 14 | [P] | `GET /health/store`; `/health` unchanged (FR-010) | `src/memkernel/api/routes/admin.py` | build | [ ] |
+| 15 | [P] | `"health"` summary in `memory://status` and in the `consolidate()` report; `### Store health` line at session start (FR-011, FR-012) | `src/memkernel/mcp/server.py`, `src/memkernel/core/services.py`, `src/memkernel/lifecycle.py` | build | [ ] |
+| 16 | | Unit tests: one seeded defect per category incl. an unmarked legacy supersession and a pre-0.2 record without a tier label found as a neighbour, quick vs full, chunk/part exclusion and linked-pair exclusion from near-duplicates, endpoint, resource, consolidate summary, lifecycle line (FR-014) | `tests/unit/test_health.py`, `tests/unit/test_admin_api.py`, `tests/unit/test_lifecycle_component.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
 
 **Checkpoint US3** — verify before continuing:
 - [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
-- [ ] `health(full=False)` on a 500-memory store completes without embedding calls (assert on a counting MockEmbedding); `health()` finds all three pairs among three near-identical memories
+- [ ] `health(full=False)` on a 500-memory store completes without embedding calls and without loading content (assert on a counting MockEmbedding and a recording store); `health()` finds all three pairs among three near-identical memories
 
 ---
 
@@ -55,9 +57,9 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 15 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section incl. the `Changed` line for auto-supersession on `retain(type="code")` and sourced-code identity; ADR-007 supersession note (FR-013, FR-015) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `docs/adr/ADR-007-tiered-memory.md` | build | [ ] |
-| 16 | [P] | README: revalidation, auto-supersession, health pass, settings, flags, endpoints; CLAUDE.md template: `needs_review` guidance (FR-013) | `README.md`, `templates/claude-memory-instructions.md` | build | [ ] |
-| 17 | [P] | Roadmap: tick revalidation and health, relabel ecosystem 0.5; memory-tiers.md rows for revalidation and health (FR-013) | `docs/roadmap.md`, `docs/architecture/memory-tiers.md` | build | [ ] |
+| 17 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section incl. the `Changed` line for auto-supersession on `retain(type="code")` and sourced-code identity; ADR-007 supersession note (FR-013, FR-015) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `docs/adr/ADR-007-tiered-memory.md` | build | [ ] |
+| 18 | [P] | README: revalidation, auto-supersession, health pass, settings, flags, endpoints, when to set `MEMKERNEL_PROJECT_ROOT`; CLAUDE.md template: `needs_review` guidance; hook templates and `templates/kiro/settings/mcp.json` set `MEMKERNEL_PROJECT_ROOT` (FR-013) | `README.md`, `templates/claude-memory-instructions.md`, `templates/hooks/*.py`, `templates/kiro/settings/mcp.json` | build | [ ] |
+| 19 | [P] | Roadmap: tick revalidation and health, relabel ecosystem 0.5; memory-tiers.md rows for revalidation and health (FR-013) | `docs/roadmap.md`, `docs/architecture/memory-tiers.md` | build | [ ] |
 
 **Checkpoint US4** — verify before continuing:
 - [ ] `poetry build` succeeds and the wheel installs in a clean venv
