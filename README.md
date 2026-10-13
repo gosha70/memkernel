@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/gosha70/memkernel/main/docs/assets/memkernel-logo.jpg" alt="MemKernel logo: a glowing memory core on three stacked tiers" width="220">
+  <img src="https://raw.githubusercontent.com/gosha70/memkernel/main/docs/assets/memkernel-logo.png" alt="MemKernel logo: a glowing memory core on three stacked tiers" width="220">
 </p>
 
 # MemKernel
