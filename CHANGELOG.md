@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `templates/kiro/`: MCP server entry, always-on steering file and lifecycle
+  hooks (`SessionStart`, `Stop`, manual checkpoint) for Kiro and the Kiro CLI,
+  with a README covering custom agents and the legacy Amazon Q Developer CLI;
+  README section "Add to Kiro".
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

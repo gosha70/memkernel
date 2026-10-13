@@ -32,7 +32,7 @@ src/memkernel/memory/    lifecycle (decay, retention), TTL policies, dedup
 src/memkernel/wiki/      LLM-wiki bridge (export drafts, import pages)
 src/memkernel/mcp/       FastMCP server + tools; src/memkernel/api/ FastAPI admin
 src/memkernel/factory.py build_service() — the supported embedding entry point
-templates/               CLAUDE.md snippet and Claude Code hook scripts (session-start, pre/post-compact)
+templates/               CLAUDE.md snippet, Claude Code hook scripts (session-start, pre/post-compact), kiro/ (mcp.json, steering, hooks)
 tests/unit, tests/e2e    unit tests use chromadb.EphemeralClient() + tests/conftest.py MockEmbedding;
                          e2e uses mcp.shared.memory.create_connected_server_and_client_session
 ```

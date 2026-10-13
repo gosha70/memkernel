@@ -1,0 +1,27 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "trigger": "SessionStart",
+      "action": {
+        "type": "agent",
+        "prompt": "Using the memkernel MCP server: call recall(query=\"session checkpoint\", checkpoint_only=true, top_k=3) and recall(query=\"<current task>\", tier=\"long_term\", top_k=8). If the project has a wiki (MEMKERNEL_WIKI_DIR), read its index.md. Summarise what is relevant in three lines, then continue with the user's request."
+      }
+    },
+    {
+      "trigger": "Stop",
+      "action": {
+        "type": "agent",
+        "prompt": "Before finishing: if this turn produced a decision, convention, fact or procedure that holds beyond this session, retain it in memkernel with that type (one idea per memory; use supersedes=<old ref_id> when it replaces an earlier one). If the plan or task state changed, retain(type=\"task\", content=\"Goal: ... Next: ... Open: ...\"). Do nothing if there is nothing worth keeping."
+      }
+    },
+    {
+      "trigger": "Manual",
+      "name": "memkernel: save checkpoint",
+      "action": {
+        "type": "agent",
+        "prompt": "Write a session checkpoint to memkernel: retain(content=\"SESSION CHECKPOINT\\nDone: ...\\nCurrent: ...\\nNext: ...\\nOpen: ...\", type=\"episode\", checkpoint=true, importance=0.8), then call consolidate() and promote(ref_id=..., type=..., content=...) for each candidate worth keeping as a fact, decision, convention or procedure."
+      }
+    }
+  ]
+}
