@@ -52,6 +52,10 @@ All notable changes to this project are documented here. The format follows
   `include_superseded=True`.
 - Hook templates and `templates/kiro/settings/mcp.json` set
   `MEMKERNEL_PROJECT_ROOT`.
+- README install guidance: pipx (isolated) recommended over a global pip
+  install, supported Python range and the `--python` fix for pipx, absolute
+  command and store paths in the Claude Code registration, a troubleshooting
+  section, and a note that there is no npm package.
 
 ### Fixed
 
