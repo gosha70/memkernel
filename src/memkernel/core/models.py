@@ -172,7 +172,12 @@ class Memory(BaseModel):
 
 
 class HealthItem(BaseModel):
-    """One finding of the store health pass."""
+    """One finding of the store health pass.
+
+    For ``near_duplicates`` an item is one pair: ``ref_id`` is the
+    lexicographically smaller id and ``detail`` is ``"~ <other id> (cosine x)"``;
+    neither side is "the original".
+    """
 
     ref_id: str
     detail: str

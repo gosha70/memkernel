@@ -948,6 +948,8 @@ class MemoryService:
                 add(HEALTH_EXPIRED_PRESENT, m.ref_id, f"{m.type.value} expired, not yet purged")
 
         if full:
+            # One item per pair: ref_id is the lexicographically smaller id, the
+            # detail names the other one ("~ <other> (cosine 0.987)").
             for first, second, similarity in self._near_duplicates(records, referenced):
                 add(HEALTH_NEAR_DUPLICATES, first, f"~ {second} (cosine {similarity:.3f})")
 
@@ -960,6 +962,12 @@ class MemoryService:
         values* (records written before 0.2 carry no tier label); neighbours
         outside the candidate set and pairs already linked by supersedes,
         superseded_by or promoted_from are ignored. Complete within the set.
+
+        Pair contract: every pair is returned once as ``(first, second, score)``
+        with ``first < second`` lexicographically (no "which is the original"
+        meaning), and ``score`` is the best of the two query directions, so an
+        approximate index scoring one direction below the threshold cannot
+        drop a pair the other direction clears.
         """
         candidates = [
             m

@@ -321,3 +321,42 @@ def test_session_start_prints_store_health_only_when_something_is_wrong() -> Non
     text = lifecycle.on_session_start()
     expected = "orphans 0, dangling links 1, unmarked supersessions 0, stale sources 0, needs review 0, expired 0"
     assert f"{HEADING_STORE_HEALTH}\n{expected}" in text
+
+
+def _pair_set(report: HealthReport) -> set[frozenset[str]]:
+    return {frozenset((i.ref_id, i.detail.split(" ")[1])) for i in report.near_duplicates}
+
+
+def test_near_duplicate_pair_is_reported_once_with_smaller_id_first() -> None:
+    svc, _, _, _ = _build()
+    a = svc.retain("alpha one", MemoryType.FACT)
+    b = svc.retain("alpha two", MemoryType.DECISION)
+    report = svc.health()
+    assert len(report.near_duplicates) == 1
+    item = report.near_duplicates[0]
+    assert item.ref_id == min(a, b)
+    assert item.detail.startswith(f"~ {max(a, b)} (cosine ")
+    assert _pair_set(report) == {frozenset((a, b))}
+
+
+def test_pair_survives_when_only_one_query_direction_clears_the_threshold() -> None:
+    """An approximate index may score A->B below the threshold and B->A above it: the pair is kept."""
+    svc, store, _, _ = _build()
+    a = svc.retain("alpha one", MemoryType.FACT)
+    b = svc.retain("alpha two", MemoryType.DECISION)
+    original = store.search_dense
+    calls = {"n": 0}
+
+    def asymmetric(query_embedding: list[float], top_k: int, where: dict[str, Any] | None = None) -> Any:
+        results = original(query_embedding, top_k, where)
+        calls["n"] += 1
+        if calls["n"] == 1:  # first query direction: pretend the neighbour scored below the threshold
+            return [
+                r.model_copy(update={"score": 0.5}) if r.ref_id != results[0].ref_id or True else r for r in results
+            ][:0] + [r.model_copy(update={"score": 0.5}) for r in results]
+        return results
+
+    store.search_dense = asymmetric  # type: ignore[method-assign]
+    report = svc.health()
+    assert _pair_set(report) == {frozenset((a, b))}
+    assert "cosine 1.000" in report.near_duplicates[0].detail
