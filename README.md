@@ -78,6 +78,20 @@ See the Prerequisites section inside each script for the Python environment requ
 
 ---
 
+## Add to Kiro
+
+Kiro (and the Kiro CLI, formerly Amazon Q Developer CLI) connects to MemKernel as a stdio MCP server. [`templates/kiro/`](templates/kiro/) holds the three files to copy into a workspace:
+
+| Template | Destination | Role |
+|----------|-------------|------|
+| `settings/mcp.json` | `.kiro/settings/mcp.json` | Server entry with `env` and `autoApprove` |
+| `steering/memory.md` | `.kiro/steering/memory.md` | Memory instructions, always included |
+| `hooks/memkernel.json` | `.kiro/hooks/memkernel.json` | `SessionStart` recall, `Stop` retain, manual checkpoint |
+
+[`templates/kiro/README.md`](templates/kiro/README.md) has the setup steps, the Kiro CLI custom-agent variant and the caveats (absolute persist path, hook format by Kiro version).
+
+---
+
 ## MCP Tools
 
 | Tool | What it does |

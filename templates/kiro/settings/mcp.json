@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "memkernel": {
+      "command": "memkernel",
+      "args": [],
+      "env": {
+        "MEMKERNEL_PROJECT_ID": "my-project",
+        "MEMKERNEL_CHROMA_PERSIST_PATH": "${HOME}/.memkernel/my-project"
+      },
+      "disabled": false,
+      "autoApprove": ["recall", "get", "ask", "retain", "consolidate"]
+    }
+  }
+}
