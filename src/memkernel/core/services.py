@@ -1037,7 +1037,8 @@ class MemoryService:
                 path = self._resolve_source(m.source)
                 if path is not None and not path.is_file():
                     add(HEALTH_STALE_SOURCES, m.ref_id, f"{m.source} does not exist")
-            if m.needs_review and not is_chunk and not _is_document_part(m):
+            if m.needs_review and m.superseded_by is None and not is_chunk and not _is_document_part(m):
+                # live records only: a replaced snapshot keeps its flag as history, not as an action item
                 add(HEALTH_NEEDS_REVIEW, m.ref_id, f"{m.source or m.type.value}: {m.review_reason}")
             if m.tier != MemoryTier.LONG_TERM and memory_is_expired(m, self._settings):
                 add(HEALTH_EXPIRED_PRESENT, m.ref_id, f"{m.type.value} expired, not yet purged")

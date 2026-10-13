@@ -359,3 +359,20 @@ def test_pair_survives_when_only_one_query_direction_clears_the_threshold() -> N
     assert state["queries"] == 2
     assert _pair_set(report) == {frozenset((a, b))}
     assert "cosine 1.000" in report.near_duplicates[0].detail
+
+
+def test_needs_review_counts_live_records_only(tmp_path: Path) -> None:
+    """retain V1 -> edit -> revalidate flags V1 -> retain V2: the store is healthy again."""
+    svc, _, _, _ = _build(_settings(tmp_path))
+    path = tmp_path / "app.py"
+    path.write_text("def a():\n    pass\n\ndef b():\n    pass\n", encoding="utf-8")
+    v1 = svc.retain(path.read_text(), MemoryType.CODE, source="app.py")
+    path.write_text("def a():\n    pass\n\ndef c():\n    pass\n", encoding="utf-8")
+    svc.revalidate()
+    assert svc.health(full=False).summary["needs_review"] == 1
+    v2 = svc.retain(path.read_text(), MemoryType.CODE, source="app.py")
+    assert v2 != v1
+    report = svc.health(full=False)
+    assert report.summary["needs_review"] == 0 and report.needs_review == []
+    old = svc.get(v1, touch=False)
+    assert old is not None and old.needs_review and old.superseded_by == v2  # history is kept
