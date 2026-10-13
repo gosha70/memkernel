@@ -345,18 +345,17 @@ def test_pair_survives_when_only_one_query_direction_clears_the_threshold() -> N
     a = svc.retain("alpha one", MemoryType.FACT)
     b = svc.retain("alpha two", MemoryType.DECISION)
     original = store.search_dense
-    calls = {"n": 0}
+    state = {"queries": 0}
 
     def asymmetric(query_embedding: list[float], top_k: int, where: dict[str, Any] | None = None) -> Any:
         results = original(query_embedding, top_k, where)
-        calls["n"] += 1
-        if calls["n"] == 1:  # first query direction: pretend the neighbour scored below the threshold
-            return [
-                r.model_copy(update={"score": 0.5}) if r.ref_id != results[0].ref_id or True else r for r in results
-            ][:0] + [r.model_copy(update={"score": 0.5}) for r in results]
+        state["queries"] += 1
+        if state["queries"] == 1:  # first direction only: every neighbour scores below the threshold
+            return [r.model_copy(update={"score": 0.5}) for r in results]
         return results
 
     store.search_dense = asymmetric  # type: ignore[method-assign]
     report = svc.health()
+    assert state["queries"] == 2
     assert _pair_set(report) == {frozenset((a, b))}
     assert "cosine 1.000" in report.near_duplicates[0].detail
