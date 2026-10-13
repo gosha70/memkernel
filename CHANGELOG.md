@@ -30,6 +30,9 @@ All notable changes to this project are documented here. The format follows
 - Port additions for adapter authors: `VectorStorePort.find_by_hash(...,
   source=None)` (never returns a chunk record) and
   `VectorStorePort.list_all(..., include_content=True)`.
+- `memkernel --version` and `memkernel --help` print and exit; any other
+  argument is an error (exit 2). Without arguments the command starts the
+  MCP server as before.
 - Settings `MEMKERNEL_PROJECT_ROOT`, `MEMKERNEL_HEALTH_DUPLICATE_THRESHOLD`,
   `MEMKERNEL_HEALTH_DUPLICATE_LIMIT`, `MEMKERNEL_HEALTH_REPORT_LIMIT`;
   `Memory.needs_review`, `review_reason`, `superseded_by`, `parent_ref`
