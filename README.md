@@ -73,7 +73,7 @@ Add MemKernel to `.claude/settings.json` in your project:
 }
 ```
 
-Replace `my-project` with a short identifier for the project — memories are isolated per project. Use the absolute path of the command (`which memkernel` prints it) because Claude Code does not necessarily see the PATH changes your shell profile makes, and an absolute `MEMKERNEL_CHROMA_PERSIST_PATH` keeps the store outside the repository. The first `retain` downloads the embedding model (about 90 MB) once; later calls are fast.
+Replace `my-project` with a short identifier for the project — memories are isolated per project. Use the absolute path of the command (`which memkernel` prints it) because Claude Code does not necessarily see the PATH changes your shell profile makes, and an absolute `MEMKERNEL_CHROMA_PERSIST_PATH` keeps the store outside the repository. On first server initialization, MemKernel downloads the embedding model (about 90 MB) if it is not already cached: `build_service()` loads the sentence-transformers model when the MCP server starts, before any tool call, so the first connection can take a minute. Later starts and every tool call are fast.
 
 <details>
 <summary>Troubleshooting the install</summary>
@@ -81,6 +81,7 @@ Replace `my-project` with a short identifier for the project — memories are is
 - **`pipx install memkernel` says "No matching distribution found"** — pipx used an interpreter outside 3.11–3.13. Pass one explicitly: `pipx install --python /opt/homebrew/opt/python@3.11/bin/python3.11 memkernel`.
 - **`bash: /some/old/path/memkernel: No such file or directory`** right after reinstalling — the shell cached the old location. Run `hash -r` (bash) or `rehash` (zsh), then `which memkernel`.
 - **`memkernel --help` seems to hang** on versions before 0.4.0 — the command had no flags and started the server; press Ctrl-C. From 0.4.0 on, `--help` and `--version` print and exit.
+- **The first MCP connection is slow or times out** — the server is downloading the embedding model at startup (see above). Wait for it once, or pre-warm it with `python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"` in the same environment.
 - **A global pip install broke another tool** (for example `langchain-chroma` wanting `chromadb < 0.6`) — uninstall memkernel from that interpreter, reinstall the versions the other tool needs, and install memkernel with pipx instead.
 
 </details>
