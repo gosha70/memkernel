@@ -15,11 +15,15 @@ from uuid import uuid4
 
 from memkernel.core.models import (
     ASK_MODES,
+    CODE_CHUNK_KEY,
+    CODE_CHUNK_TAG,
     DEFAULT_ASK_MODE,
     DEFAULT_IMPORTANCE,
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    PARENT_REF_KEY,
+    SUPERSEDED_BY_KEY,
     Answer,
     ArtifactRef,
     Memory,
@@ -86,6 +90,21 @@ class _ExtraMeta:
 def _is_document_part(memory: Memory) -> bool:
     """True for the body / chunk records a document store keeps beside a document summary."""
     return DOCUMENT_BODY_TAG in memory.tags or DOCUMENT_CHUNK_TAG in memory.tags
+
+
+def _is_code_chunk(memory: Memory, referenced: frozenset[str] = frozenset()) -> bool:
+    """True for a chunk record of a `code` memory.
+
+    Tagged or owner-linked (0.4), or referenced by a canonical's ``chunk_refs`` (legacy).
+    """
+    return CODE_CHUNK_TAG in memory.tags or memory.parent_ref is not None or memory.ref_id in referenced
+
+
+_CODE_CHUNK_INFIX = "-chunk-"
+
+
+def _code_chunk_id(parent_ref: str, position: int) -> str:
+    return f"{parent_ref}{_CODE_CHUNK_INFIX}{position}"
 
 
 def _document_headings(lines: list[str], name: str) -> list[str]:
@@ -248,23 +267,105 @@ class MemoryService:
         extra = _ExtraMeta(importance=importance, tags=tags or [], supersedes=supersedes, promoted_from=promoted_from)
         if type == MemoryType.DOCUMENT and self._document_store is not None:
             return self._retain_document(content, session_id, checkpoint, source, extra)
-        if type == MemoryType.CODE and self._chunker is not None:
-            chunks = self._chunker.chunk(content, {"source": source})
-            if chunks:
-                # Canonical record: original file — preserves get(retain(code)) == code
-                ref_id = self._retain_single(content, type, session_id, checkpoint, source, extra)
-                # Fine-grained index: each chunk stored for recall() granularity
-                chunk_extra = _ExtraMeta(importance=importance, tags=tags or [])
-                chunk_ref_ids: list[str] = []
-                for chunk in chunks:
-                    chunk_ref_ids.append(self._retain_single(chunk, type, session_id, checkpoint, source, chunk_extra))
-                # Link chunk ref_ids to canonical so forget() can clean them up
-                unique_chunk_refs = list(dict.fromkeys(r for r in chunk_ref_ids if r != ref_id))
-                if unique_chunk_refs:
-                    self._vector_store.update_metadata(ref_id, {"chunk_refs": ",".join(unique_chunk_refs)})
-                return ref_id
+        if type == MemoryType.CODE:
+            return self._retain_code(content, session_id, checkpoint, source, extra)
 
         return self._retain_single(content, type, session_id, checkpoint, source, extra)
+
+    def _retain_code(
+        self,
+        content: str,
+        session_id: str | None,
+        checkpoint: bool,
+        source: str,
+        extra: _ExtraMeta,
+    ) -> str:
+        """Store a code snapshot: canonical record plus owner-specific chunk records.
+
+        Identity is ``(source, content_hash)`` for a sourced file and the content
+        hash alone otherwise. A dedup hit refreshes the record and embeds nothing.
+        A changed file supersedes every live canonical for the same ``source``:
+        the new record carries ``supersedes``, each old one gets ``superseded_by``
+        and loses its owned chunk records, and stays as a hidden record.
+        """
+        resolved_session = session_id or self._settings.default_session_id
+        content_hash = compute_content_hash(content)
+        existing = self._vector_store.find_by_hash(content_hash, MemoryType.CODE.value, source=source or None)
+        if existing is not None:
+            self._refresh_existing(existing, resolved_session, checkpoint, extra)
+            return existing.ref_id
+
+        old_canonicals = self._live_code_canonicals(source) if source else []
+        if old_canonicals and not extra.supersedes:
+            newest = max(old_canonicals, key=lambda m: m.timestamp)
+            extra = replace(extra, supersedes=newest.ref_id)
+        ref_id = self._retain_single(content, MemoryType.CODE, session_id, checkpoint, source, extra, dedup=False)
+
+        chunks = self._chunker.chunk(content, {"source": source}) if self._chunker is not None else []
+        chunk_ids = self._index_code_chunks(ref_id, chunks, resolved_session, checkpoint, source, extra)
+        if chunk_ids:
+            self._vector_store.update_metadata(ref_id, {"chunk_refs": ",".join(chunk_ids)})
+
+        for old in old_canonicals:
+            self._mark_superseded(old.ref_id, ref_id)
+            self._delete_owned_chunks(old)
+        return ref_id
+
+    def _live_code_canonicals(self, source: str) -> list[Memory]:
+        """Live (not superseded) canonical `code` records for ``source``, chunk records excluded."""
+        where = {"$and": [{"type": MemoryType.CODE.value}, {"source": source}]}
+        records = self._vector_store.list_all(where, include_content=False)
+        referenced = frozenset(ref for m in records for ref in m.chunk_refs)
+        return [m for m in records if m.superseded_by is None and not _is_code_chunk(m, referenced)]
+
+    def _index_code_chunks(
+        self,
+        parent_ref: str,
+        chunks: list[str],
+        session_id: str,
+        checkpoint: bool,
+        source: str,
+        extra: _ExtraMeta,
+    ) -> list[str]:
+        """Write one owner-specific chunk record per chunk (no dedup) and return their ids."""
+        chunks = [c for c in chunks if c.strip()]
+        if not chunks:
+            return []
+        embeddings = self._embedding.embed(chunks)
+        chunk_extra = _ExtraMeta(importance=extra.importance, tags=[*extra.tags, CODE_CHUNK_TAG])
+        ids: list[str] = []
+        for position, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
+            ref_id = _code_chunk_id(parent_ref, position)
+            metadata = self._new_metadata(chunk, MemoryType.CODE, session_id, checkpoint, source, chunk_extra)
+            metadata[CODE_CHUNK_KEY] = True
+            metadata[PARENT_REF_KEY] = parent_ref
+            self._write_record(ref_id, chunk, embedding, metadata)
+            ids.append(ref_id)
+        return ids
+
+    def _owned_chunks(self, parent_ref: str) -> list[Memory]:
+        return self._vector_store.list_all({PARENT_REF_KEY: parent_ref}, include_content=False)
+
+    def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
+        """Set the durable ``superseded_by`` marker on ``target_ref`` and its owned chunks."""
+        if target_ref == by_ref or self._vector_store.get_by_id(target_ref) is None:
+            return
+        self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
+        for chunk in self._owned_chunks(target_ref):
+            self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
+
+    def _delete_owned_chunks(self, canonical: Memory) -> None:
+        """Delete a canonical's owned chunk records; legacy shared chunk_refs only when nothing else references them."""
+        for chunk in self._owned_chunks(canonical.ref_id):
+            self._delete_record(chunk.ref_id)
+        prefix = f"{canonical.ref_id}{_CODE_CHUNK_INFIX}"
+        legacy = [ref for ref in canonical.chunk_refs if not ref.startswith(prefix)]
+        if legacy:
+            others = self._vector_store.list_all(include_content=False)
+            referenced = {ref for m in others if m.ref_id != canonical.ref_id for ref in m.chunk_refs}
+            for ref in legacy:
+                if ref not in referenced:
+                    self._delete_record(ref)
 
     def _retain_document(
         self,
@@ -336,19 +437,33 @@ class MemoryService:
 
         # New memory
         ref_id = str(uuid4())
-        now = datetime.now(UTC)
-        token_count = max(1, len(content) // 4)
         embedding = self._embedding.embed([content])[0]
+        metadata = self._new_metadata(content, type, resolved_session, checkpoint, source, extra)
+        self._write_record(ref_id, content, embedding, metadata)
+        if extra.supersedes:
+            self._mark_superseded(extra.supersedes, ref_id)
+        return ref_id
+
+    def _new_metadata(
+        self,
+        content: str,
+        type: MemoryType,  # noqa: A002
+        session_id: str,
+        checkpoint: bool,
+        source: str,
+        extra: _ExtraMeta,
+    ) -> dict[str, Any]:
+        """Metadata for a brand-new record (every required key, tier and importance derived from the type)."""
         importance = extra.importance if extra.importance is not None else DEFAULT_IMPORTANCE[type]
         metadata: dict[str, Any] = {
             "project_id": self._settings.project_id,
-            "session_id": resolved_session,
-            "timestamp": now.isoformat(),
+            "session_id": session_id,
+            "timestamp": datetime.now(UTC).isoformat(),
             "type": type.value,
             "tier": tier_of(type).value,
             "source": source,
-            "hash": content_hash,
-            "token_count": token_count,
+            "hash": compute_content_hash(content),
+            "token_count": max(1, len(content) // 4),
             "checkpoint": checkpoint,
             "importance": max(0.0, min(1.0, importance)),
             "access_count": 0,
@@ -361,23 +476,16 @@ class MemoryService:
         if extra.document_id:
             metadata["document_id"] = extra.document_id
             metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
+        return metadata
 
-        # Authoritative store first
-        self._vector_store.upsert(
-            ref_id=ref_id,
-            content=content,
-            embedding=embedding,
-            metadata=metadata,
-        )
-
-        # BM25 is a derived index — failure is non-fatal
+    def _write_record(self, ref_id: str, content: str, embedding: list[float], metadata: dict[str, Any]) -> None:
+        """Authoritative store first; BM25 is a derived index whose failure is non-fatal."""
+        self._vector_store.upsert(ref_id=ref_id, content=content, embedding=embedding, metadata=metadata)
         try:
             self._sparse_index.add(ref_id, content)
         except Exception:
             logger.warning("BM25 add failed for %s", ref_id)
             self._sparse_index.mark_needs_rebuild()
-
-        return ref_id
 
     def _refresh_existing(self, existing: Memory, session_id: str, checkpoint: bool, extra: _ExtraMeta) -> None:
         """Dedup hit: bump session/timestamp/checkpoint and merge importance, tags and supersedes."""
@@ -393,6 +501,8 @@ class MemoryService:
         if extra.supersedes:
             update["supersedes"] = extra.supersedes
         self._vector_store.update_metadata(existing.ref_id, update)
+        if extra.supersedes:
+            self._mark_superseded(extra.supersedes, existing.ref_id)
 
     def recall(
         self,
@@ -453,6 +563,10 @@ class MemoryService:
     def _filter_live(self, results: list[ArtifactRef], query: SearchQuery) -> list[ArtifactRef]:
         """Drop expired and superseded memories; resolve document chunk hits to their summary.
 
+        Superseded means ``superseded_by`` is set (durable, independent of the
+        result window); the result-window check on ``supersedes`` links stays
+        as a fallback for legacy links without the marker.
+
         A hit on a document body or chunk record is replaced by the document's
         summary record (the ``document`` memory) carrying the hit's score, so a
         phrase deep inside a document surfaces the document exactly once and
@@ -468,12 +582,21 @@ class MemoryService:
                 memories[ref.ref_id] = memory
         superseded = {m.supersedes for m in memories.values() if m.supersedes}
         summaries: dict[str, Memory | None] = {}
+        owners: dict[str, Memory | None] = {}
         live: list[ArtifactRef] = []
         seen: set[str] = set()
         for ref in results:
             memory = memories.get(ref.ref_id)
-            if memory is None:
+            if memory is None or memory.superseded_by:
                 continue
+            if memory.parent_ref:
+                # A code chunk lives and dies with its owner: dropped when the
+                # owner is gone or superseded.
+                if memory.parent_ref not in owners:
+                    owners[memory.parent_ref] = self._vector_store.get_by_id(memory.parent_ref)
+                owner = owners[memory.parent_ref]
+                if owner is None or owner.superseded_by:
+                    continue
             if memory.document_id and _is_document_part(memory):
                 if memory.document_id not in summaries:
                     summaries[memory.document_id] = self._document_summary_record(memory.document_id, query)
@@ -516,11 +639,13 @@ class MemoryService:
         tier: MemoryTier | None = None,
         type: MemoryType | None = None,  # noqa: A002
         session_id: str | None = None,
+        include_superseded: bool = False,
     ) -> list[Memory]:
         """Return memories matching the given filters (no ranking, no access tracking).
 
         ``tier`` is filtered in Python because records written before tiers
         existed carry no ``tier`` metadata; the adapter derives it from the type.
+        Records with ``superseded_by`` set are left out unless ``include_superseded``.
         """
         conditions: list[dict[str, Any]] = []
         if type is not None:
@@ -533,6 +658,8 @@ class MemoryService:
         elif conditions:
             where = {"$and": conditions}
         memories = [m for m in self._vector_store.list_all(where) if not _is_document_part(m)]
+        if not include_superseded:
+            memories = [m for m in memories if m.superseded_by is None]
         if tier is not None:
             memories = [m for m in memories if m.tier == tier]
         return memories
@@ -707,7 +834,10 @@ class MemoryService:
         candidates = [
             m
             for m in all_memories
-            if m.tier != MemoryTier.LONG_TERM and m.ref_id not in promoted_sources and not m.checkpoint
+            if m.tier != MemoryTier.LONG_TERM
+            and m.ref_id not in promoted_sources
+            and not m.checkpoint
+            and m.superseded_by is None
         ]
         candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
         top = candidates[:limit]
@@ -758,9 +888,9 @@ class MemoryService:
         """
         canonical = self._vector_store.get_by_id(ref_id)
         if canonical is not None:
-            # CODE canonical records: delete the linked chunk records first.
-            for chunk_ref in canonical.chunk_refs:
-                self._delete_record(chunk_ref)
+            # CODE canonical records: delete the owned chunk records first
+            # (legacy shared chunks only when nothing else references them).
+            self._delete_owned_chunks(canonical)
             # DOCUMENT summary records: delete the body and chunks the document store
             # keeps — but only when no other summary (same body, other name) still owns them.
             if canonical.document_id and not _is_document_part(canonical):

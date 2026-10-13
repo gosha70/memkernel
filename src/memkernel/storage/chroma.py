@@ -9,7 +9,19 @@ from typing import TYPE_CHECKING, Any
 
 import chromadb
 
-from memkernel.core.models import DEFAULT_IMPORTANCE, Memory, MemoryTier, MemoryType, SearchResult, tier_of
+from memkernel.core.models import (
+    CODE_CHUNK_KEY,
+    DEFAULT_IMPORTANCE,
+    NEEDS_REVIEW_KEY,
+    PARENT_REF_KEY,
+    REVIEW_REASON_KEY,
+    SUPERSEDED_BY_KEY,
+    Memory,
+    MemoryTier,
+    MemoryType,
+    SearchResult,
+    tier_of,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -78,6 +90,10 @@ def _memory_from_chroma(
         supersedes=str(meta["supersedes"]) if meta.get("supersedes") else None,
         promoted_from=str(meta["promoted_from"]) if meta.get("promoted_from") else None,
         document_id=str(meta["document_id"]) if meta.get("document_id") else None,
+        superseded_by=str(meta[SUPERSEDED_BY_KEY]) if meta.get(SUPERSEDED_BY_KEY) else None,
+        parent_ref=str(meta[PARENT_REF_KEY]) if meta.get(PARENT_REF_KEY) else None,
+        needs_review=bool(meta.get(NEEDS_REVIEW_KEY, False)),
+        review_reason=str(meta.get(REVIEW_REASON_KEY) or ""),
     )
 
 
@@ -195,37 +211,46 @@ class ChromaVectorStore:
         self._collection.delete(ids=[ref_id])
         return True
 
-    def list_all(self, where: dict[str, Any] | None = None) -> list[Memory]:
-        """Return all memories, optionally filtered by metadata."""
-        kwargs: dict[str, Any] = {"include": ["metadatas", "documents"]}
+    def list_all(self, where: dict[str, Any] | None = None, include_content: bool = True) -> list[Memory]:
+        """Return all memories, optionally filtered by metadata.
+
+        ``include_content=False`` fetches ids and metadata only; ``content`` is
+        then empty, which keeps maintenance passes free of document loads.
+        """
+        kwargs: dict[str, Any] = {"include": ["metadatas", "documents"] if include_content else ["metadatas"]}
         if where is not None:
             kwargs["where"] = where
 
         result = self._collection.get(**kwargs)
         ids: list[str] = result.get("ids") or []
-        raw_docs = result.get("documents")
-        documents: list[str] = list(raw_docs) if raw_docs is not None else []
+        raw_docs = result.get("documents") if include_content else None
+        documents: list[str] = list(raw_docs) if raw_docs is not None else [""] * len(ids)
         raw_metas = result.get("metadatas")
         metadatas: list[Mapping[str, Any]] = list(raw_metas) if raw_metas is not None else []
 
         return [_memory_from_chroma(ids, documents, metadatas, i) for i in range(len(ids))]
 
-    def find_by_hash(self, content_hash: str, memory_type: str) -> Memory | None:
-        """Find a memory by content hash + type. Returns first match or None."""
-        result = self._collection.get(
-            where={"$and": [{"hash": content_hash}, {"type": memory_type}]},
-            include=["metadatas", "documents"],
-        )
+    def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
+        """Find a memory by content hash + type (+ source). Returns the first non-chunk match or None.
+
+        Code chunk records (``code_chunk: true``) are skipped so that a file
+        whose single chunk equals the whole file cannot shadow its canonical.
+        """
+        conditions: list[dict[str, Any]] = [{"hash": content_hash}, {"type": memory_type}]
+        if source is not None:
+            conditions.append({"source": source})
+        result = self._collection.get(where={"$and": conditions}, include=["metadatas", "documents"])
         ids: list[str] = result.get("ids") or []
         raw_docs = result.get("documents")
         documents: list[str] = list(raw_docs) if raw_docs is not None else []
         raw_metas = result.get("metadatas")
         metadatas: list[Mapping[str, Any]] = list(raw_metas) if raw_metas is not None else []
 
-        if not ids:
-            return None
-
-        return _memory_from_chroma(ids, documents, metadatas, 0)
+        for index, meta in enumerate(metadatas):
+            if meta.get(CODE_CHUNK_KEY) is True:
+                continue
+            return _memory_from_chroma(ids, documents, metadatas, index)
+        return None
 
     def update_metadata(self, ref_id: str, metadata: dict[str, Any]) -> None:
         """Fetch-and-merge: caller-specified keys overwrite existing; all other keys preserved."""

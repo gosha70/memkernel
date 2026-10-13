@@ -184,6 +184,10 @@ All settings are read from environment variables with the `MEMKERNEL_` prefix, o
 | `MEMKERNEL_DOCUMENT_SUMMARY_CHARS` | `1000` | Characters of the body kept in a `document` memory's summary record |
 | `MEMKERNEL_REASONER` | `local` | `ReasonerPort` behind `ask`: `local` (hybrid search over chunks, no LLM) or `rlmstudio` (falls back to `local` when `rlmstudio` is not importable) |
 | `MEMKERNEL_ASK_TOP_K` | `5` | Chunks the local reasoner returns per `ask` |
+| `MEMKERNEL_PROJECT_ROOT` | `.` | Directory that relative `source` paths of `code` memories resolve under; nothing outside it is ever read. Set it whenever the server or a hook is not started from the project directory |
+| `MEMKERNEL_HEALTH_DUPLICATE_THRESHOLD` | `0.95` | Cosine similarity in [0, 1] from which two long-term memories count as near-duplicates in the health pass |
+| `MEMKERNEL_HEALTH_DUPLICATE_LIMIT` | `500` | Most recent long-term memories the near-duplicate check covers |
+| `MEMKERNEL_HEALTH_REPORT_LIMIT` | `20` | Items listed per category in a health report |
 | `MEMKERNEL_EPISODE_TTL_DAYS` | `30` | Base TTL for `episode` memories (short-term) |
 | `MEMKERNEL_OBSERVATION_TTL_DAYS` | `7` | Base TTL for `observation` memories (short-term) |
 | `MEMKERNEL_TASK_TTL_HOURS` | `24` | Base TTL for `task` memories (working) |

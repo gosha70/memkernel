@@ -7,18 +7,18 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 1 | [P] | Settings `project_root`, `health_duplicate_threshold`, `health_duplicate_limit`, `health_report_limit`; README configuration rows for every new `MEMKERNEL_*` setting (FR-001) | `src/memkernel/config.py`, `README.md` | build | [ ] |
-| 2 | [P] | `Memory.needs_review` / `review_reason` / `superseded_by` / `parent_ref`; constants (`CODE_CHUNK_TAG`, `CODE_CHUNK_KEY`, `PARENT_REF_KEY`, review reasons); adapter loads every new key with its default (FR-002) | `src/memkernel/core/models.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
-| 3 | | `VectorStorePort.find_by_hash(content_hash, memory_type, source=None)` never returning a chunk record; `list_all(where=None, include_content=True)` with an ids-and-metadata-only path (FR-008, FR-009) | `src/memkernel/core/ports.py`, `src/memkernel/storage/chroma.py` | build | [ ] |
-| 4 | | Owner-specific code chunk records: ids `<canonical>-chunk-<n>`, `code_chunk` tag + boolean key, `parent_ref`, no dedup; `superseded_by` / `needs_review` propagate to owned chunks; `forget` deletes owned chunks and legacy `chunk_refs` targets only when unreferenced (FR-007) | `src/memkernel/core/services.py` | build | [ ] |
-| 5 | | Sourced code identity `(source, hash)`: canonical lookup before chunking so a dedup hit embeds nothing; auto-supersession sets `supersedes` on the new and `superseded_by` on every live old canonical (and their chunks), deletes their owned chunks, keeps them; explicit `supersedes` sets the marker (FR-008) | `src/memkernel/core/services.py` | build | [ ] |
-| 6 | | `_filter_live` drops `superseded_by` records and chunks with a dead `parent_ref` (window check kept as fallback); `list_memories(include_superseded=False)`, `consolidate` and `WikiExporter.export` derive superseded from `superseded_by` (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/wiki/sync.py` | build | [ ] |
-| 7 | [P] | Unit tests (identity per path, single-chunk file cannot shadow its canonical, dedup hit embeds nothing, shared-by-content chunks, old-only phrase hidden, pre-0.4 multiple canonicals, legacy chunk_refs rule, list_memories / consolidate / WikiExporter honour the marker, adapter defaults for missing keys, `list_all(include_content=False)`) and the e2e code round trip (FR-014) | `tests/unit/test_code_supersession.py`, `tests/unit/test_chroma.py`, `tests/unit/test_wiki.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [ ] |
+| 1 | [P] | Settings `project_root`, `health_duplicate_threshold`, `health_duplicate_limit`, `health_report_limit`; README configuration rows for every new `MEMKERNEL_*` setting (FR-001) | `src/memkernel/config.py`, `README.md` | build | [x] |
+| 2 | [P] | `Memory.needs_review` / `review_reason` / `superseded_by` / `parent_ref`; constants (`CODE_CHUNK_TAG`, `CODE_CHUNK_KEY`, `PARENT_REF_KEY`, review reasons); adapter loads every new key with its default (FR-002) | `src/memkernel/core/models.py`, `src/memkernel/storage/chroma.py` | build | [x] |
+| 3 | | `VectorStorePort.find_by_hash(content_hash, memory_type, source=None)` never returning a chunk record; `list_all(where=None, include_content=True)` with an ids-and-metadata-only path (FR-008, FR-009) | `src/memkernel/core/ports.py`, `src/memkernel/storage/chroma.py` | build | [x] |
+| 4 | | Owner-specific code chunk records: ids `<canonical>-chunk-<n>`, `code_chunk` tag + boolean key, `parent_ref`, no dedup; `superseded_by` / `needs_review` propagate to owned chunks; `forget` deletes owned chunks and legacy `chunk_refs` targets only when unreferenced (FR-007) | `src/memkernel/core/services.py` | build | [x] |
+| 5 | | Sourced code identity `(source, hash)`: canonical lookup before chunking so a dedup hit embeds nothing; auto-supersession sets `supersedes` on the new and `superseded_by` on every live old canonical (and their chunks), deletes their owned chunks, keeps them; explicit `supersedes` sets the marker (FR-008) | `src/memkernel/core/services.py` | build | [x] |
+| 6 | | `_filter_live` drops `superseded_by` records and chunks with a dead `parent_ref` (window check kept as fallback); `list_memories(include_superseded=False)`, `consolidate` and `WikiExporter.export` derive superseded from `superseded_by` (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/wiki/sync.py` | build | [x] |
+| 7 | [P] | Unit tests (identity per path, single-chunk file cannot shadow its canonical, dedup hit embeds nothing, shared-by-content chunks, old-only phrase hidden, pre-0.4 multiple canonicals, legacy chunk_refs rule, list_memories / consolidate / WikiExporter honour the marker, adapter defaults for missing keys, `list_all(include_content=False)`) and the e2e code round trip (FR-014) | `tests/unit/test_code_supersession.py`, `tests/unit/test_chroma.py`, `tests/unit/test_wiki.py`, `tests/e2e/test_mcp_roundtrip.py` | build | [x] |
 
 **Checkpoint US1** — verify before continuing:
-- [ ] `poetry run mypy src/` clean; `poetry run ruff check src/ tests/ templates/` clean
-- [ ] `poetry run pytest tests/unit/test_code_supersession.py tests/unit/test_chroma.py tests/unit/test_wiki.py tests/e2e -q` green with exactly nine tools listed
-- [ ] Existing 0.3 tests still pass unchanged
+- [x] `poetry run mypy src/` clean; `poetry run ruff check src/ tests/ templates/` clean
+- [x] `poetry run pytest tests/unit/test_code_supersession.py tests/unit/test_chroma.py tests/unit/test_wiki.py tests/e2e -q` green with exactly nine tools listed
+- [x] Existing 0.3 tests still pass unchanged
 
 ---
 

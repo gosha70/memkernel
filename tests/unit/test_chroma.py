@@ -345,3 +345,45 @@ def test_count_with_where_counts_only_matching_records(store: ChromaVectorStore)
     assert store.count(where={"flag": True}) == 1
     assert store.count(where={"$and": [{"type": "decision"}, {"flag": False}]}) == 1
     assert store.count(where={"type": "fact"}) == 0
+
+
+@pytest.mark.unit
+def test_find_by_hash_with_source_and_chunk_skip(store: ChromaVectorStore) -> None:
+    """find_by_hash narrows by source when given and never returns a code chunk record."""
+    base = {**_base_metadata(), "type": "code", "hash": "h-same"}
+    store.upsert(
+        ref_id="chunk", content="x", embedding=[0.1] * 8, metadata={**base, "source": "a.py", "code_chunk": True}
+    )
+    assert store.find_by_hash("h-same", "code") is None
+    assert store.find_by_hash("h-same", "code", source="a.py") is None
+    store.upsert(ref_id="canon-b", content="x", embedding=[0.1] * 8, metadata={**base, "source": "b.py"})
+    store.upsert(ref_id="canon-a", content="x", embedding=[0.1] * 8, metadata={**base, "source": "a.py"})
+    assert store.find_by_hash("h-same", "code", source="a.py").ref_id == "canon-a"  # type: ignore[union-attr]
+    assert store.find_by_hash("h-same", "code", source="b.py").ref_id == "canon-b"  # type: ignore[union-attr]
+    assert store.find_by_hash("h-same", "code", source="c.py") is None
+    assert store.find_by_hash("h-same", "code").ref_id in {"canon-a", "canon-b"}  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_list_all_without_content_and_defaults_for_missing_keys(store: ChromaVectorStore) -> None:
+    store.upsert(ref_id="m1", content="full text", embedding=[0.1] * 8, metadata={**_base_metadata(), "hash": "h1"})
+    [with_content] = store.list_all()
+    assert with_content.content == "full text"
+    [without] = store.list_all(include_content=False)
+    assert without.ref_id == "m1" and without.content == ""
+    assert without.type == with_content.type and without.timestamp == with_content.timestamp
+    # 0.4 keys absent from a 0.3 record load with their defaults
+    assert with_content.superseded_by is None
+    assert with_content.parent_ref is None
+    assert with_content.needs_review is False
+    assert with_content.review_reason == ""
+    store.update_metadata(
+        "m1", {"superseded_by": "m2", "parent_ref": "p", "needs_review": True, "review_reason": "changed"}
+    )
+    [again] = store.list_all()
+    assert (again.superseded_by, again.parent_ref, again.needs_review, again.review_reason) == (
+        "m2",
+        "p",
+        True,
+        "changed",
+    )

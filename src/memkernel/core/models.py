@@ -95,6 +95,19 @@ DOCUMENT_PART_KEY = "document_part"
 ASK_MODES: tuple[str, ...] = ("direct", "rag", "rlm", "auto")
 DEFAULT_ASK_MODE = "auto"
 
+# Chunk records of a `code` memory (0.4): owner-specific index entries, never
+# deduplicated by content, tagged and linked to their canonical record.
+CODE_CHUNK_TAG = "code_chunk"
+CODE_CHUNK_KEY = "code_chunk"  # boolean metadata so adapters can skip chunk records
+PARENT_REF_KEY = "parent_ref"
+# Durable liveness marker (0.4): set on a record that another record replaced.
+SUPERSEDED_BY_KEY = "superseded_by"
+# Revalidation flags (0.4).
+NEEDS_REVIEW_KEY = "needs_review"
+REVIEW_REASON_KEY = "review_reason"
+REVIEW_REASON_CHANGED = "changed"
+REVIEW_REASON_MISSING = "missing"
+
 
 def tier_of(memory_type: MemoryType) -> MemoryTier:
     """Return the tier a memory type belongs to."""
@@ -127,6 +140,12 @@ class Memory(BaseModel):
     # Set on a ``document`` summary record and on the body/chunk records the
     # document store keeps for it (ADR-009).
     document_id: str | None = None
+    # 0.4: durable marker on a replaced record; owner link on a code chunk
+    # record; revalidation flags. All load with defaults from older stores.
+    superseded_by: str | None = None
+    parent_ref: str | None = None
+    needs_review: bool = False
+    review_reason: str = ""
 
 
 class ReasonerError(RuntimeError):

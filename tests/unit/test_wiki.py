@@ -151,7 +151,9 @@ def test_export_skips_superseded_and_wiki_sourced(tmp_path: Path) -> None:
     svc.retain("From the wiki", MemoryType.FACT, tags=["wiki", "page:x"])
     report = WikiExporter(svc, tmp_path).export()
     assert report.written == ["concepts/new-rule.md"]
-    assert report.skipped == 2
+    # 0.4: list_memories already hides the superseded record (superseded_by), so only the wiki page is skipped here
+    assert report.skipped == 1
+    assert not (tmp_path / "concepts" / "old-rule.md").exists()
 
 
 # --------------------------------------------------------------------------
@@ -223,3 +225,17 @@ def test_export_skips_document_memories(tmp_path: Path) -> None:
     report = WikiExporter(svc, tmp_path).export()
     assert report.written == ["decisions/use-postgres.md"]
     assert report.skipped == 1
+
+
+def test_export_skips_superseded_by_marker_not_window(tmp_path: Path) -> None:
+    """The exporter trusts the durable marker, not supersedes links among the fetched memories."""
+    svc = _service()
+    old = svc.retain("Use Celery for jobs", MemoryType.DECISION)
+    svc.retain("Use arq for jobs", MemoryType.DECISION, supersedes=old)
+    report = WikiExporter(svc, tmp_path).export()
+    assert report.written == ["decisions/use-arq-for-jobs.md"]
+    # export only the old memory: the marker still hides it even though its successor is not in the set
+    old_memory = svc.get(old, touch=False)
+    assert old_memory is not None and old_memory.superseded_by is not None
+    report2 = WikiExporter(svc, tmp_path / "other").export(memories=[old_memory])
+    assert report2.written == [] and report2.skipped == 1
