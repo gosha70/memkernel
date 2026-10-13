@@ -308,6 +308,7 @@ class MemoryService:
         existing = self._vector_store.find_by_hash(content_hash, MemoryType.CODE.value, source=source or None)
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
+            self._refresh_owned_chunks(existing.ref_id, resolved_session, checkpoint)
             return existing.ref_id
 
         old_canonicals = self._live_code_canonicals(source) if source else []
@@ -360,6 +361,13 @@ class MemoryService:
 
     def _owned_chunks(self, parent_ref: str) -> list[Memory]:
         return self._vector_store.list_all({PARENT_REF_KEY: parent_ref}, include_content=False)
+
+    def _refresh_owned_chunks(self, parent_ref: str, session_id: str, checkpoint: bool) -> None:
+        """A dedup refresh moves the canonical to the new session: its owned chunks follow."""
+        update = {"session_id": session_id, "timestamp": datetime.now(UTC).isoformat(), "checkpoint": checkpoint}
+        for chunk in self._owned_chunks(parent_ref):
+            if chunk.session_id != session_id or chunk.checkpoint != checkpoint:
+                self._vector_store.update_metadata(chunk.ref_id, update)
 
     def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
         """Set the durable ``superseded_by`` marker on ``target_ref`` and its owned chunks."""
@@ -620,6 +628,8 @@ class MemoryService:
                 owner = owners[memory.parent_ref]
                 if owner is None or owner.superseded_by or (owner.needs_review and not include_needs_review):
                     continue
+                if not _matches_query(owner, query):
+                    continue  # the query's filters apply to the owner the chunk stands for
             if memory.document_id and _is_document_part(memory):
                 if memory.document_id not in summaries:
                     summaries[memory.document_id] = self._document_summary_record(memory.document_id, query)

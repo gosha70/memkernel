@@ -326,3 +326,26 @@ def test_superseded_record_of_any_type_is_not_a_dedup_hit() -> None:
     memory = svc.get(again, touch=False)
     assert memory is not None and memory.superseded_by is None
     assert (svc.get(old, touch=False) or None) is not None and svc.get(old, touch=False).superseded_by == new  # type: ignore[union-attr]
+
+
+def test_dedup_refresh_moves_owned_chunks_to_the_new_session() -> None:
+    svc, store, _ = _build()
+    ref = svc.retain(V1, MemoryType.CODE, source="src/a.py", session_id="s1")
+    assert {c.session_id for c in _chunks_of(store, ref)} == {"s1"}
+    assert svc.retain(V1, MemoryType.CODE, source="src/a.py", session_id="s2", checkpoint=True) == ref
+    chunks = _chunks_of(store, ref)
+    assert {c.session_id for c in chunks} == {"s2"} and all(c.checkpoint for c in chunks)
+    s1_hits = {r.ref_id for r in svc.recall("OLDMARKER-7731", session_id="s1", top_k=5)}
+    assert ref not in s1_hits and not any(r.startswith(f"{ref}-chunk-") for r in s1_hits)
+    s2_hits = {r.ref_id for r in svc.recall("OLDMARKER-7731", session_id="s2", top_k=5)}
+    assert s2_hits and all(r == ref or r.startswith(f"{ref}-chunk-") for r in s2_hits)
+
+
+def test_chunk_hit_must_satisfy_the_query_through_its_owner() -> None:
+    svc, store, _ = _build()
+    ref = svc.retain(V1, MemoryType.CODE, source="src/a.py", session_id="s1")
+    # even if a chunk's own metadata drifted, the owner decides
+    for chunk in _chunks_of(store, ref):
+        store.update_metadata(chunk.ref_id, {"session_id": "other"})
+    hits = {r.ref_id for r in svc.recall("OLDMARKER-7731", session_id="other", top_k=5)}
+    assert not any(r.startswith(f"{ref}-chunk-") for r in hits)
