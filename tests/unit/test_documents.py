@@ -478,3 +478,15 @@ def test_lost_chunks_are_reindexed_on_the_next_retain() -> None:
     assert documents.indexed(doc_id) == chunk_count
     assert embedding.texts == before + chunk_count
     assert [r.ref_id for r in svc.recall("QUETZALCOATL-7741", top_k=1)] == [ref_id]
+
+
+def test_document_chunk_never_resolves_to_a_superseded_summary() -> None:
+    svc, _, _ = _build()
+    body = _long_document()
+    old = svc.retain(body, MemoryType.DOCUMENT, source="old.md")
+    new = svc.retain(body, MemoryType.DOCUMENT, source="new.md", supersedes=old)
+    old_memory = svc.get(old, touch=False)
+    assert old_memory is not None and old_memory.superseded_by == new
+    hits = [r.ref_id for r in svc.recall("QUETZALCOATL-7741 escape hatch", top_k=5)]
+    assert old not in hits and new in hits
+    assert [r.ref_id for r in svc.recall("QUETZALCOATL-7741", type=MemoryType.DOCUMENT, top_k=5)] == [new]

@@ -681,9 +681,13 @@ class MemoryService:
         return live
 
     def _document_summary_record(self, document_id: str, query: SearchQuery) -> Memory | None:
-        """Return the first ``document`` summary owning ``document_id`` that satisfies ``query``'s filters."""
+        """Return the first live ``document`` summary owning ``document_id`` that satisfies ``query``'s filters.
+
+        A superseded summary is never resolved to: the liveness check ran on the
+        chunk, not on the owner it stands for.
+        """
         for owner in self._document_owners(document_id):
-            if _matches_query(owner, query):
+            if owner.superseded_by is None and _matches_query(owner, query):
                 return owner
         return None
 
