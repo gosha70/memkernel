@@ -57,21 +57,21 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 17 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section incl. the `Changed` line for auto-supersession on `retain(type="code")` and sourced-code identity; ADR-007 supersession note (FR-013, FR-015) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `docs/adr/ADR-007-tiered-memory.md` | build | [ ] |
-| 18 | [P] | README: revalidation, auto-supersession, health pass, settings, flags, endpoints, when to set `MEMKERNEL_PROJECT_ROOT`; CLAUDE.md template: `needs_review` guidance; hook templates and `templates/kiro/settings/mcp.json` set `MEMKERNEL_PROJECT_ROOT` (FR-013) | `README.md`, `templates/claude-memory-instructions.md`, `templates/hooks/*.py`, `templates/kiro/settings/mcp.json` | build | [ ] |
-| 19 | [P] | Roadmap: tick revalidation and health, relabel ecosystem 0.5; memory-tiers.md rows for revalidation and health (FR-013) | `docs/roadmap.md`, `docs/architecture/memory-tiers.md` | build | [ ] |
+| 17 | | Bump to `0.4.0`; `[0.4.0]` CHANGELOG section incl. the `Changed` line for auto-supersession on `retain(type="code")` and sourced-code identity; ADR-007 supersession note (FR-013, FR-015) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md`, `docs/adr/ADR-007-tiered-memory.md` | build | [x] |
+| 18 | [P] | README: revalidation, auto-supersession, health pass, settings, flags, endpoints, when to set `MEMKERNEL_PROJECT_ROOT`; CLAUDE.md template: `needs_review` guidance; hook templates and `templates/kiro/settings/mcp.json` set `MEMKERNEL_PROJECT_ROOT` (FR-013) | `README.md`, `templates/claude-memory-instructions.md`, `templates/hooks/*.py`, `templates/kiro/settings/mcp.json` | build | [x] |
+| 19 | [P] | Roadmap: tick revalidation and health, relabel ecosystem 0.5; memory-tiers.md rows for revalidation and health (FR-013) | `docs/roadmap.md`, `docs/architecture/memory-tiers.md` | build | [x] |
 
 **Checkpoint US4** — verify before continuing:
-- [ ] `poetry build` succeeds and the wheel installs in a clean venv
-- [ ] Coverage ≥ 80 percent: `poetry run pytest -m "not slow" --cov=memkernel --cov-fail-under=80 -q`
+- [x] `poetry build` succeeds and the wheel installs in a clean venv
+- [x] Coverage ≥ 80 percent: `poetry run pytest -m "not slow" --cov=memkernel --cov-fail-under=80 -q`
 
 ---
 
 ## Final Verification
 
-- [ ] Type checker: 0 errors
-- [ ] Linter: 0 errors
-- [ ] All existing tests pass
-- [ ] No [NEEDS CLARIFICATION] markers remain in spec.md
-- [ ] Registered MCP tools are exactly: retain, recall, get, forget, promote, consolidate, ask, wiki_export, wiki_import
-- [ ] `.github/workflows/ci.yml` unchanged; no dependency added; `docs/adr/` untouched except the ADR-007 note
+- [x] Type checker: 0 errors
+- [x] Linter: 0 errors
+- [x] All existing tests pass
+- [x] No [NEEDS CLARIFICATION] markers remain in spec.md
+- [x] Registered MCP tools are exactly: retain, recall, get, forget, promote, consolidate, ask, wiki_export, wiki_import
+- [x] `.github/workflows/ci.yml` unchanged; no dependency added; `docs/adr/` untouched except the ADR-007 note

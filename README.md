@@ -97,11 +97,11 @@ Kiro (and the Kiro CLI, formerly Amazon Q Developer CLI) connects to MemKernel a
 | Tool | What it does |
 |------|-------------|
 | `retain(content, type, session_id?, checkpoint?, source?, importance?, tags?, supersedes?)` | Store a memory. Returns `ref_id`. Idempotent — identical content + type returns the same `ref_id`. `supersedes` hides the memory it replaces. |
-| `recall(query, type?, tier?, session_id?, checkpoint_only?, top_k?)` | Search by natural language or identifier. Returns lightweight `ArtifactRef` list ranked by relevance + recency + importance. Records an access (reinforces retention). |
+| `recall(query, type?, tier?, session_id?, checkpoint_only?, top_k?, include_needs_review?)` | Search by natural language or identifier. Returns lightweight `ArtifactRef` list ranked by relevance + recency + importance. Records an access (reinforces retention). Code memories flagged `needs_review` are hidden unless `include_needs_review=true`. |
 | `get(ref_id)` | Fetch full content of a specific memory. Records an access. |
 | `forget(ref_id)` | Delete a memory from all indexes. |
 | `promote(ref_id, type, content?, importance?, tags?)` | Turn a short-term/working memory into a long-term one (you supply the distilled text). Keeps provenance via `promoted_from`. |
-| `consolidate(session_id?, limit?, synthesize?)` | Purge expired short-term memories and list the ones most worth promoting (ranked by importance × how often they were recalled). `synthesize=true` also asks an external reasoner to draft long-term statements (`suggested`). |
+| `consolidate(session_id?, limit?, synthesize?, revalidate?)` | Purge expired short-term memories and list the ones most worth promoting (ranked by importance × how often they were recalled). `synthesize=true` also asks an external reasoner to draft long-term statements (`suggested`); `revalidate=true` first checks every code memory against its source file (`revalidated`). The report always carries a `health` summary. |
 | `ask(ref_id, question, mode?)` | Answer a question about one memory without loading it — for a `document` the full body is consulted. `mode`: `direct` \| `rag` \| `rlm` \| `auto`, passed to the reasoner unchanged; the built-in reasoner answers in `rag` mode with the best-matching chunks. Returns `answer`, `mode`, `citations`, `usage`. |
 | `wiki_export(wiki_dir?)` | Compile long-term memories without a wiki page into draft markdown pages (`index.md`, `log.md` updated). |
 | `wiki_import(wiki_dir?)` | Index curated wiki pages as long-term memories (idempotent; changed pages supersede). |
@@ -114,7 +114,7 @@ Kiro (and the Kiro CLI, formerly Amazon Q Developer CLI) connects to MemKernel a
 | `convention` | long-term | Naming rules, code style, project patterns | 0.9 | Never |
 | `fact` | long-term | Durable project facts: build commands, environments, contracts | 0.7 | Never |
 | `procedure` | long-term | How-to that worked: workflows, recipes, verified skills | 0.8 | Never |
-| `code` | long-term | Function/class snapshots, API contracts | 0.6 | Never |
+| `code` | long-term | Function/class snapshots, API contracts; identified by `(source, content)`, a changed file supersedes the old snapshot, a drifted source flags `needs_review` | 0.6 | Never (superseded on re-retain) |
 | `document` | long-term | Large artefacts (specs, transcripts, files): the body is stored and chunk-indexed, `get` returns a summary, `ask` answers from the indexed chunks (local reasoner) or the body (RLM Studio) | 0.6 | Never |
 | `episode` | short-term | Session events, compaction checkpoints | 0.4 | 30 days, extended by every recall |
 | `observation` | short-term | Findings, tool outputs, things noticed | 0.3 | 7 days, extended by every recall |
@@ -129,6 +129,7 @@ Retention: `ttl = base_ttl × (1 + access_boost × access_count)`, measured from
 3. **Before compaction** — `retain(type="episode", checkpoint=true)` (the `pre-compact.py` hook) and `consolidate()`.
 4. **After compaction / end of phase** — `promote(ref_id, type, content)` for the candidates worth keeping.
 5. **Large artefacts** — `retain(type="document", content=<body>, source=<name>)` then `ask(ref_id, question)`; never `get` a document to read it.
+7. **Code snapshots** — `retain(type="code", content=<file>, source=<path>)`; retain the file again after editing it (the new snapshot supersedes the old one). The session-start hook revalidates snapshots against their files and lists the ones that need re-retaining.
 6. **Curate** — `wiki_export` → review the drafts → `wiki_import`.
 
 ### Quick examples
@@ -278,6 +279,12 @@ Long-term memory has a human-readable twin: a markdown wiki in the [LLM Wiki](ht
 
 Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. Rationale and the proposed standalone `ai-wiki` repo: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md).
 
+### Revalidation and store health
+
+A `code` memory is a snapshot of a file. `MemoryService.revalidate()` hashes each live snapshot's whole source file and compares it with the stored content hash: a changed file flags the memory `needs_review` (`changed`), a vanished file flags it `missing`, a matching file clears the flag. Flagged memories leave default `recall` until the file is retained again (which supersedes the stale snapshot) or they are asked for with `include_needs_review=true`. Revalidation runs from `consolidate(revalidate=true)`, at every session start through `MemoryLifecycle.on_session_start()` (a `### Needs review` section lists what to re-retain), and from `POST /revalidate`. Sources resolve under `MEMKERNEL_PROJECT_ROOT` (default: the current directory); set it whenever the server or a hook is not started from the project directory. Nothing outside that root is ever read. 0.4 hashes whole files; per-chunk invalidation is a follow-up.
+
+`MemoryService.health()` audits the store without changing it: orphaned chunk and document records, dangling `supersedes` / `superseded_by` / `promoted_from` / `parent_ref` links, supersessions from 0.2/0.3 that lack the durable marker, `code` memories whose source file is gone, memories flagged for review, expired short-term memories not yet purged and, in full mode only, near-duplicate pairs among the most recent long-term memories (cosine ≥ `MEMKERNEL_HEALTH_DUPLICATE_THRESHOLD`). The quick report (counts only, no embeddings, no content loads) is part of every `consolidate()` report and of the `memory://status` resource; the full report is `GET /health/store`. The pass never fixes anything: a fix mode is a later feature.
+
 ## Admin API
 
 A FastAPI admin server provides health and stats endpoints (independent of MCP):
@@ -291,6 +298,8 @@ uvicorn memkernel.api.app:app --host 127.0.0.1 --port 8766
 | `GET /health` | Server health and memory count |
 | `GET /stats` | Total memory count, per-type and per-tier breakdown, growth rate, last recall latency |
 | `GET /collections` | List ChromaDB collections |
+| `GET /health/store` | Full store health report (orphans, dangling links, stale sources, near-duplicates, …) |
+| `POST /revalidate` | Check every code memory against its source file; flag changed or missing ones |
 
 ---
 
@@ -313,7 +322,7 @@ Releases are published to PyPI by [`.github/workflows/release.yml`](.github/work
 
 1. Set `version` in `pyproject.toml` and move the `[Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under the new version.
 2. Merge to `main` with CI green.
-3. Tag and push: `git tag -a v0.3.0 -m "memkernel 0.3.0" && git push origin v0.3.0`.
+3. Tag and push: `git tag -a v0.4.0 -m "memkernel 0.4.0" && git push origin v0.4.0`.
 
 The workflow refuses a tag that does not match the `pyproject.toml` version, builds the sdist and wheel, smoke-installs the wheel, and uploads through the `pypi` environment.
 

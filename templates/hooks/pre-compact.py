@@ -49,12 +49,14 @@ Environment variables (all optional — defaults match server defaults):
     MEMKERNEL_PROJECT_ID           Project to write into (default: "default")
     MEMKERNEL_CHROMA_PERSIST_PATH  ChromaDB data directory (default: ".memkernel/chroma")
     MEMKERNEL_EMBEDDING_MODEL      Embedding model name (default: "all-MiniLM-L6-v2")
+    MEMKERNEL_PROJECT_ROOT         Directory code-memory sources resolve under (default: the hook's working directory)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -67,6 +69,8 @@ from memkernel.factory import build_service  # noqa: E402
 from memkernel.lifecycle import MemoryLifecycle  # noqa: E402
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+# Claude Code runs hooks from the project directory: make it the source root unless set.
+os.environ.setdefault("MEMKERNEL_PROJECT_ROOT", os.getcwd())
 
 
 def main() -> None:

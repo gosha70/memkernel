@@ -100,6 +100,9 @@ retrieval ranks by a combination of axes rather than cosine alone.
 | Compaction and session start as consolidation triggers | Claude Code auto-memory & compaction behaviour | `templates/hooks/{pre-compact,post-compact,session-start}.py` |
 | Human-readable compiled knowledge with an index | Karpathy LLM Wiki; Claude Code `MEMORY.md` index | `memkernel.wiki` (ADR-008) |
 | Backward compatibility with 0.1.x stores | — | adapter derives tier/importance when metadata is absent |
+| Revalidation of code snapshots against their source | Roynard 2026 (facts refreshed against drifting sources) | `MemoryService.revalidate()` (whole-file hash, `needs_review`, hidden from recall), `consolidate(revalidate=True)`, session start |
+| One live snapshot per path, durable supersession | ADR-007 supersession model | `retain(type=code)` supersedes by `source`; `superseded_by` marker honoured by recall, listing, consolidation, wiki export |
+| Store health audit (read-only) | — | `MemoryService.health()`: orphans, dangling links, stale sources, near-duplicates…; `GET /health/store`, summary in `memory://status` |
 
 ### Recall scoring
 
@@ -150,13 +153,13 @@ extra, never a requirement.
 
 | Tool | Tier | Purpose |
 |---|---|---|
-| `retain(content, type, …, importance, tags, supersedes)` | any | store; idempotent on content+type |
-| `recall(query, type, tier, session_id, checkpoint_only, top_k)` | any | ranked references; records access |
+| `retain(content, type, …, importance, tags, supersedes)` | any | store; idempotent on content+type (`code`: on source+content, supersedes by path) |
+| `recall(query, type, tier, session_id, checkpoint_only, top_k, include_needs_review)` | any | ranked references; records access |
 | `get(ref_id)` | any | full content; records access |
 | `forget(ref_id)` | any | delete |
 | `promote(ref_id, type, content, importance, tags)` | short → long | agent-driven consolidation with provenance |
-| `consolidate(session_id, limit)` | short/working | purge expired, return promotion candidates |
-| `forget_expired()` | short/working | garbage collection |
+| `consolidate(session_id, limit, synthesize, revalidate)` | short/working | purge expired, return promotion candidates (+ health summary, optional revalidation) |
+| `ask(ref_id, question, mode)` | any | answer a question about one memory through the reasoner port |
 | `wiki_export(wiki_dir)` | long | compile long-term memories to draft wiki pages |
 | `wiki_import(wiki_dir)` | long | index curated wiki pages |
 

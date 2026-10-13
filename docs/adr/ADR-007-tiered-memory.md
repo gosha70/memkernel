@@ -27,6 +27,11 @@ synthesis (Letta, Mem0, A-MEM).
    - working: `task`
 2. Long-term memories never expire; they are replaced via
    `retain(supersedes=<ref_id>)` and superseded records are hidden from recall.
+   *0.4 note (spec memkernel-0-4, FR-008):* for `code` memories supersession
+   is automatic by `source` — retaining a changed file supersedes every live
+   snapshot of that path — and every superseded record of any type carries a
+   durable `superseded_by` marker that recall, listing, consolidation and
+   the wiki exporter honour independently of the search window.
 3. Short-term and working memories expire after a base TTL that grows with
    every recall (`base × (1 + access_boost × access_count)`), measured from
    the later of creation and last access.

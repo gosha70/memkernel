@@ -29,6 +29,8 @@ Copy `settings/mcp.json`, then edit two values:
 - `MEMKERNEL_CHROMA_PERSIST_PATH`: an absolute data directory. The default
   (`.memkernel/chroma`) is relative to the server's working directory, which an IDE may not
   set to the workspace. Kiro expands `${HOME}` and other environment variables in `env`.
+- `MEMKERNEL_PROJECT_ROOT`: the absolute workspace path. Code-memory sources resolve under it
+  and revalidation reads nothing outside it; the IDE does not start the server from the workspace.
 
 `autoApprove` lists the tools Kiro may call without a prompt. The template approves
 `recall`, `get`, `ask`, `retain` and `consolidate`; `forget`, `promote`, `wiki_export` and

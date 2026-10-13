@@ -28,6 +28,7 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 - Found something (test output, a quirk, a measurement) → retain(type="observation", content=…, tags=[…])
 - Learned something true beyond this session → retain(type="fact"|"decision"|"convention"|"procedure")
 - A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
+- Edited a file you had retained as code → retain(type="code", content=<new file>, source=<same path>) (supersedes the old snapshot)
 - Anything longer than a screen (a spec, a transcript, a file) → retain(type="document", content=<body>, source=<name>)
   then ask(ref_id=…, question=…) instead of get() — get() only returns the summary
 
@@ -56,7 +57,7 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 | `convention` | long-term | Project-specific rules, naming patterns, style choices | Never |
 | `fact` | long-term | Durable facts: build commands, environment quirks, contracts, measured results | Never |
 | `procedure` | long-term | A workflow or recipe that worked and was verified | Never |
-| `code` | long-term | Function/class snapshots, API contracts, schema definitions | Never |
+| `code` | long-term | Function/class snapshots, API contracts, schema definitions; one live snapshot per path | Never (superseded on re-retain; flagged `needs_review` when the file drifts) |
 | `document` | long-term | Large artefacts (specs, transcripts, files): body stored and chunk-indexed, `get` returns a summary | Never |
 | `episode` | short-term | Session events, compaction checkpoints | 30 days, extended by every recall |
 | `observation` | short-term | Findings and tool outputs worth keeping for a few days | 7 days, extended by every recall |
@@ -103,6 +104,14 @@ ask(ref_id=<document ref_id>, question="Which endpoints need rate limiting?", mo
 `ask` returns `answer`, the `mode` used, `citations` and `usage`. `mode` is `direct | rag | rlm | auto`;
 with the built-in reasoner the answer is the best-matching chunks (`rag`), with RLM Studio it is a
 synthesised answer. `recall` finds documents by their summary and by phrases inside the body.
+
+### Code snapshots: one per path, revalidated at session start
+
+`retain(type="code", content=<file>, source=<path>)` keeps one live snapshot per path: retaining a
+changed file supersedes the old snapshot. At session start the hook compares every snapshot with its
+file; a snapshot whose file changed or vanished is flagged `needs_review`, hidden from `recall`, and
+listed under `### Needs review`. Re-retain the file to refresh it; pass `include_needs_review=true` to
+`recall` only if you need the stale text. `consolidate(revalidate=true)` runs the same check on demand.
 
 ### Consolidating: short-term → long-term
 

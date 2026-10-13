@@ -5,10 +5,17 @@
       "args": [],
       "env": {
         "MEMKERNEL_PROJECT_ID": "my-project",
-        "MEMKERNEL_CHROMA_PERSIST_PATH": "${HOME}/.memkernel/my-project"
+        "MEMKERNEL_CHROMA_PERSIST_PATH": "${HOME}/.memkernel/my-project",
+        "MEMKERNEL_PROJECT_ROOT": "/path/to/my-project"
       },
       "disabled": false,
-      "autoApprove": ["recall", "get", "ask", "retain", "consolidate"]
+      "autoApprove": [
+        "recall",
+        "get",
+        "ask",
+        "retain",
+        "consolidate"
+      ]
     }
   }
 }
