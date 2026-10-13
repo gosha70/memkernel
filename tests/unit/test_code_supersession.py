@@ -455,3 +455,31 @@ def test_supersedes_link_points_at_the_newest_replaced_snapshot() -> None:
     memory = svc.get(half, touch=False)
     assert memory is not None and memory.supersedes == v2
     assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [half]  # noqa: SLF001
+
+
+def test_interrupted_old_chunk_cleanup_is_finished_by_the_retry() -> None:
+    """A failure after the old snapshot was marked but before its chunks were deleted is repaired on retry."""
+    svc, store, _ = _build()
+    v1 = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    original_delete = store.delete
+    state = {"fail": True}
+
+    def flaky_delete(ref_id: str) -> bool:
+        if state["fail"] and ref_id.startswith(f"{v1}-chunk-"):
+            raise RuntimeError("store hiccup during chunk cleanup")
+        return original_delete(ref_id)
+
+    store.delete = flaky_delete  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="hiccup"):
+        svc.retain(V2, MemoryType.CODE, source="src/a.py")
+    # the marker was written before the failure; v1's chunks are still there
+    v1_memory = svc.get(v1, touch=False)
+    assert v1_memory is not None and v1_memory.superseded_by is not None
+    assert len(_chunks_of(store, v1)) == 2
+    v2 = v1_memory.superseded_by
+
+    state["fail"] = False
+    assert svc.retain(V2, MemoryType.CODE, source="src/a.py") == v2  # dedup hit finishes the cleanup
+    assert _chunks_of(store, v1) == []
+    assert len(_chunks_of(store, v2)) == 2
+    assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [v2]  # noqa: SLF001

@@ -365,24 +365,33 @@ class MemoryService:
         """
         if not source:
             return
-        others = [m for m in self._live_code_canonicals(source) if m.ref_id != ref_id]
-        if not others:
+        records = self._code_records(source)
+        referenced = frozenset(ref for m in records for ref in m.chunk_refs)
+        canonicals = [m for m in records if m.ref_id != ref_id and not _is_code_chunk(m, referenced)]
+        others = [m for m in canonicals if m.superseded_by is None]
+        # Snapshots an earlier, interrupted attempt already marked as replaced by
+        # this one may still own chunk records: they are cleanup targets too.
+        marked_before = [m for m in canonicals if m.superseded_by == ref_id]
+        if not others and not marked_before:
             return
         canonical = self._vector_store.get_by_id(ref_id)
-        other_ids = {m.ref_id for m in others}
-        if canonical is not None and canonical.supersedes not in other_ids:
+        if others and canonical is not None and canonical.supersedes not in {m.ref_id for m in others}:
             # point the provenance link at the newest snapshot this one replaces
             newest = max(others, key=lambda m: m.timestamp)
             self._vector_store.update_metadata(ref_id, {"supersedes": newest.ref_id})
         for old in others:
             self._mark_superseded(old.ref_id, ref_id)
-        for old in others:
+        for old in [*others, *marked_before]:
             self._delete_owned_chunks(old)
+
+    def _code_records(self, source: str) -> list[Memory]:
+        """Every `code` record (canonicals and chunks) stored for ``source``, metadata only."""
+        where = {"$and": [{"type": MemoryType.CODE.value}, {"source": source}]}
+        return self._vector_store.list_all(where, include_content=False)
 
     def _live_code_canonicals(self, source: str) -> list[Memory]:
         """Live (not superseded) canonical `code` records for ``source``, chunk records excluded."""
-        where = {"$and": [{"type": MemoryType.CODE.value}, {"source": source}]}
-        records = self._vector_store.list_all(where, include_content=False)
+        records = self._code_records(source)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
         return [m for m in records if m.superseded_by is None and not _is_code_chunk(m, referenced)]
 
