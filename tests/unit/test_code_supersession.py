@@ -11,6 +11,7 @@ import pytest
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import CODE_CHUNK_TAG, MemoryTier, MemoryType
 from memkernel.core.services import MemoryService
+from memkernel.memory.dedup import compute_content_hash
 from memkernel.retrieval.search import HybridSearchService
 from memkernel.retrieval.sparse import BM25Index
 from memkernel.storage.chroma import ChromaVectorStore
@@ -400,7 +401,7 @@ def test_dedup_hit_finishes_an_interrupted_retain() -> None:
             "timestamp": sample.timestamp.isoformat(),
             "type": "code",
             "source": "src/a.py",
-            "hash": __import__("memkernel.memory.dedup", fromlist=["compute_content_hash"]).compute_content_hash(V2),
+            "hash": compute_content_hash(V2),
             "token_count": 1,
         },
     )
@@ -411,3 +412,46 @@ def test_dedup_hit_finishes_an_interrupted_retain() -> None:
     half_memory, v1_memory = svc.get(half, touch=False), svc.get(v1, touch=False)
     assert half_memory is not None and half_memory.supersedes == v1 and half_memory.chunk_refs
     assert v1_memory is not None and v1_memory.superseded_by == half
+
+
+def test_partial_chunk_index_is_rebuilt_on_the_next_retain() -> None:
+    """chunk_refs is the completion marker: a canonical with some chunks but no chunk_refs is re-indexed."""
+    svc, store, _ = _build()
+    ref = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    # simulate an interruption after the first chunk: drop the marker and one chunk
+    store.update_metadata(ref, {"chunk_refs": ""})
+    store.delete(f"{ref}-chunk-1")
+    assert len(_chunks_of(store, ref)) == 1
+    assert svc.retain(V1, MemoryType.CODE, source="src/a.py") == ref
+    chunks = _chunks_of(store, ref)
+    assert [c.ref_id for c in chunks] == [f"{ref}-chunk-0", f"{ref}-chunk-1"]
+    memory = svc.get(ref, touch=False)
+    assert memory is not None and memory.chunk_refs == [f"{ref}-chunk-0", f"{ref}-chunk-1"]
+
+
+def test_supersedes_link_points_at_the_newest_replaced_snapshot() -> None:
+    svc, store, _ = _build()
+    v1 = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    v2 = svc.retain(V2, MemoryType.CODE, source="src/a.py")
+    # a half-written third snapshot whose stale supersedes link points at v1
+    half = "half-written-v3"
+    sample = store.list_all()[0]
+    store.upsert(
+        ref_id=half,
+        content=V1 + "\n# v3",
+        embedding=MockEmbedding().embed([V1 + "\n# v3"])[0],
+        metadata={
+            "project_id": sample.project_id,
+            "session_id": "default",
+            "timestamp": sample.timestamp.isoformat(),
+            "type": "code",
+            "source": "src/a.py",
+            "hash": compute_content_hash(V1 + "\n# v3"),
+            "token_count": 1,
+            "supersedes": v1,
+        },
+    )
+    assert svc.retain(V1 + "\n# v3", MemoryType.CODE, source="src/a.py") == half
+    memory = svc.get(half, touch=False)
+    assert memory is not None and memory.supersedes == v2
+    assert [m.ref_id for m in svc._live_code_canonicals("src/a.py")] == [half]  # noqa: SLF001

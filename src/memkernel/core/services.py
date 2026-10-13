@@ -321,10 +321,16 @@ class MemoryService:
         try:
             self._index_missing_chunks(ref_id, content, resolved_session, checkpoint, source, extra)
         except Exception:
-            # Compensate: a canonical without its index entries must not stay findable.
-            for chunk in self._owned_chunks(ref_id):
-                self._delete_record(chunk.ref_id)
+            # Compensate: a canonical without its index entries must not stay
+            # findable. Best effort — the canonical goes first so that a store
+            # failing mid-compensation leaves orphan chunks (which recall hides
+            # and health reports), never a live half-written snapshot.
             self._delete_record(ref_id)
+            for chunk in self._owned_chunks(ref_id):
+                try:
+                    self._delete_record(chunk.ref_id)
+                except Exception:
+                    logger.warning("could not remove chunk %s while compensating a failed retain", chunk.ref_id)
             raise
         self._supersede_other_snapshots(ref_id, source)
         return ref_id
@@ -332,9 +338,19 @@ class MemoryService:
     def _index_missing_chunks(
         self, ref_id: str, content: str, session_id: str, checkpoint: bool, source: str, extra: _ExtraMeta
     ) -> None:
-        """Write the owned chunk records of ``ref_id`` unless they already exist (idempotent)."""
-        if self._chunker is None or self._owned_chunks(ref_id):
+        """Write the owned chunk records of ``ref_id`` unless the index is complete (idempotent).
+
+        ``chunk_refs`` on the canonical is the completion marker: it is written
+        last, after every chunk record, so a partial index from an interrupted
+        retain has no ``chunk_refs`` and is rebuilt from scratch.
+        """
+        if self._chunker is None:
             return
+        canonical = self._vector_store.get_by_id(ref_id)
+        if canonical is None or canonical.chunk_refs:
+            return
+        for partial in self._owned_chunks(ref_id):
+            self._delete_record(partial.ref_id)
         chunks = self._chunker.chunk(content, {"source": source})
         chunk_ids = self._index_code_chunks(ref_id, chunks, session_id, checkpoint, source, extra)
         if chunk_ids:
@@ -353,7 +369,9 @@ class MemoryService:
         if not others:
             return
         canonical = self._vector_store.get_by_id(ref_id)
-        if canonical is not None and not canonical.supersedes:
+        other_ids = {m.ref_id for m in others}
+        if canonical is not None and canonical.supersedes not in other_ids:
+            # point the provenance link at the newest snapshot this one replaces
             newest = max(others, key=lambda m: m.timestamp)
             self._vector_store.update_metadata(ref_id, {"supersedes": newest.ref_id})
         for old in others:
