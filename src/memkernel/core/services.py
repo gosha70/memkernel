@@ -9,7 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -22,7 +22,11 @@ from memkernel.core.models import (
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
+    REVIEW_REASON_CHANGED,
+    REVIEW_REASON_KEY,
+    REVIEW_REASON_MISSING,
     SUPERSEDED_BY_KEY,
     Answer,
     ArtifactRef,
@@ -513,11 +517,13 @@ class MemoryService:
         top_k: int | None = None,
         tier: MemoryTier | None = None,
         touch: bool = True,
+        include_needs_review: bool = False,
     ) -> list[ArtifactRef]:
         """Search for memories matching the query.
 
         Returns a list of ArtifactRef (lightweight references, no full content).
-        Expired and superseded memories are filtered out from the results.
+        Expired, superseded and (unless ``include_needs_review``) needs-review
+        memories are filtered out from the results.
         Returned memories are marked as accessed (``touch``), which reinforces
         their retention — unless ``touch=False`` (used by maintenance paths).
         BM25 index is self-healed (rebuilt from vector store) if needs_rebuild is set.
@@ -545,7 +551,7 @@ class MemoryService:
                 top_k=fetch_k,
             )
             results = self._search_service.search(search_query)
-            live = self._filter_live(results, search_query)
+            live = self._filter_live(results, search_query, include_needs_review)
 
             store_exhausted = len(results) < fetch_k
             if len(live) >= desired_k or store_exhausted:
@@ -560,12 +566,16 @@ class MemoryService:
         self._last_recall_ms = (time.perf_counter() - _start) * 1000
         return live
 
-    def _filter_live(self, results: list[ArtifactRef], query: SearchQuery) -> list[ArtifactRef]:
+    def _filter_live(
+        self, results: list[ArtifactRef], query: SearchQuery, include_needs_review: bool = False
+    ) -> list[ArtifactRef]:
         """Drop expired and superseded memories; resolve document chunk hits to their summary.
 
         Superseded means ``superseded_by`` is set (durable, independent of the
         result window); the result-window check on ``supersedes`` links stays
-        as a fallback for legacy links without the marker.
+        as a fallback for legacy links without the marker. The needs-review
+        exclusion is applied here, in Python, never as a store filter, so a
+        record without the key is simply live.
 
         A hit on a document body or chunk record is replaced by the document's
         summary record (the ``document`` memory) carrying the hit's score, so a
@@ -589,13 +599,15 @@ class MemoryService:
             memory = memories.get(ref.ref_id)
             if memory is None or memory.superseded_by:
                 continue
+            if memory.needs_review and not include_needs_review:
+                continue
             if memory.parent_ref:
                 # A code chunk lives and dies with its owner: dropped when the
-                # owner is gone or superseded.
+                # owner is gone, superseded or flagged for review.
                 if memory.parent_ref not in owners:
                     owners[memory.parent_ref] = self._vector_store.get_by_id(memory.parent_ref)
                 owner = owners[memory.parent_ref]
-                if owner is None or owner.superseded_by:
+                if owner is None or owner.superseded_by or (owner.needs_review and not include_needs_review):
                     continue
             if memory.document_id and _is_document_part(memory):
                 if memory.document_id not in summaries:
@@ -810,8 +822,12 @@ class MemoryService:
         limit: int = 20,
         purge: bool = True,
         synthesize: bool = False,
+        revalidate: bool = False,
     ) -> dict[str, Any]:
         """Run a consolidation pass and return promotion candidates.
+
+        ``revalidate=True`` first runs :meth:`revalidate` and adds its report
+        under ``"revalidated"``.
 
         1. Purge expired short-term / working memories (``purge=True``).
         2. Rank the surviving short-term and working memories that have not
@@ -827,6 +843,7 @@ class MemoryService:
         the bookkeeping, the agent does the synthesis (see
         docs/architecture/memory-tiers.md).
         """
+        revalidated = self.revalidate() if revalidate else None
         purged = self.forget_expired() if purge else 0
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
         all_memories = self._vector_store.list_all(where)
@@ -851,7 +868,7 @@ class MemoryService:
                 logger.warning("consolidate(synthesize=True): reasoner failed, no suggestions: %s", exc)
             else:
                 suggested = parse_suggestions(answer.answer)
-        return {
+        report: dict[str, Any] = {
             "purged": purged,
             "candidates": [
                 {
@@ -867,6 +884,75 @@ class MemoryService:
             ],
             "suggested": suggested,
         }
+        if revalidated is not None:
+            report["revalidated"] = revalidated
+        return report
+
+    # ------------------------------------------------------------------
+    # Revalidation of code memories (0.4)
+    # ------------------------------------------------------------------
+
+    def _resolve_source(self, source: str) -> Path | None:
+        """Resolve ``source`` inside the project root; None when it escapes the boundary.
+
+        Relative paths join ``project_root``; absolute paths are taken as given;
+        symlinks are followed and ``..`` normalised before the containment check,
+        so nothing outside the resolved root is ever read.
+        """
+        root = Path(self._settings.project_root).resolve()
+        candidate = Path(source) if Path(source).is_absolute() else root / source
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return None
+        return resolved if resolved.is_relative_to(root) else None
+
+    def revalidate(self) -> dict[str, Any]:
+        """Compare every live canonical `code` memory with its source file; flag or clear ``needs_review``.
+
+        Whole-file hashing: the file's content hash (the same one retain uses)
+        against the stored ``content_hash``. A missing file flags ``missing``, a
+        different hash flags ``changed``, a matching file clears a flag; owned
+        chunk records follow their canonical. Paths outside the project root
+        or unreadable count as ``unknown`` and are left untouched. Nothing else
+        is written.
+        """
+        report: dict[str, Any] = {"checked": 0, "changed": 0, "missing": 0, "cleared": 0, "unknown": 0, "flagged": []}
+        records = self._vector_store.list_all({"type": MemoryType.CODE.value}, include_content=False)
+        referenced = frozenset(ref for m in records for ref in m.chunk_refs)
+        for memory in records:
+            if memory.superseded_by or not memory.source or _is_code_chunk(memory, referenced):
+                continue
+            report["checked"] += 1
+            path = self._resolve_source(memory.source)
+            if path is None:
+                report["unknown"] += 1
+                continue
+            if not path.is_file():
+                reason = REVIEW_REASON_MISSING
+            else:
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    report["unknown"] += 1
+                    continue
+                reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.content_hash else ""
+            if reason:
+                report[reason] += 1
+                report["flagged"].append({"ref_id": memory.ref_id, "source": memory.source, "reason": reason})
+                if not (memory.needs_review and memory.review_reason == reason):
+                    self._set_review(memory.ref_id, True, reason)
+            elif memory.needs_review:
+                report["cleared"] += 1
+                self._set_review(memory.ref_id, False, "")
+        return report
+
+    def _set_review(self, ref_id: str, flag: bool, reason: str) -> None:
+        """Write the review flag on a canonical and on its owned chunk records."""
+        update = {NEEDS_REVIEW_KEY: flag, REVIEW_REASON_KEY: reason}
+        self._vector_store.update_metadata(ref_id, update)
+        for chunk in self._owned_chunks(ref_id):
+            self._vector_store.update_metadata(chunk.ref_id, update)
 
     def forget_expired(self) -> int:
         """Delete every memory whose retention window has lapsed. Returns the number deleted."""

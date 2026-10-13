@@ -26,15 +26,15 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 8 | | `MemoryService.revalidate()`: resolve `source` inside the `project_root` boundary (symlinks, `..`), whole-file hash compare, flag/clear canonical and owned chunk records, report; writes nothing else (FR-001, FR-003) | `src/memkernel/core/services.py` | build | [ ] |
-| 9 | | `recall(include_needs_review=False)` exclusion applied in Python in `_filter_live` incl. chunk hits whose owner is flagged; `recall` MCP flag; test that a record without the key is still recalled (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [ ] |
-| 10 | | `consolidate(revalidate=False)` with `"revalidated"` report; MCP flag; `on_session_start` runs it and prints `### Needs review` only when non-empty (FR-005) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py`, `src/memkernel/lifecycle.py` | build | [ ] |
-| 11 | [P] | `POST /revalidate` admin endpoint (FR-006) | `src/memkernel/api/routes/admin.py` | build | [ ] |
-| 12 | | Unit tests for revalidation (changed / missing / cleared / unknown / boundary escape / owned-chunk propagation), recall exclusion incl. missing-key record, consolidate report, lifecycle section, endpoint (FR-014) | `tests/unit/test_revalidation.py`, `tests/unit/test_lifecycle_component.py`, `tests/unit/test_admin_api.py` | build | [ ] |
+| 8 | | `MemoryService.revalidate()`: resolve `source` inside the `project_root` boundary (symlinks, `..`), whole-file hash compare, flag/clear canonical and owned chunk records, report; writes nothing else (FR-001, FR-003) | `src/memkernel/core/services.py` | build | [x] |
+| 9 | | `recall(include_needs_review=False)` exclusion applied in Python in `_filter_live` incl. chunk hits whose owner is flagged; `recall` MCP flag; test that a record without the key is still recalled (FR-004) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py` | build | [x] |
+| 10 | | `consolidate(revalidate=False)` with `"revalidated"` report; MCP flag; `on_session_start` runs it and prints `### Needs review` only when non-empty (FR-005) | `src/memkernel/core/services.py`, `src/memkernel/mcp/tools/memory.py`, `src/memkernel/lifecycle.py` | build | [x] |
+| 11 | [P] | `POST /revalidate` admin endpoint (FR-006) | `src/memkernel/api/routes/admin.py` | build | [x] |
+| 12 | | Unit tests for revalidation (changed / missing / cleared / unknown / boundary escape / owned-chunk propagation), recall exclusion incl. missing-key record, consolidate report, lifecycle section, endpoint (FR-014) | `tests/unit/test_revalidation.py`, `tests/unit/test_lifecycle_component.py`, `tests/unit/test_admin_api.py` | build | [x] |
 
 **Checkpoint US2** — verify before continuing:
-- [ ] `poetry run pytest tests/unit/test_revalidation.py tests/unit/test_lifecycle_component.py tests/unit/test_admin_api.py -q` green
-- [ ] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
+- [x] `poetry run pytest tests/unit/test_revalidation.py tests/unit/test_lifecycle_component.py tests/unit/test_admin_api.py -q` green
+- [x] `poetry run pytest -m "not slow" -q` green; mypy and ruff clean
 
 ---
 

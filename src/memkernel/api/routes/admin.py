@@ -1,6 +1,6 @@
 # Copyright (c) 2026 EGOGE
 # SPDX-License-Identifier: Apache-2.0
-"""Admin API route handlers: /health, /stats, /collections."""
+"""Admin API route handlers: /health, /stats, /collections, /revalidate."""
 
 from __future__ import annotations
 
@@ -42,3 +42,10 @@ async def collections(request: Request) -> list[dict[str, Any]]:
     """List all project collections with record counts."""
     svc = _svc(request)
     return svc.list_collections()
+
+
+@router.post("/revalidate")
+async def revalidate(request: Request) -> dict[str, Any]:
+    """Check every code memory against its source file; flag changed or missing ones (needs_review)."""
+    svc = _svc(request)
+    return svc.revalidate()

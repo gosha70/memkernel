@@ -41,6 +41,7 @@ HEADING_SESSION_END = "## MemKernel session end"
 HEADING_CHECKPOINT = "### Latest checkpoint"
 HEADING_CONTEXT = "### Long-term context"
 HEADING_CANDIDATES = "### Promotion candidates (short-term memories worth keeping)"
+HEADING_NEEDS_REVIEW = "### Needs review"
 HEADING_WIKI = "### Wiki"
 SEPARATOR = "---"
 
@@ -57,6 +58,7 @@ POST_COMPACT_CONTEXT_TOP_K = 5
 _CHECKPOINT_PREFIX = "SESSION CHECKPOINT — "
 _NO_SUMMARY = "Compaction triggered — no summary provided."
 _PROMOTE_HINT = "Call promote(ref_id, type, content) for anything that should outlive this session."
+_REVIEW_HINT = "These code memories no longer match their source; retain the file again as code to refresh them."
 
 
 class MemoryLifecycle:
@@ -71,8 +73,8 @@ class MemoryLifecycle:
     # ------------------------------------------------------------------
 
     def on_session_start(self) -> str:
-        """Consolidate, then return the checkpoint, long-term context, candidates and wiki pointer."""
-        report = self._service.consolidate(limit=CANDIDATE_LIMIT)
+        """Consolidate with revalidation; return checkpoint, context, candidates, review list and wiki pointer."""
+        report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint("session checkpoint next steps", touch=False)
         context = self._service.recall(
             "decisions conventions active work", tier=MemoryTier.LONG_TERM, top_k=SESSION_START_CONTEXT_TOP_K
@@ -87,6 +89,7 @@ class MemoryLifecycle:
             *(_context_lines(context) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
+        lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
         wiki_index = Path(self._settings.wiki_dir) / "index.md" if self._settings.wiki_dir else None
         if wiki_index is not None and wiki_index.is_file():
             lines.extend(
@@ -176,6 +179,17 @@ class MemoryLifecycle:
 
 def _context_lines(refs: list[ArtifactRef]) -> list[str]:
     return [f"- [{r.type}] {r.preview}" for r in refs]
+
+
+def _needs_review_block(flagged: list[dict[str, Any]]) -> list[str]:
+    if not flagged:
+        return []
+    return [
+        "",
+        HEADING_NEEDS_REVIEW,
+        *(f"- {f['source']} — {f['reason']} — {f['ref_id']}" for f in flagged),
+        _REVIEW_HINT,
+    ]
 
 
 def _candidates_block(candidates: list[dict[str, Any]]) -> list[str]:
