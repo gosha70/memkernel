@@ -4,17 +4,24 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+ENV_PREFIX = "MEMKERNEL_"
+ENV_FILE = ".env"
 
 
 class MemKernelSettings(BaseSettings):
     """All settings are configurable via MEMKERNEL_ prefixed env vars."""
 
     # extra="ignore": a project .env usually holds keys for other tools; they
-    # must not stop the server from starting (issue #15).
-    model_config = SettingsConfigDict(env_prefix="MEMKERNEL_", env_file=".env", extra="ignore")
+    # must not stop the server from starting (issue #15). Misspelled MEMKERNEL_
+    # keys would be ignored too, so settings_customise_sources() warns about them.
+    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_file=ENV_FILE, extra="ignore")
 
     project_id: str = "default"
     default_session_id: str = "default"
@@ -70,3 +77,32 @@ class MemKernelSettings(BaseSettings):
     transport: Literal["stdio", "streamable-http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8765
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Keep the default source order; warn about MEMKERNEL_ keys that match no setting."""
+        for source, origin in ((env_settings, "the environment"), (dotenv_settings, ENV_FILE)):
+            for key in unknown_prefixed_keys(settings_cls, source):
+                logger.warning(
+                    "memkernel: unknown setting %s in %s is ignored; check the spelling against the README", key, origin
+                )
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
+
+
+def unknown_prefixed_keys(settings_cls: type[BaseSettings], source: PydanticBaseSettingsSource) -> list[str]:
+    """Return the MEMKERNEL_ keys ``source`` holds that are not fields of ``settings_cls``, upper-cased."""
+    if not isinstance(source, EnvSettingsSource):
+        return []
+    prefix = ENV_PREFIX.lower()  # case-insensitive sources expose lower-cased keys
+    return sorted(
+        key.upper()
+        for key in source.env_vars
+        if key.lower().startswith(prefix) and key.lower()[len(prefix) :] not in settings_cls.model_fields
+    )
