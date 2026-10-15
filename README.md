@@ -192,6 +192,8 @@ ask(ref_id="<document ref_id>", question="Which endpoints need rate limiting?", 
 ## Configuration
 
 All settings are read from environment variables with the `MEMKERNEL_` prefix, or from a `.env` file.
+Entries in `.env` without the prefix (keys for other tools) are ignored; a `MEMKERNEL_` key that matches no
+setting is logged as a warning at startup.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

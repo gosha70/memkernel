@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The server (and `build_service()`) no longer fails to start when the working
+  directory holds a `.env` with keys for other tools: the `.env` source of
+  `MemKernelSettings` is limited to known settings instead of rejecting the
+  file (#15). `MEMKERNEL_` keys that match no setting (typos) are logged as a
+  warning, in `.env` and in the environment, instead of being dropped silently;
+  unknown constructor arguments still raise.
+
 ## [0.4.0] - 2026-10-12
 
 ### Added
