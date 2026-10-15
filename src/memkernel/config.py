@@ -5,9 +5,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +21,11 @@ ENV_FILE = ".env"
 class MemKernelSettings(BaseSettings):
     """All settings are configurable via MEMKERNEL_ prefixed env vars."""
 
-    # extra="ignore": a project .env usually holds keys for other tools; they
-    # must not stop the server from starting (issue #15). Misspelled MEMKERNEL_
-    # keys would be ignored too, so settings_customise_sources() warns about them.
-    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_file=ENV_FILE, extra="ignore")
+    # Unknown keys stay forbidden (constructor typos raise), but the .env source
+    # is filtered to known settings: a project .env usually holds keys for other
+    # tools and must not stop the server from starting (issue #15). Misspelled
+    # MEMKERNEL_ keys are reported by settings_customise_sources().
+    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_file=ENV_FILE)
 
     project_id: str = "default"
     default_session_id: str = "default"
@@ -87,13 +91,30 @@ class MemKernelSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Keep the default source order; warn about MEMKERNEL_ keys that match no setting."""
+        """Default source order with the .env source limited to known settings.
+
+        Warns about MEMKERNEL_ keys in the environment or in .env that match no setting.
+        """
         for source, origin in ((env_settings, "the environment"), (dotenv_settings, ENV_FILE)):
             for key in unknown_prefixed_keys(settings_cls, source):
                 logger.warning(
                     "memkernel: unknown setting %s in %s is ignored; check the spelling against the README", key, origin
                 )
-        return init_settings, env_settings, dotenv_settings, file_secret_settings
+        return init_settings, env_settings, KnownFieldsOnly(dotenv_settings), file_secret_settings
+
+
+class KnownFieldsOnly(PydanticBaseSettingsSource):
+    """Pass through only the values of ``inner`` that belong to a settings field."""
+
+    def __init__(self, inner: PydanticBaseSettingsSource) -> None:
+        super().__init__(inner.settings_cls)
+        self._inner = inner
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return self._inner.get_field_value(field, field_name)
+
+    def __call__(self) -> dict[str, Any]:
+        return {key: value for key, value in self._inner().items() if key in self.settings_cls.model_fields}
 
 
 def unknown_prefixed_keys(settings_cls: type[BaseSettings], source: PydanticBaseSettingsSource) -> list[str]:

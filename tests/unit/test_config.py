@@ -9,6 +9,7 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from memkernel.config import MemKernelSettings
 
@@ -77,3 +78,11 @@ def test_misspelled_prefixed_key_in_environment_is_reported(
 
     assert "MEMKERNEL_PROJEKT_ID" in caplog.text
     assert "the environment" in caplog.text
+
+
+def test_misspelled_constructor_argument_is_rejected(cwd: Path) -> None:
+    """Only the .env source is lenient; programmatic typos still fail loudly."""
+    (cwd / ".env").write_text("COMPOSE_CONVERT_WINDOWS_PATHS=1\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="projekt_id"):
+        MemKernelSettings(projekt_id="wrong")  # type: ignore[call-arg]
