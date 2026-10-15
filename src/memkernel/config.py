@@ -12,7 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class MemKernelSettings(BaseSettings):
     """All settings are configurable via MEMKERNEL_ prefixed env vars."""
 
-    model_config = SettingsConfigDict(env_prefix="MEMKERNEL_", env_file=".env")
+    # extra="ignore": a project .env usually holds keys for other tools; they
+    # must not stop the server from starting (issue #15).
+    model_config = SettingsConfigDict(env_prefix="MEMKERNEL_", env_file=".env", extra="ignore")
 
     project_id: str = "default"
     default_session_id: str = "default"

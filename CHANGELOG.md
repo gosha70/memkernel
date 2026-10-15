@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The server (and `build_service()`) no longer fails to start when the working
+  directory holds a `.env` with keys for other tools: `MemKernelSettings`
+  ignores entries outside the `MEMKERNEL_` prefix instead of rejecting them
+  (#15).
+
 ## [0.4.0] - 2026-10-12
 
 ### Added
