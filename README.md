@@ -18,6 +18,24 @@ MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory a
 
 **Tiered memory (0.2)**: memories live in three tiers with different persistence rules — *working* (the current task, hours), *short-term* (episodes and observations, decays unless recalled) and *long-term* (decisions, conventions, facts, procedures, code; never decays, replaced by supersession). Recall ranks by relevance, recency and importance; `consolidate` and `promote` move what proved useful into long-term memory; an LLM-wiki bridge keeps a human-readable, git-versioned copy of long-term knowledge. Design: [`docs/architecture/memory-tiers.md`](docs/architecture/memory-tiers.md).
 
+## What MemKernel is, and what it is not
+
+**It is:**
+
+- **Persistent memory for a coding agent.** What the agent retains survives context compaction and the end of a session, in a local ChromaDB store per project.
+- **Explicit.** The agent decides what to retain (decisions, conventions, facts, code snapshots, tasks) and what to recall. The lifecycle hooks only automate the protocol around that: checkpoint before compaction, recovery after it, consolidation and revalidation at session start.
+- **Code-aware.** AST chunking, hybrid search that finds identifiers as well as meaning, and revalidation of `code` memories against the files they came from.
+- **No mandatory generative LLM.** Default retrieval uses a local sentence-transformer embedding model plus BM25 and RRF; nothing generates text inside MemKernel. `ask` with the built-in reasoner returns the best-matching chunks; synthesis is the agent's job, or an optional external reasoner's.
+
+**It is not:**
+
+- **A token optimizer or context compressor.** MemKernel does not shrink the context window, compress prompts, or lower model cost by itself. It adds tool calls and returned content to a session. Any token saving comes from the agent re-reading fewer files or documents after a resume; that is a side effect to measure, not a promise.
+- **A replacement for files, specs and git.** Progress notes, task lists and review records already carry state between sessions. MemKernel adds retrieval by meaning and identifier, tiers with decay, supersession and revalidation on top. When a file already holds everything the next session needs, expect no gain.
+- **An index of the whole repository.** `code` memories are the snapshots the agent chose to retain, not an automatic scan of every file.
+- **A cross-project knowledge base.** One store per project id. Sharing is deliberate: a second server with a shared id, or the wiki bridge.
+
+**Evidence.** `eval/run_eval.py` measures retrieval (recall@k, precision@k, MRR). An agent-level benchmark that runs the same agent with and without MemKernel, including a negative control where files already carry all state, is tracked in [#17](https://github.com/gosha70/memkernel/issues/17). Results will be published per minor release, including the cases with no gain.
+
 ---
 
 ## Requirements

@@ -89,6 +89,13 @@ is blocked on it.
 - [ ] CCT: hooks on the factory, skill text for tiers, feature id tags,
       `MEMKERNEL_WIKI_DIR=knowledge/wiki`
 - [ ] haa: `harness/tools/memory.py`, lifecycle hooks, project id derivation
+- [ ] Agent-level evidence (#17): enter `agent-memory-bench` (public,
+      preregistered, execution-graded, no LLM judge, own control arms incl.
+      files-only) through a reviewable memkernel adapter; add a supplemental
+      suite in its task format for what it does not measure (retain across
+      sessions, compaction recovery, revalidation after a repository change,
+      wiki sharing); one preregistered run on a Claude model published per
+      minor release, nulls and discarded cells included
 
 ## Later / research
 
