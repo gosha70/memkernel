@@ -89,6 +89,7 @@ The standalone repository shipped as `gosha70/wiki-studio` 0.1.0 on
 contract `WikiExporter` and `WikiImporter` follow; memkernel's CI lints
 exporter output with it from 0.4.1. The follow-up is narrowed by
 `specs/memkernel-0-5`: the `memkernel[wiki]` extra exposes lint and health
-on `wiki_export` and routes exports through wiki-studio's promote gate;
+on `wiki_export` and, once wiki-studio 0.2 ships its proposal API
+(gosha70/wiki-studio#7), routes exports through its promote gate;
 `wiki query` is not exposed because its backends shell out to a copilot CLI
 and memkernel runs inside one. See ADR-010 (0.5).

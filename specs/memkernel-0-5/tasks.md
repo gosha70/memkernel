@@ -14,7 +14,7 @@
 | 4 | | Version 0.4.1, CHANGELOG `[0.4.1]` (docs and contract test only) (FR-019) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [x] |
 
 **Checkpoint US1** — verify before continuing:
-- [ ] Contract test runs in CI (dev group installed) and passes against wiki-studio 0.1.0
+- [x] Contract test runs in CI (dev group installed) and passes against wiki-studio 0.1.0
 - [x] `ci.yml` untouched, or the single FR-004 condition documented in the PR
 - [ ] Tag `v0.4.1` after merge (driver)
 
