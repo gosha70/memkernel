@@ -6126,7 +6126,6 @@ description = "The lightning-fast ASGI server."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "sys_platform != \"emscripten\""
 files = [
     {file = "uvicorn-0.54.0-py3-none-any.whl", hash = "sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf"},
     {file = "uvicorn-0.54.0.tar.gz", hash = "sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620"},
@@ -6444,6 +6443,18 @@ files = [
 ]
 
 [[package]]
+name = "wiki-studio"
+version = "0.1.0"
+description = "Karpathy-pattern LLM wiki maintainer: ingest, promote, query, lint and audit a curated markdown knowledge base."
+optional = false
+python-versions = "<3.14,>=3.11"
+groups = ["dev"]
+files = [
+    {file = "wiki_studio-0.1.0-py3-none-any.whl", hash = "sha256:3ba080328731bd441b4c5198265aed75ec646f06204837422207aa819ff84f46"},
+    {file = "wiki_studio-0.1.0.tar.gz", hash = "sha256:c19567b579b09670564b8f03fef0e4e3a9dea379a507e01d31606aacaf655f70"},
+]
+
+[[package]]
 name = "yarl"
 version = "1.25.1"
 description = "Yet another URL library"
@@ -6599,4 +6610,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "d6409926cc8be9ec0c3c8318aaaf730238188b31a24c0f1c8fa48d2e3a0a579d"
+content-hash = "e10b7d141e6eccad8291e523820554a47547377f7d3e5758479435a63b73b3ce"

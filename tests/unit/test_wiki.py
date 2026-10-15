@@ -239,3 +239,25 @@ def test_export_skips_superseded_by_marker_not_window(tmp_path: Path) -> None:
     assert old_memory is not None and old_memory.superseded_by is not None
     report2 = WikiExporter(svc, tmp_path / "other").export(memories=[old_memory])
     assert report2.written == [] and report2.skipped == 1
+
+
+def test_exported_pages_lint_clean_with_wiki_studio(tmp_path: Path) -> None:
+    """Contract with wiki-studio: whatever WikiExporter writes passes its structural lint and audit checks."""
+    api = pytest.importorskip("wiki_studio.api")
+    from wiki_studio.paths import WikiPaths
+
+    svc = _service()
+    svc.retain("Use Postgres for the user DB\n\nBecause of concurrent writes.", MemoryType.DECISION)
+    svc.retain("All services log JSON to stdout; never write log files.", MemoryType.CONVENTION)
+    svc.retain("Run `make verify` before every PR.", MemoryType.PROCEDURE)
+    wiki_dir = tmp_path / "knowledge" / "wiki"
+    report = WikiExporter(svc, wiki_dir).export()
+    assert len(report.written) == 3
+
+    result = api.lint(WikiPaths.for_root(tmp_path, wiki_dir=wiki_dir), health=True)
+
+    assert result.violations == ()
+    assert result.audit_errors == ()
+    assert result.pages_checked == 5  # three pages plus index.md and log.md
+    assert result.health is not None
+    assert {finding.kind for finding in result.health.findings} <= {"weak-orphan"}

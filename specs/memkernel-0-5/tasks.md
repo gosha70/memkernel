@@ -9,13 +9,13 @@
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
 | 1 | | Done in PR #18 (94016f5) before approval: README positioning section and roadmap evidence item; nothing to build, do not re-add (FR-001) | `README.md`, `docs/roadmap.md` | — | [x] |
-| 2 | [P] | `ai-wiki` → wiki-studio in README (bridge section, Related projects), roadmap ("lint and health via wiki-studio"), dated note in ADR-008 (FR-002) | `README.md`, `docs/roadmap.md`, `docs/adr/ADR-008-llm-wiki-as-semantic-layer.md` | build | [ ] |
-| 3 | | wiki-studio as a dev dependency; exporter → `wiki_studio.api.lint` contract test, skipped without the import (FR-003, FR-004) | `pyproject.toml`, `poetry.lock`, `tests/unit/test_wiki.py` | build | [ ] |
-| 4 | | Version 0.4.1, CHANGELOG `[0.4.1]` (docs and contract test only) (FR-019) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [ ] |
+| 2 | [P] | `ai-wiki` → wiki-studio in README (bridge section, Related projects), roadmap ("lint and health via wiki-studio"), dated note in ADR-008 (FR-002) | `README.md`, `docs/roadmap.md`, `docs/adr/ADR-008-llm-wiki-as-semantic-layer.md` | build | [x] |
+| 3 | | wiki-studio as a dev dependency; exporter → `wiki_studio.api.lint` contract test, skipped without the import (FR-003, FR-004) | `pyproject.toml`, `poetry.lock`, `tests/unit/test_wiki.py` | build | [x] |
+| 4 | | Version 0.4.1, CHANGELOG `[0.4.1]` (docs and contract test only) (FR-019) | `pyproject.toml`, `src/memkernel/__init__.py`, `CHANGELOG.md` | build | [x] |
 
 **Checkpoint US1** — verify before continuing:
 - [ ] Contract test runs in CI (dev group installed) and passes against wiki-studio 0.1.0
-- [ ] `ci.yml` untouched, or the single FR-004 condition documented in the PR
+- [x] `ci.yml` untouched, or the single FR-004 condition documented in the PR
 - [ ] Tag `v0.4.1` after merge (driver)
 
 ---
