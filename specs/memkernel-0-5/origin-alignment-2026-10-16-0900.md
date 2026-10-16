@@ -16,3 +16,5 @@ Confidence: high
 
 Notes:
   - Supersedes origin-alignment-2026-10-15-1838.md, whose addendum recorded that task 11 made US3/US4 infeasible as written.
+  - Revised after review of PR #22 (2026-10-16): the `lc-wiki` wiki directory is a declared shared artifact for every arm with an empty destination store; `lc-compact` trials need per-trial evidence that compaction fell between exposure and use, with preregistered exclusion and pairing rules (FR-015a); receipts follow a versioned schema with timestamps, chain position, admission status, configuration and preregistration bindings, and diagnostic numerators and denominators. Origin unchanged; these tighten the experiment contract only.
+  - Second revision on PR #22: trial validity separates verified harness failures and missing compaction (invalid, excluded) from agent timeouts, hook failures and wrong or missing answers (valid failures in the primary endpoint); exposure and evaluation stages are runner-controlled; a hooks-succeeded analysis is secondary and labelled. Origin unchanged.
