@@ -1,0 +1,28 @@
+{
+  "task_id": "lc-reval-identity-casefold",
+  "group": "lc-reval",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "casefold",
+    "case-insensitively"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a __repr__ to User in users.py. Identity rule from the accounts team: user ids compare case-insensitively using str.casefold(). Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "overlay": "s1",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement same_user(a, b) in a new identity.py for two User objects from users.py, following the project's identity rule."
+        }
+      ]
+    }
+  ]
+}

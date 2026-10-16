@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-wiki-release-tags",
+  "group": "lc-wiki",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "rel/",
+    "/rc"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the release team: a release tag is rel/ followed by the version, and a release candidate appends /rc and its number, for example rel/1.4.0/rc2. Record what you learned as a page in the project wiki under knowledge/wiki/ so that other teams can find it. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "namespace": "second",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement tag(major, minor, patch, rc=None) in tags.py returning the release tag, following the release team's decision. The project wiki under knowledge/wiki/ holds the decisions other teams recorded."
+        }
+      ]
+    }
+  ],
+  "shared_artifact": "knowledge/wiki"
+}

@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-wiki-slugs",
+  "group": "lc-wiki",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "40 characters",
+    "non-alphanumeric"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the content team: page slugs are lowercase ASCII words joined by '-', every non-alphanumeric character is dropped, a slug is at most 40 characters and never ends with '-'. Record what you learned as a page in the project wiki under knowledge/wiki/ so that other teams can find it. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "namespace": "second",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement slugify(title) in slugs.py following the content team's decision for page slugs. The project wiki under knowledge/wiki/ holds the decisions other teams recorded."
+        }
+      ]
+    }
+  ],
+  "shared_artifact": "knowledge/wiki"
+}

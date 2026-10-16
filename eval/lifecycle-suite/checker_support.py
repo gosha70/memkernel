@@ -26,3 +26,73 @@ def run_bounded(cmd: Sequence[str], *, cwd: Path, timeout_s: float = 60.0) -> su
         out = exc.stdout if isinstance(exc.stdout, str) else ""
         err = exc.stderr if isinstance(exc.stderr, str) else ""
         return subprocess.CompletedProcess(list(cmd), 124, out, err + "\n[timeout]")
+
+
+RESULT_PATH_ENV = "LC_ORACLE_RESULT"
+RESULT_NONCE_ENV = "LC_ORACLE_NONCE"
+STARTED = "started"
+
+
+class CheckerInfrastructureError(RuntimeError):
+    """The oracle itself could not run; the trial is invalid (checker_crashed), not an agent failure."""
+
+
+def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tuple[bool, str]:
+    """Run ``oracle_dir/driver.py`` against a copy of ``workdir`` and read its verdict from a trusted channel.
+
+    The verdict is never read from stdout, which the candidate's code shares.
+    The driver receives a result path and a nonce through its environment,
+    removes both before it imports the candidate, writes ``started`` before
+    the import and the verdict after grading. No ``started`` record means the
+    oracle never ran (raises CheckerInfrastructureError); ``started`` without a
+    verdict means the candidate's code ended the process or hung, which is the
+    candidate's failure.
+    """
+    import json
+    import os
+    import secrets
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path as _Path
+
+    driver = oracle_dir / "driver.py"
+    if not driver.is_file():
+        raise CheckerInfrastructureError(f"oracle driver missing: {driver}")
+    nonce = secrets.token_hex(16)
+    with tempfile.TemporaryDirectory() as temp:
+        stage = _Path(temp) / "work"
+        result = _Path(temp) / "result.jsonl"
+        shutil.copytree(workdir, stage, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        env = {**os.environ, RESULT_PATH_ENV: str(result), RESULT_NONCE_ENV: nonce}
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(driver), str(stage)],
+                cwd=stage,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                check=False,
+            )
+            exit_code: int | None = completed.returncode
+        except subprocess.TimeoutExpired:
+            exit_code = None
+        records = []
+        if result.exists():
+            for line in result.read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("nonce") == nonce:
+                    records.append(record)
+    if not any(r.get("status") == STARTED for r in records):
+        raise CheckerInfrastructureError(f"oracle did not start (exit {exit_code})")
+    verdicts = [r for r in records if "verdict" in r]
+    if exit_code is None:
+        return False, "candidate code did not finish within the checker's time limit"
+    if not verdicts:
+        return False, f"candidate code ended the grading process (exit {exit_code})"
+    verdict = str(verdicts[-1]["verdict"])
+    return verdict == "OK", verdict

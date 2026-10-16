@@ -1,0 +1,27 @@
+{
+  "task_id": "lc-retain-rounding",
+  "group": "lc-retain",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "half-up",
+    "away from zero"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a short docstring to currency_symbol() in billing.py. Context from the finance team, mentioned while you work: every amount in this project is rounded to cents half-up, away from zero, never with banker's rounding. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Add total(prices) to billing.py. It takes an iterable of decimal strings such as '1.005' and returns their sum rounded to cents, as a string with exactly two decimals, using this project's rounding rule."
+        }
+      ]
+    }
+  ]
+}
