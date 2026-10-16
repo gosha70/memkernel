@@ -16,7 +16,7 @@
 **Checkpoint US1** — verify before continuing:
 - [x] Contract test runs in CI (dev group installed) and passes against wiki-studio 0.1.0
 - [x] `ci.yml` untouched, or the single FR-004 condition documented in the PR
-- [ ] Tag `v0.4.1` after merge (driver)
+- [x] Tag `v0.4.1` after merge (driver): v0.4.1 on 24f354d, PyPI lists 0.4.1 (wheel + sdist)
 
 ---
 
@@ -24,10 +24,10 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 5 | [P] | Open the wiki-studio issue for FR-010 (`api.propose`, `wiki_studio.schema`, `consumers.md` fix) with the contract memkernel needs | wiki-studio issue | driver | [ ] |
-| 6 | [P] | ADR-010: wiki-studio as wiki maintainer, optional extra, adopted and rejected capabilities, fallback (FR-005) | `docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md` | build | [ ] |
-| 7 | | `[wiki]` extra `wiki-studio>=0.1,<1`; README install lines; lazy import helper, silent when absent, warning only on explicit request (FR-005, FR-006) | `pyproject.toml`, `README.md`, `src/memkernel/wiki/studio.py` | build | [ ] |
-| 8 | | Post-export lint adapter against wiki-studio 0.1: `ExportReport.lint: LintSummary | None` with `HealthItem` copied field for field from `HealthFinding`; `wiki_export` returns `"lint"` or `null` + `lint_hint`; tool set stays nine; tests with the extra and with the import simulated absent; pyproject optional-extra test (FR-006, FR-008, SC-1) | `src/memkernel/wiki/studio.py`, `src/memkernel/wiki/sync.py`, `src/memkernel/mcp/tools/wiki.py`, `tests/unit/test_wiki_studio.py` | build | [ ] |
+| 5 | [P] | Open the wiki-studio issue for FR-010 (`api.propose`, `wiki_studio.schema`, `consumers.md` fix) with the contract memkernel needs | wiki-studio issue | driver | [x] |
+| 6 | [P] | ADR-010: wiki-studio as wiki maintainer, optional extra, adopted and rejected capabilities, fallback (FR-005) | `docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md` | build | [x] |
+| 7 | | `[wiki]` extra `wiki-studio>=0.1,<1`; README install lines; lazy import helper, silent when absent, warning only on explicit request (FR-005, FR-006) | `pyproject.toml`, `README.md`, `src/memkernel/wiki/studio.py` | build | [x] |
+| 8 | | Post-export lint adapter against wiki-studio 0.1: `ExportReport.lint: LintSummary | None` with `HealthItem` copied field for field from `HealthFinding`; `wiki_export` returns `"lint"` or `null` + `lint_hint`; tool set stays nine; tests with the extra and with the import simulated absent; pyproject optional-extra test (FR-006, FR-008, SC-1) | `src/memkernel/wiki/studio.py`, `src/memkernel/wiki/sync.py`, `src/memkernel/mcp/tools/wiki.py`, `tests/unit/test_wiki_studio.py` | build | [x] |
 | 9 | | **(≥ 0.2)** Raise the pin to `>=0.2,<1`; `wiki_proposals_dir` setting + README row; `WikiExporter.export()` through `propose` + `promote`, direct writer otherwise; gate tests: clean export identical to direct write, violating draft rejected, 0.1 or no extra → unchanged (FR-007) | `pyproject.toml`, `src/memkernel/config.py`, `src/memkernel/wiki/sync.py`, `README.md`, `tests/unit/test_wiki_studio.py` | build | [ ] |
 | 10 | | **(≥ 0.2)** Raise the dev pin to `>=0.2,<1` and update `poetry.lock`; schema contract test (`EXPORT_MAP`, `IMPORT_MAP`, `PAGE_SECTIONS` vs `wiki_studio.schema`) that fails on a missing module unless `MK_TEST_NO_EXTRA=1` (FR-009, FR-019) | `pyproject.toml`, `poetry.lock`, `tests/unit/test_wiki.py` | build | [ ] |
 

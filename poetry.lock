@@ -6448,11 +6448,12 @@ version = "0.1.0"
 description = "Karpathy-pattern LLM wiki maintainer: ingest, promote, query, lint and audit a curated markdown knowledge base."
 optional = false
 python-versions = "<3.14,>=3.11"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "wiki_studio-0.1.0-py3-none-any.whl", hash = "sha256:3ba080328731bd441b4c5198265aed75ec646f06204837422207aa819ff84f46"},
     {file = "wiki_studio-0.1.0.tar.gz", hash = "sha256:c19567b579b09670564b8f03fef0e4e3a9dea379a507e01d31606aacaf655f70"},
 ]
+markers = {main = "extra == \"wiki\""}
 
 [[package]]
 name = "yarl"
@@ -6607,7 +6608,10 @@ idna = ">=2.0"
 multidict = ">=4.0"
 propcache = ">=0.2.1"
 
+[extras]
+wiki = ["wiki-studio"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "e10b7d141e6eccad8291e523820554a47547377f7d3e5758479435a63b73b3ce"
+content-hash = "315494e6b72dfcf5f17f795751ec04f3b8d123c30f2948d4e965bac2da5444be"

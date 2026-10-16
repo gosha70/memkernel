@@ -31,6 +31,11 @@ tree-sitter-python = ">=0.23"
 pydantic = ">=2.0,<3"
 pydantic-settings = ">=2.0,<3"
 fastapi = ">=0.115,<1"
+# Optional integrations (ADR-010): installed only through an extra; imported lazily.
+wiki-studio = { version = ">=0.1,<1", optional = true }
+
+[tool.poetry.extras]
+wiki = ["wiki-studio"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
@@ -62,6 +67,11 @@ python_version = "3.11"
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# wiki-studio 0.1 ships no py.typed; it is imported lazily behind the [wiki] extra (ADR-010).
+module = ["wiki_studio", "wiki_studio.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 markers = [

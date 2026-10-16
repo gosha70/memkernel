@@ -11,6 +11,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP  # noqa: TC002 — runtime import required by FastMCP introspection
 from mcp.server.fastmcp.server import Context  # noqa: TC002
 
+from memkernel.wiki.studio import INSTALL_HINT
 from memkernel.wiki.sync import WikiExporter, WikiImporter
 
 
@@ -38,11 +39,28 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         """Compile long-term memories (decision, convention, fact, procedure) that have no wiki
         page yet into draft markdown pages under wiki_dir (default MEMKERNEL_WIKI_DIR), and
         append them to index.md and log.md. Review and curate the drafts before marking stable.
+        With the memkernel[wiki] extra installed, "lint" carries wiki-studio's violations, audit
+        errors and health findings for the whole wiki after the export (curated pages included);
+        without the extra it is null and "lint_hint" says how to enable it; if the lint pass itself
+        failed it is null and "lint_error" says why. The files written are the same in every case.
         """
         app_ctx = _context(ctx)
-        exporter = WikiExporter(app_ctx.memory_service, _resolve_wiki_dir(wiki_dir, app_ctx.settings))
+        exporter = WikiExporter(
+            app_ctx.memory_service,
+            _resolve_wiki_dir(wiki_dir, app_ctx.settings),
+            project_root=Path(app_ctx.settings.project_root),
+        )
         report = exporter.export()
-        return json.dumps({"written": report.written, "skipped": report.skipped})
+        payload: dict[str, Any] = {"written": report.written, "skipped": report.skipped}
+        if report.lint is not None:
+            payload["lint"] = report.lint.model_dump(mode="json")
+        elif report.lint_error is not None:
+            payload["lint"] = None
+            payload["lint_error"] = report.lint_error
+        else:
+            payload["lint"] = None
+            payload["lint_hint"] = INSTALL_HINT
+        return json.dumps(payload)
 
     @server.tool()
     async def wiki_import(

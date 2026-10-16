@@ -355,6 +355,11 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
         export = json.loads(_text(result))
         assert export["written"] == ["decisions/use-arq-for-background-jobs.md"]
         assert (wiki_dir / "index.md").is_file() and (wiki_dir / "log.md").is_file()
+        assert "lint" in export  # wiki-studio findings with the extra, null + lint_hint without it
+        if export["lint"] is None:
+            assert export["lint_hint"]
+        else:
+            assert export["lint"]["violations"] == []
 
         # Curate the draft, then import it: recall must return the curated page version.
         page = wiki_dir / "decisions/use-arq-for-background-jobs.md"
