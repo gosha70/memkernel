@@ -85,7 +85,7 @@ is blocked on it.
       CI lints `WikiExporter` output with it (0.4.1)
 - [ ] `memkernel[wiki]` extra (ADR-010, specs/memkernel-0-5): lint and
       health via wiki-studio on `wiki_export`; the promote gate and a schema
-      drift test on wiki-studio 0.2 (gosha70/wiki-studio#7); no `wiki query`
+      drift test on wiki-studio 0.3.1 (gosha70/wiki-studio#7, #17); no `wiki query`
       tool (its backends shell out to a copilot CLI)
 - [ ] New `ragkit` rebuilt from `document-assistant/src/rag/` (langchain-free);
       memkernel contributes `ASTChunker` and n-list `rrf_fuse`, then depends

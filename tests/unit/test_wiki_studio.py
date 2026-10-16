@@ -232,3 +232,129 @@ def test_initialisation_error_is_a_lint_error_logged_once(
     assert report.lint is None
     assert report.lint_error is not None and "failed to initialise" in report.lint_error
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
+
+
+# ── the promote gate (FR-007, SC-2) ───────────────────────────────────────────
+
+FIXED_DAY = "2026-10-16"
+WRITTEN = ("decisions", "concepts", "workflows")
+
+
+def _written_files(wiki_dir: Path) -> dict[str, str]:
+    """Pages, index.md and log.md: what SC-2 compares (the gate's .audit/ is excluded)."""
+    files = {}
+    for path in sorted(wiki_dir.rglob("*.md")):
+        rel = path.relative_to(wiki_dir).as_posix()
+        if rel in ("index.md", "log.md") or rel.split("/")[0] in WRITTEN:
+            files[rel] = path.read_text(encoding="utf-8")
+    return files
+
+
+@pytest.fixture
+def fixed_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    from memkernel.wiki import sync
+
+    monkeypatch.setattr(sync, "_today", lambda: FIXED_DAY)
+
+
+def test_gated_export_matches_the_direct_writer_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
+) -> None:
+    pytest.importorskip("wiki_studio.api")
+    from memkernel.wiki import sync
+
+    gated_wiki, direct_wiki = tmp_path / "gated" / "wiki", tmp_path / "direct" / "wiki"
+    exporter = _export_three(gated_wiki, tmp_path / "gated")  # one store, so both wikis cite the same ref_ids
+    gated = exporter.export()
+    monkeypatch.setattr(sync, "gate_available", lambda: None)
+    direct = WikiExporter(exporter._service, direct_wiki, project_root=tmp_path / "direct").export()
+
+    assert gated.gated is True and direct.gated is False and gated.gate_error is None
+    assert gated.written == direct.written and len(gated.written) == 3
+    assert _written_files(gated_wiki) == _written_files(direct_wiki)
+    assert (gated_wiki / ".audit" / "proposals").is_dir()  # the gate's own trail, outside the comparison
+
+
+def test_the_proposals_directory_is_explicit_or_memkernels_default(tmp_path: Path) -> None:
+    pytest.importorskip("wiki_studio.api")
+    svc_dir = tmp_path / "explicit"
+    exporter = _export_three(svc_dir / "wiki", svc_dir)
+    exporter._proposals_dir = svc_dir / "props"  # what the tool passes from MEMKERNEL_WIKI_PROPOSALS_DIR
+    assert exporter.export().gated
+    assert any((svc_dir / "props" / ".applied").iterdir())
+
+    default_dir = tmp_path / "default"
+    assert _export_three(default_dir / "wiki", default_dir).export().gated
+    assert any((default_dir / ".memkernel" / "wiki-proposals" / ".applied").iterdir())
+
+
+def test_a_rejected_export_leaves_pages_index_and_log_as_they_were(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
+) -> None:
+    pytest.importorskip("wiki_studio.api")
+    from memkernel.wiki import sync
+
+    # A decision page placed in concepts/ violates the schema; the gate refuses the whole patch-set.
+    monkeypatch.setitem(sync.EXPORT_MAP, MemoryType.DECISION, ("decision", "concepts"))
+
+    fresh = tmp_path / "fresh" / "wiki"
+    report = _export_three(fresh, tmp_path / "fresh").export()
+    assert report.gate_error is not None and "rejected" in report.gate_error
+    assert report.written == [] and report.gated is False
+    assert _written_files(fresh) == {}  # the scaffold this call created was removed again
+
+    existing = tmp_path / "existing" / "wiki"
+    existing.mkdir(parents=True)
+    (existing / "index.md").write_text(
+        sync._index_scaffold() + "- [Old](concepts/old.md) — curated.\n", encoding="utf-8"
+    )
+    (existing / "log.md").write_text(sync._log_scaffold(), encoding="utf-8")
+    before = _written_files(existing)
+    assert _export_three(existing, tmp_path / "existing").export().gate_error is not None
+    assert _written_files(existing) == before
+
+
+def test_without_the_gate_the_direct_writer_runs_and_only_a_requested_gate_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_wiki_studio: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
+
+    plain = _export_three(tmp_path / "plain" / "wiki", tmp_path / "plain").export()
+    assert plain.gated is False and len(plain.written) == 3
+    assert not caplog.records  # absence of the extra is silent
+
+    asked = WikiExporter(
+        _service(), tmp_path / "asked" / "wiki", project_root=tmp_path, proposals_dir=tmp_path / "props"
+    )
+    asked.export()
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]  # MEMKERNEL_WIKI_PROPOSALS_DIR set, no gate
+    assert INSTALL_HINT in caplog.text
+
+
+def test_export_without_index_updates_takes_the_direct_writer(tmp_path: Path) -> None:
+    """Pages without index entries are orphans, which the gate rejects by design."""
+    pytest.importorskip("wiki_studio.api")
+    report = _export_three(tmp_path / "wiki", tmp_path).export(update_index=False)
+    assert report.gated is False and len(report.written) == 3
+    assert not (tmp_path / "wiki" / "index.md").exists() and not (tmp_path / "wiki" / ".audit").exists()
+
+
+def test_bypassing_a_requested_gate_with_update_index_false_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    pytest.importorskip("wiki_studio.api")
+    caplog.set_level(logging.WARNING, logger="memkernel.wiki.sync")
+    exporter = WikiExporter(_service(), tmp_path / "wiki", project_root=tmp_path, proposals_dir=tmp_path / "props")
+    exporter._service.retain("Use arq for background jobs", MemoryType.DECISION)
+
+    report = exporter.export(update_index=False)
+
+    assert report.gated is False and report.written
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert "bypasses it" in caplog.text
+
+    caplog.clear()
+    quiet = WikiExporter(_service(), tmp_path / "wiki2", project_root=tmp_path)  # gate not requested
+    quiet._service.retain("Use arq for background jobs", MemoryType.DECISION)
+    quiet.export(update_index=False)
+    assert not caplog.records

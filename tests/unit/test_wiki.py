@@ -261,3 +261,29 @@ def test_exported_pages_lint_clean_with_wiki_studio(tmp_path: Path) -> None:
     assert result.pages_checked == 5  # three pages plus index.md and log.md
     assert result.health is not None
     assert {finding.kind for finding in result.health.findings} <= {"weak-orphan"}
+
+
+def test_memkernel_schema_constants_match_wiki_studio_schema() -> None:
+    """Drift guard (FR-009): memkernel keeps its own constants; wiki-studio's published schema must agree.
+
+    Fails, never skips, when ``wiki_studio.schema`` is missing, unless ``MK_TEST_NO_EXTRA=1`` marks a
+    deliberate no-extra run. The variable is outside the MEMKERNEL_ prefix on purpose: MemKernelSettings
+    warns about unknown prefixed keys.
+    """
+    import os
+
+    try:
+        from wiki_studio.schema import PAGE_TYPES, VALID_PAGE_TYPES
+    except ImportError:
+        if os.environ.get("MK_TEST_NO_EXTRA") == "1":
+            pytest.skip("deliberate no-extra run")
+        raise
+
+    from memkernel.wiki.sync import EXPORT_MAP, IMPORT_MAP, PAGE_SECTIONS
+
+    for page_type, directory in EXPORT_MAP.values():
+        assert PAGE_TYPES[page_type].directory == directory, page_type
+    for page_type, sections in PAGE_SECTIONS.items():
+        assert tuple(sections) == tuple(PAGE_TYPES[page_type].required_sections), page_type
+        assert PAGE_TYPES[page_type].promotable, page_type
+    assert set(IMPORT_MAP) <= set(VALID_PAGE_TYPES)

@@ -18,6 +18,7 @@ supersede their previous version.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +26,16 @@ from typing import TYPE_CHECKING
 
 from memkernel.core.models import MemoryTier, MemoryType
 from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
-from memkernel.wiki.studio import LintError, LintSummary, lint_wiki
+from memkernel.wiki.studio import (
+    GatedPage,
+    GateError,
+    LintError,
+    LintSummary,
+    gate_available,
+    lint_wiki,
+    load_studio,
+    propose_and_promote,
+)
 
 if TYPE_CHECKING:
     from memkernel.core.models import Memory
@@ -36,6 +46,7 @@ logger = logging.getLogger(__name__)
 WIKI_TAG = "wiki"
 INDEX_FILE = "index.md"
 LOG_FILE = "log.md"
+DEFAULT_PROPOSALS_SUBDIR = Path(".memkernel") / "wiki-proposals"
 
 # MemoryType -> (page_type, directory). CODE is not exported: code lives in the
 # repo. DOCUMENT is not exported either: documents are sources, not wiki pages.
@@ -87,6 +98,8 @@ class ExportReport:
     skipped: int = 0
     lint: LintSummary | None = None
     lint_error: str | None = None
+    gated: bool = False  # the pages went through wiki-studio's promote gate
+    gate_error: str | None = None  # the gate rejected the export; nothing was written
 
 
 @dataclass
@@ -100,11 +113,22 @@ class ImportReport:
 class WikiExporter:
     """Compile long-term memories into draft wiki pages under ``wiki_dir``."""
 
-    def __init__(self, service: MemoryService, wiki_dir: Path, project_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        service: MemoryService,
+        wiki_dir: Path,
+        project_root: Path | None = None,
+        proposals_dir: Path | None = None,
+    ) -> None:
         self._service = service
         self._wiki_dir = Path(wiki_dir)
         # The root ``path:`` sources resolve against; memkernel's project root when the tool passes it.
         self._project_root = Path(project_root) if project_root is not None else self._wiki_dir.parent
+        # An explicit proposals directory is a request for the gate (FR-006): its absence is then worth a warning.
+        self._proposals_requested = proposals_dir is not None
+        self._proposals_dir = (
+            Path(proposals_dir) if proposals_dir is not None else self._project_root / DEFAULT_PROPOSALS_SUBDIR
+        )
 
     def export(self, memories: list[Memory] | None = None, update_index: bool = True) -> ExportReport:
         """Write one page per exportable memory that is not already a wiki page.
@@ -119,6 +143,7 @@ class WikiExporter:
         """
         report = ExportReport()
         candidates = memories if memories is not None else self._service.list_memories(tier=MemoryTier.LONG_TERM)
+        planned: list[tuple[str, WikiPage]] = []
         for memory in candidates:
             mapping = EXPORT_MAP.get(memory.type)
             if mapping is None or WIKI_TAG in memory.tags or memory.superseded_by or memory.chunk_refs:
@@ -126,22 +151,85 @@ class WikiExporter:
                 continue
             page_type, directory = mapping
             page = self._page_for(memory, page_type)
-            target = self._wiki_dir / directory / f"{page.slug}.md"
-            if target.exists():
+            rel = f"{directory}/{page.slug}.md"
+            if (self._wiki_dir / rel).exists() or any(r == rel for r, _ in planned):
                 report.skipped += 1
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(render_page(page), encoding="utf-8")
-            rel = f"{directory}/{page.slug}.md"
-            report.written.append(rel)
-            if update_index:
-                self._append_index(rel, page)
-                self._append_log(page, "created")
+            planned.append((rel, page))
+
+        # Pages without index entries are orphans, which the gate rejects by design; update_index=False
+        # therefore always takes the direct writer.
+        api = gate_available() if planned and update_index else None
+        if self._proposals_requested and api is None:
+            if planned and not update_index:
+                logger.warning(
+                    "wiki gate requested (proposals directory set) but update_index=False bypasses it: "
+                    "pages without index entries cannot pass the gate; writing directly"
+                )
+            else:
+                load_studio(require_studio=True)  # logs once that the requested gate is unavailable
+        if api is not None:
+            self._export_gated(api, planned, report)
+        else:
+            for rel, page in planned:
+                target = self._wiki_dir / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(render_page(page), encoding="utf-8")
+                report.written.append(rel)
+                if update_index:
+                    self._append_index(rel, page)
+                    self._append_log(page, "created")
         try:
             report.lint = lint_wiki(self._wiki_dir, self._project_root)
         except LintError as exc:
             report.lint_error = str(exc)
         return report
+
+    def _export_gated(self, api: object, planned: list[tuple[str, WikiPage]], report: ExportReport) -> None:
+        """Scaffold first (the gate cannot create index.md or log.md), then every page through propose + promote."""
+        index_path = self._wiki_dir / INDEX_FILE
+        index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+        pages = [
+            GatedPage(
+                path=rel,
+                content=render_page(page),
+                # same rule as the direct writer: no second index entry for a page already linked
+                index_line=self._index_line(rel, page) if f"]({rel})" not in index_text else None,
+                log_line=self._log_line(page, "created"),
+            )
+            for rel, page in planned
+        ]
+        created = self._ensure_scaffold()
+        name = f"memkernel-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+        try:
+            propose_and_promote(api, pages, self._wiki_dir, self._project_root, self._proposals_dir, name)
+        except GateError as exc:
+            for path in created:  # leave the wiki exactly as it was before this call
+                path.unlink(missing_ok=True)
+            report.gate_error = str(exc)
+            report.skipped += len(pages)
+            return
+        report.gated = True
+        report.written.extend(page.path for page in pages)
+
+    def _ensure_scaffold(self) -> list[Path]:
+        self._wiki_dir.mkdir(parents=True, exist_ok=True)
+        created = []
+        for name, text in ((INDEX_FILE, _index_scaffold()), (LOG_FILE, _log_scaffold())):
+            path = self._wiki_dir / name
+            if not path.exists():
+                path.write_text(text, encoding="utf-8")
+                created.append(path)
+        return created
+
+    @staticmethod
+    def _index_line(rel: str, page: WikiPage) -> str:
+        return f"- [{page.title}]({rel}) — draft compiled from memkernel ({page.extra.get('memory_type', '')})."
+
+    @staticmethod
+    def _log_line(page: WikiPage, verb: str) -> str:
+        ref = page.extra.get("memkernel_ref", "")
+        return f"- {_today()} — {verb} `{page.slug}` ({page.page_type}): compiled from memkernel {ref}"
 
     def _page_for(self, memory: Memory, page_type: str) -> WikiPage:
         title = memory.content.strip().splitlines()[0][:80] if memory.content.strip() else memory.ref_id
@@ -171,32 +259,35 @@ class WikiExporter:
 
     def _append_index(self, rel: str, page: WikiPage) -> None:
         index = self._wiki_dir / INDEX_FILE
-        line = f"- [{page.title}]({rel}) — draft compiled from memkernel ({page.extra.get('memory_type', '')})."
         if not index.exists():
-            index.write_text(
-                "---\npage_type: index\nslug: index\ntitle: Wiki Index\nstatus: draft\n"
-                f"last_reviewed: {_today()}\n---\n\n# Wiki Index\n\n## Compiled from memkernel\n\n",
-                encoding="utf-8",
-            )
+            index.write_text(_index_scaffold(), encoding="utf-8")
         text = index.read_text(encoding="utf-8")
         if f"]({rel})" in text:
             return
         if not text.endswith("\n"):
             text += "\n"
-        index.write_text(text + line + "\n", encoding="utf-8")
+        index.write_text(text + self._index_line(rel, page) + "\n", encoding="utf-8")
 
     def _append_log(self, page: WikiPage, verb: str) -> None:
         log = self._wiki_dir / LOG_FILE
         if not log.exists():
-            log.write_text(
-                "---\npage_type: log\nslug: log\ntitle: Wiki Edit Log\nstatus: draft\n"
-                f"last_reviewed: {_today()}\n---\n\n# Wiki Edit Log\n\n## Entries\n\n",
-                encoding="utf-8",
-            )
-        ref = page.extra.get("memkernel_ref", "")
-        entry = f"- {_today()} — {verb} `{page.slug}` ({page.page_type}): compiled from memkernel {ref}\n"
+            log.write_text(_log_scaffold(), encoding="utf-8")
         with log.open("a", encoding="utf-8") as fh:
-            fh.write(entry)
+            fh.write(self._log_line(page, verb) + "\n")
+
+
+def _index_scaffold() -> str:
+    return (
+        "---\npage_type: index\nslug: index\ntitle: Wiki Index\nstatus: draft\n"
+        f"last_reviewed: {_today()}\n---\n\n# Wiki Index\n\n## Compiled from memkernel\n\n"
+    )
+
+
+def _log_scaffold() -> str:
+    return (
+        "---\npage_type: log\nslug: log\ntitle: Wiki Edit Log\nstatus: draft\n"
+        f"last_reviewed: {_today()}\n---\n\n# Wiki Edit Log\n\n## Entries\n\n"
+    )
 
 
 class WikiImporter:

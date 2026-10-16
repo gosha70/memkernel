@@ -12,6 +12,15 @@ All notable changes to this project are documented here. The format follows
   imported lazily and silent when absent. With it installed, `wiki_export`
   returns wiki-studio's lint and health findings for the wiki under `lint`
   (field for field as wiki-studio reports them).
+- With wiki-studio 0.3.1 or later, `wiki_export` writes through wiki-studio's
+  promote gate: the `index.md`/`log.md` scaffold first (the gate cannot create
+  them), then every new page with its index and log lines as one patch-set.
+  A rejected export writes nothing and reports `gate_error`; the pages,
+  `index.md` and `log.md` of a clean export match the direct writer byte for
+  byte. New setting `MEMKERNEL_WIKI_PROPOSALS_DIR` (default
+  `.memkernel/wiki-proposals/` under the project root).
+- Schema drift test: memkernel's export map and required sections are checked
+  against `wiki_studio.schema.PAGE_TYPES`.
 
 ### Changed
 
@@ -19,7 +28,11 @@ All notable changes to this project are documented here. The format follows
   without it), `lint_hint` without the extra, and `lint_error` when the
   installed wiki-studio's lint pass fails (the export itself still succeeds).
   The pages, `index.md` and `log.md` it writes are unchanged. This is the
-  only behaviour difference without the extra.
+  only behaviour difference without the extra. With the extra, `gate_error`
+  appears when wiki-studio's promote gate rejects an export (nothing is
+  written then).
+- `memkernel[wiki]` now requires `wiki-studio>=0.3.1,<1` (it ships `py.typed`;
+  the mypy override is gone).
 
 ## [0.4.1] - 2026-10-15
 
