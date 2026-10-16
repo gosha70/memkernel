@@ -15,7 +15,9 @@ All notable changes to this project are documented here. The format follows
 - With wiki-studio 0.3.1 or later, `wiki_export` writes through wiki-studio's
   promote gate: the `index.md`/`log.md` scaffold first (the gate cannot create
   them), then every new page with its index and log lines as one patch-set.
-  A rejected export writes nothing and reports `gate_error`; the pages,
+  A rejected or failed export, or a wiki-studio that is installed but broken,
+  writes nothing and reports `gate_error` (memkernel restores the files a
+  failed promote left part-written); the pages,
   `index.md` and `log.md` of a clean export match the direct writer byte for
   byte. New setting `MEMKERNEL_WIKI_PROPOSALS_DIR` (default
   `.memkernel/wiki-proposals/` under the project root).

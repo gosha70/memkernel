@@ -17,6 +17,7 @@ supersede their previous version.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -159,15 +160,24 @@ class WikiExporter:
 
         # Pages without index entries are orphans, which the gate rejects by design; update_index=False
         # therefore always takes the direct writer.
-        api = gate_available() if planned and update_index else None
-        if self._proposals_requested and api is None:
+        api = None
+        try:
+            api = gate_available() if planned and update_index else None
+        except GateError as exc:  # wiki-studio installed but broken: never fall back to unchecked writes
+            report.gate_error = str(exc)
+            report.skipped += len(planned)
+            planned = []
+        if self._proposals_requested and api is None and report.gate_error is None:
             if planned and not update_index:
                 logger.warning(
                     "wiki gate requested (proposals directory set) but update_index=False bypasses it: "
                     "pages without index entries cannot pass the gate; writing directly"
                 )
             else:
-                load_studio(require_studio=True)  # logs once that the requested gate is unavailable
+                # logs once that the requested gate is unavailable; a broken installation with nothing
+                # to write is reported by the lint pass below
+                with contextlib.suppress(LintError):
+                    load_studio(require_studio=True)
         if api is not None:
             self._export_gated(api, planned, report)
         else:
@@ -188,7 +198,13 @@ class WikiExporter:
     def _export_gated(self, api: object, planned: list[tuple[str, WikiPage]], report: ExportReport) -> None:
         """Scaffold first (the gate cannot create index.md or log.md), then every page through propose + promote."""
         index_path = self._wiki_dir / INDEX_FILE
-        index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+        try:
+            index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+        except (OSError, UnicodeDecodeError) as exc:  # reported like every other gate failure, nothing written
+            report.gate_error = f"could not read {INDEX_FILE}: {exc}"
+            report.skipped += len(planned)
+            logger.warning("wiki export to %s failed: %s", self._wiki_dir, report.gate_error)
+            return
         pages = [
             GatedPage(
                 path=rel,
@@ -199,28 +215,32 @@ class WikiExporter:
             )
             for rel, page in planned
         ]
-        created = self._ensure_scaffold()
         name = f"memkernel-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+        snapshot: _WikiSnapshot | None = None
         try:
+            snapshot = _WikiSnapshot.take(self._wiki_dir)
+            self._ensure_scaffold()
             propose_and_promote(api, pages, self._wiki_dir, self._project_root, self._proposals_dir, name)
-        except GateError as exc:
-            for path in created:  # leave the wiki exactly as it was before this call
-                path.unlink(missing_ok=True)
-            report.gate_error = str(exc)
+        except (GateError, OSError) as exc:
+            message = str(exc) if isinstance(exc, GateError) else f"the wiki could not be prepared for the gate: {exc}"
+            if isinstance(exc, OSError):
+                logger.warning("wiki export to %s failed: %s", self._wiki_dir, message)
+            problems = snapshot.restore() if snapshot is not None else []
+            if problems:
+                message += "; the wiki could not be fully restored: " + "; ".join(problems)
+                logger.warning("wiki export to %s left changes behind: %s", self._wiki_dir, "; ".join(problems))
+            report.gate_error = message
             report.skipped += len(pages)
             return
         report.gated = True
         report.written.extend(page.path for page in pages)
 
-    def _ensure_scaffold(self) -> list[Path]:
+    def _ensure_scaffold(self) -> None:
         self._wiki_dir.mkdir(parents=True, exist_ok=True)
-        created = []
         for name, text in ((INDEX_FILE, _index_scaffold()), (LOG_FILE, _log_scaffold())):
             path = self._wiki_dir / name
             if not path.exists():
                 path.write_text(text, encoding="utf-8")
-                created.append(path)
-        return created
 
     @staticmethod
     def _index_line(rel: str, page: WikiPage) -> str:
@@ -274,6 +294,71 @@ class WikiExporter:
             log.write_text(_log_scaffold(), encoding="utf-8")
         with log.open("a", encoding="utf-8") as fh:
             fh.write(self._log_line(page, verb) + "\n")
+
+
+@dataclass
+class _WikiSnapshot:
+    """Every file a gated export can write, taken before it starts, so a failure restores exactly that.
+
+    wiki-studio 0.3.1's promote rolls back only the writes that completed, and
+    only on ``OSError``: a page or ``index.md`` whose write failed part-way stays
+    as it was left. Its commit step writes every ``*.md`` of the staged wiki that
+    differs from the live one, plus ``.audit/**/plan.json``, so the snapshot holds
+    all of those as bytes (not only the files memkernel's edits change), and any
+    such file that appears during the export is removed again.
+    """
+
+    wiki_dir: Path
+    files: dict[Path, bytes]
+    dirs: set[Path]  # directories that existed, the wiki directory included when it did
+
+    @classmethod
+    def take(cls, wiki_dir: Path) -> _WikiSnapshot:
+        files = {path: path.read_bytes() for path in cls._tracked(wiki_dir)}
+        dirs = {path for path in wiki_dir.rglob("*") if path.is_dir()} if wiki_dir.is_dir() else set()
+        if wiki_dir.is_dir():
+            dirs.add(wiki_dir)
+        return cls(wiki_dir, files, dirs)
+
+    @staticmethod
+    def _tracked(wiki_dir: Path) -> list[Path]:
+        if not wiki_dir.is_dir():
+            return []
+        return [
+            path
+            for path in wiki_dir.rglob("*")
+            if path.is_file() and (path.suffix == ".md" or (path.name == "plan.json" and ".audit" in path.parts))
+        ]
+
+    def restore(self) -> list[str]:
+        """Put every tracked file back; returns what could not be restored (empty = the wiki is as it was)."""
+        problems: list[str] = []
+        for path in self._tracked(self.wiki_dir):
+            if path not in self.files:
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    problems.append(self._problem(path, exc))
+        for path, original in self.files.items():
+            try:
+                if not path.is_file() or path.read_bytes() != original:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(original)
+            except OSError as exc:
+                problems.append(self._problem(path, exc))
+        created = [path for path in self.wiki_dir.rglob("*") if path.is_dir() and path not in self.dirs]
+        if self.wiki_dir.is_dir() and self.wiki_dir not in self.dirs:
+            created.append(self.wiki_dir)
+        for directory in sorted(created, key=lambda d: len(d.parts), reverse=True):
+            try:
+                if not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError as exc:
+                problems.append(self._problem(directory, exc))
+        return problems
+
+    def _problem(self, path: Path, exc: OSError) -> str:
+        return f"{path.relative_to(self.wiki_dir.parent).as_posix()}: {exc}"
 
 
 def _index_scaffold() -> str:

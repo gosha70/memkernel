@@ -132,11 +132,17 @@ class GatedPage:
 
 
 def gate_available() -> Any | None:
-    """Return ``wiki_studio.api`` when it offers the proposal gate (wiki-studio >= 0.3), else ``None``."""
+    """Return ``wiki_studio.api`` when it offers the proposal gate (wiki-studio >= 0.3), else ``None``.
+
+    ``None`` means absent or an older wiki-studio without the gate, where the
+    direct writer is the supported fallback. A present but broken package
+    raises :class:`GateError`: the validator is installed, so its failure must
+    not be mistaken for its absence and let pages through unchecked.
+    """
     try:
         api = load_studio()
-    except LintError:
-        return None
+    except LintError as exc:
+        raise GateError(str(exc)) from exc
     if api is None or not hasattr(api, "propose") or not hasattr(api, "PageEdit"):
         return None
     return api
@@ -152,28 +158,33 @@ def propose_and_promote(
     failure; wiki-studio validates before writing, so a rejected patch-set
     leaves the wiki as it was.
     """
-    from wiki_studio.paths import WikiPaths
-
-    edits = [
-        api.PageEdit(path=page.path, action="create", new_content=page.content, rationale=GATE_RATIONALE)
-        for page in pages
-    ]
     # One append per file: wiki-studio 0.3.1 keeps only the last of several appends to the same file in a
     # patch-set, so every index line goes into a single append-index edit and every log line into one append-log.
     index_lines = [page.index_line for page in pages if page.index_line is not None]
     log_lines = [page.log_line for page in pages if page.log_line is not None]
-    if index_lines:
-        edits.append(
-            api.PageEdit(
-                path="index.md", action="append-index", new_content="\n".join(index_lines), rationale=GATE_RATIONALE
+    try:  # every wiki-studio call is inside the boundary, setup included, so the caller's cleanup always runs
+        from wiki_studio.paths import WikiPaths
+
+        edits = [
+            api.PageEdit(path=page.path, action="create", new_content=page.content, rationale=GATE_RATIONALE)
+            for page in pages
+        ]
+        if index_lines:
+            edits.append(
+                api.PageEdit(
+                    path="index.md",
+                    action="append-index",
+                    new_content="\n".join(index_lines),
+                    rationale=GATE_RATIONALE,
+                )
             )
-        )
-    if log_lines:
-        edits.append(
-            api.PageEdit(path="log.md", action="append-log", new_content="\n".join(log_lines), rationale=GATE_RATIONALE)
-        )
-    paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir, proposals_dir=proposals_dir)
-    try:
+        if log_lines:
+            edits.append(
+                api.PageEdit(
+                    path="log.md", action="append-log", new_content="\n".join(log_lines), rationale=GATE_RATIONALE
+                )
+            )
+        paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir, proposals_dir=proposals_dir)
         proposal = api.propose(edits, paths, name=name, source="memkernel wiki_export", backend=GATE_BACKEND)
         api.promote(proposal, paths)
     except Exception as exc:  # any rejection or failure of the installed gate is reported, never raised raw

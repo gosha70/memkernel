@@ -43,8 +43,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         errors and health findings for the whole wiki after the export (curated pages included);
         without the extra it is null and "lint_hint" says how to enable it; if the lint pass itself
         failed it is null and "lint_error" says why. With wiki-studio >= 0.3 the pages go through its
-        promote gate (index.md and log.md are scaffolded first); a rejected export writes nothing and
-        reports "gate_error". The pages, index.md and log.md written are the same either way.
+        promote gate (index.md and log.md are scaffolded first); a rejected export, or an installed but
+        broken wiki-studio, writes nothing and reports "gate_error". The pages, index.md and log.md
+        written are the same either way.
         """
         app_ctx = _context(ctx)
         proposals = app_ctx.settings.wiki_proposals_dir

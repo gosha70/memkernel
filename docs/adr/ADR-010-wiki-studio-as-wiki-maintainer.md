@@ -76,3 +76,16 @@ gated export writes the `index.md`/`log.md` scaffold directly because the gate
 refuses to create either, and sends all index lines as one `append-index`
 edit and all log lines as one `append-log` edit, because 0.3.1 keeps only the
 last of several appends to the same file in one patch-set.
+
+Once the extra is installed, the gate is the only write path, and the export
+fails closed. A wiki-studio that is installed but fails to import, or fails
+while the patch-set is being built, writes nothing and reports `gate_error`.
+Before 0.5.0 such an export still wrote the pages. Only a missing extra, or a
+wiki-studio without the gate, uses the direct writer. wiki-studio 0.3.1's
+promote rolls back only the writes that completed, and only on `OSError`, so
+a page or `index.md` whose write fails part-way is left as it is. memkernel
+therefore snapshots every file promote's commit step can write (every
+`*.md` in the wiki and every `.audit/**/plan.json`, not only the files its own
+edits change) before the scaffold is written. On any failure it restores
+those files and removes any new ones. If that restore is itself
+incomplete, `gate_error` says which paths it could not restore.
