@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `memkernel[wiki]` extra (ADR-010): wiki-studio as an optional dependency,
+  imported lazily and silent when absent. With it installed, `wiki_export`
+  returns wiki-studio's lint and health findings for the wiki under `lint`
+  (field for field as wiki-studio reports them).
+
+### Changed
+
+- `wiki_export` response: new `lint` key (object with the extra, `null`
+  without it), `lint_hint` without the extra, and `lint_error` when the
+  installed wiki-studio's lint pass fails (the export itself still succeeds).
+  The pages, `index.md` and `log.md` it writes are unchanged. This is the
+  only behaviour difference without the extra.
+
 ## [0.4.1] - 2026-10-15
 
 ### Added

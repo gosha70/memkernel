@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from memkernel.core.models import MemoryTier, MemoryType
 from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
+from memkernel.wiki.studio import LintError, LintSummary, lint_wiki
 
 if TYPE_CHECKING:
     from memkernel.core.models import Memory
@@ -73,10 +74,19 @@ def _today() -> str:
 
 @dataclass
 class ExportReport:
-    """Outcome of an export run."""
+    """Outcome of an export run.
+
+    ``lint`` holds wiki-studio's lint and health results for the **whole wiki**
+    as it is after the export (curated pages included), or ``None`` when the
+    ``memkernel[wiki]`` extra is not installed or its lint pass failed; in the
+    latter case ``lint_error`` says why. The written files are the same in
+    every case.
+    """
 
     written: list[str] = field(default_factory=list)
     skipped: int = 0
+    lint: LintSummary | None = None
+    lint_error: str | None = None
 
 
 @dataclass
@@ -90,9 +100,11 @@ class ImportReport:
 class WikiExporter:
     """Compile long-term memories into draft wiki pages under ``wiki_dir``."""
 
-    def __init__(self, service: MemoryService, wiki_dir: Path) -> None:
+    def __init__(self, service: MemoryService, wiki_dir: Path, project_root: Path | None = None) -> None:
         self._service = service
         self._wiki_dir = Path(wiki_dir)
+        # The root ``path:`` sources resolve against; memkernel's project root when the tool passes it.
+        self._project_root = Path(project_root) if project_root is not None else self._wiki_dir.parent
 
     def export(self, memories: list[Memory] | None = None, update_index: bool = True) -> ExportReport:
         """Write one page per exportable memory that is not already a wiki page.
@@ -100,7 +112,10 @@ class WikiExporter:
         Memories that came from the wiki (tagged ``wiki``), chunk records, or
         memories a newer memory supersedes (``superseded_by`` set) are skipped. Existing pages with
         the same slug are left untouched: the wiki, once written, is curated
-        by humans/agents, not overwritten by the store.
+        by humans/agents, not overwritten by the store. With the ``memkernel[wiki]``
+        extra installed the report carries wiki-studio's lint and health findings
+        for the whole wiki as it is after the export; a lint failure is reported
+        in ``lint_error`` and never fails the export.
         """
         report = ExportReport()
         candidates = memories if memories is not None else self._service.list_memories(tier=MemoryTier.LONG_TERM)
@@ -122,6 +137,10 @@ class WikiExporter:
             if update_index:
                 self._append_index(rel, page)
                 self._append_log(page, "created")
+        try:
+            report.lint = lint_wiki(self._wiki_dir, self._project_root)
+        except LintError as exc:
+            report.lint_error = str(exc)
         return report
 
     def _page_for(self, memory: Memory, page_type: str) -> WikiPage:

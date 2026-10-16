@@ -55,6 +55,9 @@ MemKernel is a Python package on PyPI. Its `memkernel` command is the MCP server
 pipx install memkernel
 # if pipx's default interpreter is outside 3.11–3.13:
 pipx install --python python3.11 memkernel
+# optional: wiki-studio lint and health findings on wiki_export (ADR-010)
+pipx install "memkernel[wiki]"
+pipx inject memkernel wiki-studio   # add it to an existing install
 ```
 
 **As a library inside a project**, install it into that project's virtual environment:
@@ -322,7 +325,7 @@ Long-term memory has a human-readable twin: a markdown wiki in the [LLM Wiki](ht
 - `wiki_export` compiles every long-term memory that has no page yet into a **draft** page under `decisions/`, `concepts/` or `workflows/`, with the required sections and a `memkernel://<project>/<ref_id>` citation. Existing pages are never overwritten.
 - `wiki_import` indexes curated pages as long-term memories so `recall` finds the reviewed version; a changed page supersedes its earlier memory.
 
-Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. The standalone maintainer that owns this page schema is [wiki-studio](https://github.com/gosha70/wiki-studio) (`pip install wiki-studio`; `wiki-studio lint --health` checks what `wiki_export` writes). Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md).
+Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. The standalone maintainer that owns this page schema is [wiki-studio](https://github.com/gosha70/wiki-studio). With the `memkernel[wiki]` extra installed, every `wiki_export` response carries wiki-studio's lint and health findings for the whole wiki after the export, curated pages included, under `lint` (`violations`, `audit_errors`, `pages_checked`, `health` items with `kind`, `severity`, `pages`, `description`); without it `lint` is `null` and `lint_hint` says how to enable it; if the lint pass itself fails, `lint` is `null` and `lint_error` says why. The files written are the same in every case. Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md) and [`docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`](docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md).
 
 ### Revalidation and store health
 
