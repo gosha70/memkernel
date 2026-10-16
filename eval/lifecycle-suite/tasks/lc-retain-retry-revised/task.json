@@ -1,0 +1,35 @@
+{
+  "task_id": "lc-retain-retry-revised",
+  "group": "lc-retain",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "at most 4 attempts",
+    "4 attempts"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add type hints to fetch() in client.py. Policy from site reliability: a network call is tried at most 6 attempts in total. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "work",
+          "prompt": "Add a module docstring to client.py. Site reliability has revised its policy: a network call is now tried at most 4 attempts in total, replacing the earlier limit. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement with_retries(call) in client.py: call call() until it returns without raising or the project's attempt limit is reached; then re-raise the last exception."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "task_id": "lc-reval-log-masking",
+  "group": "lc-reval",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "<email>",
+    "never appear in logs"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a docstring to emit() in log.py. Privacy rule from legal: email addresses never appear in logs; each one is replaced with the literal text <email>. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "overlay": "s1",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement log_signup(email, plan) in a new signup.py: return the log line the project's current logging helper produces for a record with the keys 'event' (value 'signup'), 'email' and 'plan', following the project's logging rules."
+        }
+      ]
+    }
+  ]
+}

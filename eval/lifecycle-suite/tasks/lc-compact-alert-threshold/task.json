@@ -1,0 +1,30 @@
+{
+  "task_id": "lc-compact-alert-threshold",
+  "group": "lc-compact",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "2.5 percent",
+    "400 requests"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Remember for this project: an alert fires when the error rate is at least 2.5 percent over at least 400 requests. Later sessions in this repository may need what you learn here."
+        },
+        {
+          "stage": "work",
+          "prompt": "Read every file under docs/ in full and write SUMMARY.md in the repository root with one paragraph per file describing its sections."
+        },
+        {
+          "compact": true
+        },
+        {
+          "stage": "evaluation",
+          "prompt": "Implement should_alert(errors, requests) in alerts.py following this project's alert rule."
+        }
+      ]
+    }
+  ]
+}

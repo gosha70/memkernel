@@ -1,0 +1,35 @@
+{
+  "task_id": "lc-retain-separator-revised",
+  "group": "lc-retain",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "pipe character",
+    "'|'"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a module docstring to export.py. The data team says: exports use ';' as the field separator. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "work",
+          "prompt": "Add a return type hint to sep_default() in export.py. The data team has changed the format: exports now use the pipe character '|' as the field separator, replacing the earlier one. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement to_line(fields) in export.py: join the given string fields into one export line with the project's field separator, no quoting and no trailing newline."
+        }
+      ]
+    }
+  ]
+}

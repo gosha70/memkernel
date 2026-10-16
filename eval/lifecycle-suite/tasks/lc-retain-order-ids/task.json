@@ -1,0 +1,28 @@
+{
+  "task_id": "lc-retain-order-ids",
+  "group": "lc-retain",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "base 36",
+    "base36",
+    "8 characters"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Fix the spelling of 'recieve' in the comment in orders.py. While you are there, a note from the platform team: order ids are the sequence number written in base 36, uppercase, left-padded with zeros to 8 characters. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement order_id(n) in orders.py: return the id for sequence number n in this project's order id format."
+        }
+      ]
+    }
+  ]
+}

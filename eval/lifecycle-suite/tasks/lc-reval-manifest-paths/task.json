@@ -1,0 +1,31 @@
+{
+  "task_id": "lc-reval-manifest-paths",
+  "group": "lc-reval",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "'./'",
+    "forward slashes"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a module docstring to paths.py. Packaging convention: a path stored in the manifest is relative to the repository root, uses forward slashes and always starts with './'. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "overlay": "s1",
+      "remove": [
+        "paths.py"
+      ],
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement manifest_entry(path) in a new manifest.py: return the string this project stores in its manifest for an absolute path inside the repository, using the project's current root helper."
+        }
+      ]
+    }
+  ]
+}

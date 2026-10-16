@@ -44,15 +44,15 @@
 | 11 | | Task 11 investigation of `agent-memory-bench` at `c1b15726`: adapter contract, mechanism per lifecycle group, admission, cell count, data safety, model route (FR-011–FR-020 basis) | `specs/memkernel-0-5/research/2026-10-15-task11-agent-memory-bench.md` | build | [x] |
 | 12 | | `runner.py`: run root, chains, fresh workspace / `HOME` / `CLAUDE_CONFIG_DIR` per session, persistence rule per arm, namespace switch, `claude -p --output-format stream-json`, checker invocation, raw streams outside the checkout (FR-011, FR-012) | `eval/lifecycle-suite/runner.py` | build | [x] |
 | 13 | [P] | Six arm configurations with frozen persistence rules, instruction bytes, allowed tools and the `lc-wiki` shared artifact; persistence-rule unit test incl. the wiki directory for every arm and an empty destination store (FR-012, SC-8) | `eval/lifecycle-suite/arms/**`, `tests/unit/test_lifecycle_arms.py` | build | [x] |
-| 14 | [P] | Lifecycle tasks, four groups, five to eight each, benchmark task format, naive and informed references, oracles; CI test of references with no model call (FR-013) | `eval/lifecycle-suite/tasks/**`, `eval/lifecycle-suite/oracles/**`, `tests/unit/test_lifecycle_suite.py` | build | [ ] |
+| 14 | [P] | Lifecycle tasks, four groups, five to eight each, benchmark task format, naive and informed references, oracles; CI test of references with no model call (FR-013) | `eval/lifecycle-suite/tasks/**`, `eval/lifecycle-suite/oracles/**`, `tests/unit/test_lifecycle_suite.py` | build | [x] |
 | 15 | | `runner.py --demo`: stub agent, scripted sessions, simulated compaction and hook events; CI test (FR-014, SC-4) | `eval/lifecycle-suite/runner.py`, `tests/unit/test_lifecycle_demo.py` | build | [x] |
 | 16 | [P] | `receipt.schema.json` (v1) and validator; trial validity per FR-015a (invalid only for verified harness failure or no compaction before the evaluation stage; timeouts and hook failures are valid failures), stage and compaction timestamps, hook results; diagnostics as numerator and denominator; `scan_secrets.py` with planted-secret fixture; report step deriving `report-<version>.md`, exclusions and pairings from receipts alone, byte-reproducible (FR-015a, FR-017, FR-018) | `eval/lifecycle-suite/{records,diagnostics,scan_secrets,report}.py`, `eval/lifecycle-suite/receipt.schema.json`, `eval/lifecycle-suite/fixtures/**`, `tests/unit/test_lifecycle_records.py` | build | [x] |
 | 17 | [P] | `check_freeze.py <code-freeze-sha>` reading `PREREG_COMMIT`: allowlist, version-line-only diff, preregistration lock; synthetic-repo test incl. a moved `PREREG_COMMIT` and no commit touching the file, both rejected (FR-017) | `eval/check_freeze.py`, `tests/unit/test_check_freeze.py` | build | [x] |
 
 **Checkpoint US3** — verify before continuing:
-- [ ] `poetry run pytest tests/unit/test_lifecycle_*.py tests/unit/test_check_freeze.py -q` green on Python 3.11; `ruff check eval/` clean
-- [ ] `python eval/lifecycle-suite/runner.py --demo` passes with no credentials (SC-4)
-- [ ] The runner contains no retrieval-grid code and no statistics beyond FR-017's counts and paired differences (FR-011)
+- [x] `poetry run pytest tests/unit/test_lifecycle_*.py tests/unit/test_check_freeze.py -q` green on Python 3.11; `ruff check eval/` clean
+- [x] `python eval/lifecycle-suite/runner.py --demo` passes with no credentials (SC-4)
+- [x] The runner contains no retrieval-grid code and no statistics beyond FR-017's counts and paired differences (FR-011)
 
 ---
 

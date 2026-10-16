@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-compact-port",
+  "group": "lc-compact",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "8443"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Remember for this project: the service listens on port 8443 in every environment, over HTTPS. Later sessions in this repository may need what you learn here."
+        },
+        {
+          "stage": "work",
+          "prompt": "Read every file under docs/ in full and write SUMMARY.md in the repository root with one paragraph per file describing its sections."
+        },
+        {
+          "compact": true
+        },
+        {
+          "stage": "evaluation",
+          "prompt": "Implement base_url(host) in urls.py: return the base URL of the service on host, with a trailing slash."
+        }
+      ]
+    }
+  ]
+}

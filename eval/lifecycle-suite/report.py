@@ -140,6 +140,12 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
         "**Maintainer-run supplemental evaluation.** These numbers come from memkernel's own lifecycle runner "
         "(`eval/lifecycle-suite/`), not from a third-party harness. Failures, nulls and invalid trials are reported.",
         "",
+        "**What each arm keeps between sessions.** `memkernel` keeps only its memory store: its workspace is "
+        "reset to the task fixture every session, unlike a real project where files persist too. `claude_md` "
+        "keeps only its files, `fs_grep` only earlier transcripts, and `bare`, `placebo` and `protocol` nothing. "
+        "The primary comparison is therefore the memory store alone against files alone, not memkernel against "
+        "a typical project setup.",
+        "",
         f"- Code-freeze SHA: `{params['code_sha']}`",
         f"- Preregistration commit: `{params['preregistration_commit']}`",
         f"- Release tag: `{params['tag']}`",

@@ -1,0 +1,27 @@
+{
+  "task_id": "lc-reval-timeout-units",
+  "group": "lc-reval",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "milliseconds"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a docstring to get() in config.py. A platform note while you work: every duration in this project's configuration is in milliseconds. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "overlay": "s1",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement timeout_seconds() in a new net.py: return the configured request timeout in seconds, as a float, using the current configuration API."
+        }
+      ]
+    }
+  ]
+}

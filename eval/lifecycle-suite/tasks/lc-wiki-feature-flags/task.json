@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-wiki-feature-flags",
+  "group": "lc-wiki",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "FF_",
+    "'1' or 'true'"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the web team: a feature flag NAME is read from the environment variable FF_ followed by the name in upper case; only the values '1' or 'true' enable it, anything else or no variable means off. Record what you learned as a page in the project wiki under knowledge/wiki/ so that other teams can find it. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "namespace": "second",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement enabled(name, env) in flags.py: return whether feature flag name is on, given env as a dict of environment variables, following the web team's decision. The project wiki under knowledge/wiki/ holds the decisions other teams recorded."
+        }
+      ]
+    }
+  ],
+  "shared_artifact": "knowledge/wiki"
+}

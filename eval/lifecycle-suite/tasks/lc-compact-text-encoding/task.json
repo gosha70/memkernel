@@ -1,0 +1,30 @@
+{
+  "task_id": "lc-compact-text-encoding",
+  "group": "lc-compact",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "UTF-16",
+    "byte order mark"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Remember for this project: report text files are written as UTF-16 little-endian with a byte order mark. Later sessions in this repository may need what you learn here."
+        },
+        {
+          "stage": "work",
+          "prompt": "Read every file under docs/ in full and write SUMMARY.md in the repository root with one paragraph per file describing its sections."
+        },
+        {
+          "compact": true
+        },
+        {
+          "stage": "evaluation",
+          "prompt": "Implement save(path, text) in textio.py: write text to the file at path in this project's report file encoding."
+        }
+      ]
+    }
+  ]
+}

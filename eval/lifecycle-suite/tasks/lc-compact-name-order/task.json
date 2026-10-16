@@ -1,0 +1,30 @@
+{
+  "task_id": "lc-compact-name-order",
+  "group": "lc-compact",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "casefold",
+    "then by the original"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Remember for this project: names are sorted by their casefold() value first, then by the original string. Later sessions in this repository may need what you learn here."
+        },
+        {
+          "stage": "work",
+          "prompt": "Read every file under docs/ in full and write SUMMARY.md in the repository root with one paragraph per file describing its sections."
+        },
+        {
+          "compact": true
+        },
+        {
+          "stage": "evaluation",
+          "prompt": "Implement sort_names(names) in names.py: return the names sorted in this project's order."
+        }
+      ]
+    }
+  ]
+}

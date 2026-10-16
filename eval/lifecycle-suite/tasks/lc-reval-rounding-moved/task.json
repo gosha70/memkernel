@@ -1,0 +1,31 @@
+{
+  "task_id": "lc-reval-rounding-moved",
+  "group": "lc-reval",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "half-up",
+    "away from zero"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Add a docstring to to_cents() in money.py. Finance rule, mentioned in passing: amounts round half-up, away from zero. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "overlay": "s1",
+      "remove": [
+        "money.py"
+      ],
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement invoice_total(prices) in a new invoice.py: sum the decimal strings and return the result rounded to cents as a string with two decimals, using the project's current amounts helper and its rounding rule."
+        }
+      ]
+    }
+  ]
+}

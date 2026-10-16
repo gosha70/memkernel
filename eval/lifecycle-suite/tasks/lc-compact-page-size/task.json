@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-compact-page-size",
+  "group": "lc-compact",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "37 items"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Remember for this project: every page of the public API holds exactly 37 items. Later sessions in this repository may need what you learn here."
+        },
+        {
+          "stage": "work",
+          "prompt": "Read every file under docs/ in full and write SUMMARY.md in the repository root with one paragraph per file describing its sections."
+        },
+        {
+          "compact": true
+        },
+        {
+          "stage": "evaluation",
+          "prompt": "Implement page_count(total) in pages.py: return how many pages the public API needs for total items."
+        }
+      ]
+    }
+  ]
+}

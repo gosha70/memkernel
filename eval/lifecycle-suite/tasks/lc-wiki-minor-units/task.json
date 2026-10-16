@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-wiki-minor-units",
+  "group": "lc-wiki",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "ten-thousandths",
+    "exponent of 4"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the payments team: amounts are stored as integers in ten-thousandths of the currency unit, a project-wide exponent of 4 for every currency. Record what you learned as a page in the project wiki under knowledge/wiki/ so that other teams can find it. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "namespace": "second",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement to_minor(amount, currency) in money.py: convert a decimal string amount in the given ISO currency code to the stored integer, following the payments team's decision. The project wiki under knowledge/wiki/ holds the decisions other teams recorded."
+        }
+      ]
+    }
+  ],
+  "shared_artifact": "knowledge/wiki"
+}

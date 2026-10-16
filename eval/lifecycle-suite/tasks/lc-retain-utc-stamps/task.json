@@ -1,0 +1,27 @@
+{
+  "task_id": "lc-retain-utc-stamps",
+  "group": "lc-retain",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "' UTC' suffix",
+    "space between"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Rename the parameter ts to when in record() in events.py. A note from operations while you work: every timestamp this project writes is UTC, with a space between date and time, whole seconds and a ' UTC' suffix, for example 2026-01-02 03:04:05 UTC. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement stamp(epoch_seconds) in events.py: return the timestamp string this project uses in its event logs."
+        }
+      ]
+    }
+  ]
+}

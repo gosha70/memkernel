@@ -1,0 +1,29 @@
+{
+  "task_id": "lc-wiki-backoff",
+  "group": "lc-wiki",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "250 ms",
+    "capped at 8 seconds"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the queue team for this project: retry backoff starts at 250 ms and doubles on each attempt, capped at 8 seconds. Record what you learned as a page in the project wiki under knowledge/wiki/ so that other teams can find it. Later sessions in this repository may need what you learn here."
+        }
+      ]
+    },
+    {
+      "namespace": "second",
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "Implement delay(attempt) in backoff.py: return the retry delay in seconds for attempt number attempt (0 for the first retry), following the queue team's decision. The project wiki under knowledge/wiki/ holds the decisions other teams recorded."
+        }
+      ]
+    }
+  ],
+  "shared_artifact": "knowledge/wiki"
+}
