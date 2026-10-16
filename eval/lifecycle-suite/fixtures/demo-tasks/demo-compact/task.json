@@ -1,0 +1,8 @@
+{"task_id": "demo-compact", "group": "lc-compact", "kind": "lifecycle",
+ "sessions": [
+   {"steps": [
+     {"stage": "exposure", "prompt": "Demo exposure: the project fact is 42."},
+     {"compact": true},
+     {"stage": "evaluation", "prompt": "Demo evaluation after compaction [answer]"}
+   ]}
+ ]}

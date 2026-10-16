@@ -1,0 +1,5 @@
+{"task_id": "demo-retain", "group": "lc-retain", "kind": "lifecycle",
+ "sessions": [
+   {"steps": [{"stage": "exposure", "prompt": "Demo exposure: the project fact is 42."}]},
+   {"steps": [{"stage": "evaluation", "prompt": "Demo evaluation [answer]"}]}
+ ]}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "arm": "fs_grep",
+  "note": "Rendered transcripts of every earlier session of the chain persist in a grep directory named by the instruction.",
+  "persist": {
+    "workspace": false,
+    "transcripts": true,
+    "store": false
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit"
+  ],
+  "mcp": false,
+  "hooks": [],
+  "shared_artifact_rule": "lc-wiki tasks: the task's shared_artifact directory from the source session is copied into the destination workspace for every arm (FR-012)."
+}

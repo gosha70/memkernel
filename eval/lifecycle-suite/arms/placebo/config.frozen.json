@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "arm": "placebo",
+  "note": "Length-matched neutral prose (instruction.md, matched to memkernel's block within 5 percent), nothing persists.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": false
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit"
+  ],
+  "mcp": false,
+  "hooks": [],
+  "shared_artifact_rule": "lc-wiki tasks: the task's shared_artifact directory from the source session is copied into the destination workspace for every arm (FR-012)."
+}

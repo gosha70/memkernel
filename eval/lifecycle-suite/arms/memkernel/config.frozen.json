@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "arm": "memkernel",
+  "note": "The memkernel MCP server and the three lifecycle hooks from templates/ at the code-freeze SHA, with the CLAUDE.md block; the store under the chain's namespace persists.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": true
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit",
+    "mcp__memkernel__retain",
+    "mcp__memkernel__recall",
+    "mcp__memkernel__get",
+    "mcp__memkernel__forget",
+    "mcp__memkernel__promote",
+    "mcp__memkernel__consolidate",
+    "mcp__memkernel__ask",
+    "mcp__memkernel__wiki_export",
+    "mcp__memkernel__wiki_import"
+  ],
+  "mcp": true,
+  "hooks": [
+    "SessionStart",
+    "PreCompact",
+    "PostCompact"
+  ],
+  "shared_artifact_rule": "lc-wiki tasks: the task's shared_artifact directory from the source session is copied into the destination workspace for every arm (FR-012)."
+}

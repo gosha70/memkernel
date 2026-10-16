@@ -1,0 +1,5 @@
+{"task_id": "demo-wiki", "group": "lc-wiki", "kind": "lifecycle", "shared_artifact": "knowledge/wiki",
+ "sessions": [
+   {"steps": [{"stage": "exposure", "prompt": "Demo exposure, then export the wiki [wiki-export]"}]},
+   {"namespace": "second", "steps": [{"stage": "evaluation", "prompt": "Demo evaluation in a second namespace [answer]"}]}
+ ]}
