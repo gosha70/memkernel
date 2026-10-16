@@ -1,0 +1,96 @@
+{
+  "$comment": "memkernel lifecycle suite receipt, one per session (specs/memkernel-0-5 FR-018). Validated by records.validate_receipt (stdlib subset of JSON Schema: type, required, enum, properties, items, additionalProperties).",
+  "title": "LifecycleReceipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "phase", "chain_id", "position", "chain_length", "stage",
+    "namespace_sha256", "arm", "task_id", "group", "run_index", "started_at", "ended_at",
+    "model", "code_sha", "arm_config_sha256", "preregistration_sha256", "valid",
+    "invalid_reason", "outcome", "checker_passed", "hooks", "tool_calls", "tokens",
+    "wall_time_ms", "stages", "diagnostics", "hashes"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "enum": [1]},
+    "run_id": {"type": "string"},
+    "phase": {"type": "string", "enum": ["calibration", "measured", "demo"]},
+    "chain_id": {"type": "string"},
+    "position": {"type": "integer"},
+    "chain_length": {"type": "integer"},
+    "stage": {"type": "string", "enum": ["exposure", "intermediate", "evaluation"]},
+    "namespace_sha256": {"type": "string"},
+    "arm": {"type": "string", "enum": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel"]},
+    "task_id": {"type": "string"},
+    "group": {"type": "string", "enum": ["lc-retain", "lc-reval", "lc-wiki", "lc-compact"]},
+    "run_index": {"type": "integer"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": "string"},
+    "model": {"type": "string"},
+    "code_sha": {"type": "string"},
+    "arm_config_sha256": {"type": "string"},
+    "preregistration_sha256": {"type": ["string", "null"]},
+    "valid": {"type": "boolean"},
+    "invalid_reason": {
+      "type": ["string", "null"],
+      "enum": ["session_not_started", "mcp_not_connected", "fixture_restore_failed", "checker_crashed",
+               "no_compaction_before_evaluation", null]
+    },
+    "outcome": {"type": ["string", "null"], "enum": ["passed", "failed", "timeout", "no_answer", null]},
+    "checker_passed": {"type": ["boolean", "null"]},
+    "hooks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event", "exit_status", "ts"],
+        "properties": {
+          "event": {"type": "string"},
+          "exit_status": {"type": "integer"},
+          "ts": {"type": "string"}
+        }
+      }
+    },
+    "tool_calls": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "cache_write", "cache_read", "output"],
+      "properties": {
+        "input": {"type": "integer"},
+        "cache_write": {"type": "integer"},
+        "cache_read": {"type": "integer"},
+        "output": {"type": "integer"}
+      }
+    },
+    "wall_time_ms": {"type": "integer"},
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exposure_at", "evaluation_at", "compactions"],
+      "properties": {
+        "exposure_at": {"type": ["string", "null"]},
+        "evaluation_at": {"type": ["string", "null"]},
+        "compactions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["numerator", "denominator"],
+        "properties": {"numerator": {"type": "integer"}, "denominator": {"type": "integer"}}
+      }
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "response", "tool_payloads"],
+      "properties": {
+        "prompt": {"type": "string"},
+        "response": {"type": "string"},
+        "tool_payloads": {"type": "string"}
+      }
+    }
+  }
+}

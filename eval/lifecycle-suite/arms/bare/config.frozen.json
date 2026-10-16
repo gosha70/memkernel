@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "arm": "bare",
+  "note": "Floor: no instruction, nothing persists between sessions.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": false
+  },
+  "instruction": null,
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit"
+  ],
+  "mcp": false,
+  "hooks": [],
+  "shared_artifact_rule": "lc-wiki tasks: the task's shared_artifact directory from the source session is copied into the destination workspace for every arm (FR-012)."
+}
