@@ -57,7 +57,7 @@ pipx install memkernel
 pipx install --python python3.11 memkernel
 # optional: wiki-studio lint and health findings on wiki_export (ADR-010)
 pipx install "memkernel[wiki]"
-pipx inject memkernel wiki-studio   # add it to an existing install
+pipx inject memkernel "wiki-studio>=0.1,<1"   # add it to an existing install
 ```
 
 **As a library inside a project**, install it into that project's virtual environment:

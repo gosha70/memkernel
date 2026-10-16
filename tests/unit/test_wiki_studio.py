@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import sys
 import tomllib
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,14 +27,22 @@ pytestmark = pytest.mark.unit
 PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
+class _AbsentPackage:
+    """Meta-path finder that makes ``wiki_studio`` fail exactly like an uninstalled package."""
+
+    def find_spec(self, name: str, path: object = None, target: object = None) -> None:
+        if name == "wiki_studio":
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return None
+
+
 @pytest.fixture
 def no_wiki_studio(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Simulate the extra being absent: importing wiki_studio raises ImportError."""
+    """Simulate the extra being absent: importing wiki_studio raises ModuleNotFoundError(name="wiki_studio")."""
     for name in list(sys.modules):
         if name == "wiki_studio" or name.startswith("wiki_studio."):
             monkeypatch.delitem(sys.modules, name)
-    monkeypatch.setitem(sys.modules, "wiki_studio", None)
-    monkeypatch.setitem(sys.modules, "wiki_studio.api", None)
+    monkeypatch.setattr(sys, "meta_path", [_AbsentPackage(), *sys.meta_path])
     yield
 
 
@@ -133,3 +142,93 @@ def test_lint_accepts_an_empty_project_root_from_settings(tmp_path: Path, monkey
     report = _export_three(wiki_dir, Path(settings.project_root)).export()
 
     assert report.lint is not None and report.lint.violations == []
+
+
+def test_broken_installation_is_reported_not_treated_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A present but broken wiki_studio package must surface as lint_error, never as the install hint."""
+    caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
+    for name in list(sys.modules):
+        if name == "wiki_studio" or name.startswith("wiki_studio."):
+            monkeypatch.delitem(sys.modules, name)
+    stub = types.ModuleType("wiki_studio")
+    stub.__path__ = []  # a package whose submodule import fails
+    monkeypatch.setitem(sys.modules, "wiki_studio", stub)
+    monkeypatch.setitem(sys.modules, "wiki_studio.api", None)
+
+    with pytest.raises(LintError, match="installed but broken"):
+        load_studio()
+
+    wiki_dir = tmp_path / "knowledge" / "wiki"
+    caplog.clear()
+    report = _export_three(wiki_dir, tmp_path).export()
+    assert len(report.written) == 3
+    assert report.lint is None
+    assert report.lint_error is not None and "installed but broken" in report.lint_error
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]  # logged exactly once
+
+
+def test_unrecognised_result_shape_is_a_lint_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An incompatible wiki-studio whose findings lack a field fails the lint, not the export."""
+    api = pytest.importorskip("wiki_studio.api")
+
+    class Finding:
+        kind = "weak-orphan"
+        severity = "warning"
+        description = "no pages attribute"
+
+    class Health:
+        findings = [Finding()]
+
+    class Result:
+        violations = ()
+        audit_errors = ()
+        pages_checked = 1
+        health = Health()
+
+    monkeypatch.setattr(api, "lint", lambda *args, **kwargs: Result())
+    wiki_dir = tmp_path / "knowledge" / "wiki"
+
+    report = _export_three(wiki_dir, tmp_path).export()
+
+    assert len(report.written) == 3 and (wiki_dir / "index.md").is_file()
+    assert report.lint is None
+    assert report.lint_error is not None and "wiki-studio lint failed" in report.lint_error
+
+
+class _FailingInit:
+    """Meta-path finder whose ``wiki_studio`` package raises RuntimeError while it initialises."""
+
+    def find_spec(self, name: str, path: object = None, target: object = None) -> object:
+        if name != "wiki_studio":
+            return None
+        import importlib.machinery
+
+        class Loader:
+            def create_module(self, spec: object) -> None:
+                return None
+
+            def exec_module(self, module: object) -> None:
+                raise RuntimeError("wiki-studio failed to initialise")
+
+        return importlib.machinery.ModuleSpec(name, Loader(), is_package=True)
+
+
+def test_initialisation_error_is_a_lint_error_logged_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-ImportError raised while wiki_studio initialises must not fail the export."""
+    caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
+    for name in list(sys.modules):
+        if name == "wiki_studio" or name.startswith("wiki_studio."):
+            monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_FailingInit(), *sys.meta_path])
+    wiki_dir = tmp_path / "knowledge" / "wiki"
+
+    report = _export_three(wiki_dir, tmp_path).export()
+
+    assert len(report.written) == 3 and (wiki_dir / "index.md").is_file()
+    assert report.lint is None
+    assert report.lint_error is not None and "failed to initialise" in report.lint_error
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
