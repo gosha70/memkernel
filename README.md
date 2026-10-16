@@ -322,7 +322,7 @@ Long-term memory has a human-readable twin: a markdown wiki in the [LLM Wiki](ht
 - `wiki_export` compiles every long-term memory that has no page yet into a **draft** page under `decisions/`, `concepts/` or `workflows/`, with the required sections and a `memkernel://<project>/<ref_id>` citation. Existing pages are never overwritten.
 - `wiki_import` indexes curated pages as long-term memories so `recall` finds the reviewed version; a changed page supersedes its earlier memory.
 
-Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. Rationale and the proposed standalone `ai-wiki` repo: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md).
+Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. The standalone maintainer that owns this page schema is [wiki-studio](https://github.com/gosha70/wiki-studio) (`pip install wiki-studio`; `wiki-studio lint --health` checks what `wiki_export` writes). Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md).
 
 ### Revalidation and store health
 
@@ -402,7 +402,7 @@ MemKernel is the memory component of a small family of projects by the same auth
 
 | Project | Role | Relationship |
 |---|---|---|
-| [ai-wiki](https://github.com/gosha70/ai-wiki) | LLM-maintained markdown wiki (ingest / promote / query / lint) | the human-readable form of long-term memory; `wiki_export` / `wiki_import` speak its page schema (ADR-008) |
+| [wiki-studio](https://github.com/gosha70/wiki-studio) | LLM-wiki maintainer (ingest / promote / query / lint / audit), stdlib-only | the human-readable form of long-term memory; `wiki_export` / `wiki_import` speak its page schema (ADR-008), and CI lints exporter output with it |
 | [rlm-studio](https://github.com/gosha70/rlm-studio) | Recursive Language Models workbench: Direct / RAG / RLM / auto over large documents | the document layer behind `document` memories and the `ask()` tool (`MEMKERNEL_REASONER=rlmstudio`, ADR-009) |
 | [code-copilot-team](https://github.com/gosha70/code-copilot-team) | Enforceable harness configuration for Claude Code, Pi and other copilots | consumes MemKernel through MCP and hooks |
 | [haa](https://github.com/gosha70/haa) | Home-built AI coding harness, future component assembler | consumes MemKernel in-process through `build_service()` |

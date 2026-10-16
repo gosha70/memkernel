@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "memkernel"
-version = "0.4.0"
+version = "0.4.1"
 description = "Code-aware memory server for AI coding copilots"
 authors = ["EGOGE"]
 license = "Apache-2.0"
@@ -40,6 +40,7 @@ ruff = ">=0.9"
 mypy = ">=1.13"
 httpx = ">=0.27"
 pip-audit = "^2.10.0"
+wiki-studio = ">=0.1,<1"
 
 [build-system]
 requires = ["poetry-core"]

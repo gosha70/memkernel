@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Added
+
+- README section "What MemKernel is, and what it is not", with an evidence
+  line pointing at the retrieval eval and the agent-level benchmark tracked
+  in #17 (#18).
+- Contract test with [wiki-studio](https://github.com/gosha70/wiki-studio):
+  pages written by `WikiExporter` lint clean with `wiki-studio lint --health`
+  (wiki-studio is a development dependency only; no runtime change).
+
+### Changed
+
+- Documentation names wiki-studio as the maintainer of the wiki page schema
+  (README, roadmap, a dated note in ADR-008); the working name `ai-wiki` is
+  retired.
+
 ### Fixed
 
 - The server (and `build_service()`) no longer fails to start when the working
