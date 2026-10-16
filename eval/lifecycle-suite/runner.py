@@ -60,6 +60,7 @@ HOOK_SCRIPTS = {
 BASE_TOOLS = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
 ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel")
 COMPACT_PROMPT = "/compact"
+CALIBRATION_PHASE = "calibration"
 PRIMARY_NAMESPACE = "primary"
 MEMORY_DIR_TOKEN = "{memory_dir}"
 ENV_PASSTHROUGH = ("PATH", "LANG", "LC_ALL", "TMPDIR", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL")
@@ -597,7 +598,10 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
         transcript = chain_dir / f"transcript-{position}.md"
         transcript.write_text(render_transcript(outcome.prompts, outcome.summary), encoding="utf-8")
         state = ChainState(workspace=outcome.dirs.workspace, transcripts=[*state.transcripts, transcript])
-    if outcome is not None and outcome.receipt["valid"] and outcome.receipt["stage"] == "evaluation":
+    # Calibration is never graded: nobody sees pass/fail before the preregistration is committed, so its
+    # receipts carry usage and stream evidence only. Measured and demo runs are graded exactly as before.
+    gradeable = cfg.phase != CALIBRATION_PHASE
+    if gradeable and outcome is not None and outcome.receipt["valid"] and outcome.receipt["stage"] == "evaluation":
         earlier_timeout = any(r["outcome"] == "timeout" for r in receipts[:-1])
         grade(task, arm, outcome, cfg, earlier_timeout=earlier_timeout)
     for receipt in receipts:
