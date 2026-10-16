@@ -206,6 +206,7 @@ def test_report_keeps_valid_failures_and_removes_only_invalid_pairs() -> None:
     ]
     text = report.render(receipts, PARAMS)
     assert "Maintainer-run supplemental evaluation" in text
+    assert "the memory store alone against files alone" in text
     assert "| memkernel | 3 | 2 | 1/2 (50%) | 0 | 1 | 0 | mcp_not_connected: 1 |" in text  # the timeout stays a failure
     assert "| claude_md (primary) | 2 | 0 | 1 | 1 | 0 | 1 |" in text
     assert "Descriptive" in text and "Calibration (not scored)" in text and "- Sessions: 1" in text

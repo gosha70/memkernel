@@ -188,3 +188,41 @@ def test_natural_defaults_that_need_no_memory_fail(tmp_path: Path) -> None:
         "def sort_names(names):\n    return sorted(names, key=lambda n: (n.lower(), n))\n", encoding="utf-8"
     )
     assert _grade(task, workspace)[0] is False
+
+
+def test_grading_hides_the_operators_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "operator-secret-value")
+    body = (
+        "import os\n\n\ndef base_url(host):\n"
+        '    return repr((os.environ.get("ANTHROPIC_API_KEY"), os.environ.get("HOME", "").startswith("/")))\n'
+    )
+    task, workspace = _port_workspace(tmp_path, body)
+    passed, detail = _grade(task, workspace)
+    assert passed is False
+    assert "operator-secret-value" not in detail and "(None, True)" in detail
+
+
+def test_a_link_outside_the_workspace_fails_grading(tmp_path: Path) -> None:
+    secret = tmp_path / "host-secret.txt"
+    secret.write_text("host data\n", encoding="utf-8")
+    task, workspace = _evaluation_fixture("lc-compact-port", tmp_path / "linked")
+    (workspace / "leak.txt").symlink_to(secret)
+    passed, detail = _grade(task, workspace)
+    assert passed is False and "links outside itself: leak.txt" in detail
+
+
+def test_a_second_verdict_is_treated_as_tampering(tmp_path: Path) -> None:
+    oracle = tmp_path / "oracle"
+    oracle.mkdir()
+    (oracle / "driver.py").write_text(
+        "import json, os\n"
+        'path, nonce = os.environ.pop("LC_ORACLE_RESULT"), os.environ.pop("LC_ORACLE_NONCE")\n'
+        "with open(path, 'a') as fh:\n"
+        "    for rec in ({'status': 'started'}, {'verdict': 'OK'}, {'verdict': 'OK'}):\n"
+        "        fh.write(json.dumps({'nonce': nonce, **rec}) + '\\n')\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    passed, detail = checker_support.run_driver(workspace, oracle)
+    assert passed is False and "tampered" in detail
