@@ -3,6 +3,7 @@
 <!-- One `## US<n>:` group = one auto-build phase. [US#] tags trace to spec.md. -->
 <!-- Run per phase: poetry run ruff check src/ tests/ templates/ eval/ && poetry run ruff format --check src/ tests/ templates/ eval/ && poetry run mypy src/ && poetry run pytest -m "not slow" -q -p no:cacheprovider -->
 <!-- Track B amended 2026-10-16 (option B): lifecycle runner of our own, four groups only; upstream retrieval arm is US5, not a release gate. -->
+<!-- Amended 2026-10-17: seventh arm `wiki_studio` on lc-wiki only (task 17a, before calibration). -->
 
 ## US1: Positioning and the wiki-studio contract (release 0.4.1)
 
@@ -32,8 +33,8 @@
 | 10 | | **(≥ 0.3)** Dev pin `>=0.3,<1` (set in task 9); schema contract test (`EXPORT_MAP`, `IMPORT_MAP`, `PAGE_SECTIONS` vs `wiki_studio.schema`) that fails on a missing module unless `MK_TEST_NO_EXTRA=1` (FR-009, FR-019) | `pyproject.toml`, `poetry.lock`, `tests/unit/test_wiki.py` | build | [x] |
 
 **Checkpoint US2** — verify before continuing:
-- [ ] `poetry run pytest tests/unit/test_wiki.py tests/unit/test_wiki_studio.py tests/e2e -q` green with the schema test running (not skipped); the simulated-absent tests pass; exactly nine tools
-- [ ] Fallback if wiki-studio 0.2.0 is not out: ship tasks 5–8 (extra at `>=0.1`, lint adapter, no gate, no schema test); tasks 9–10 move to 0.5.1 and the README says the gate is not yet active
+- [x] `poetry run pytest tests/unit/test_wiki.py tests/unit/test_wiki_studio.py tests/e2e -q` green with the schema test running (not skipped); the simulated-absent tests pass; exactly nine tools (on 0.3.1 in #26, on 0.4.0 in #29)
+- [x] Not needed: wiki-studio 0.2.0 shipped. Fallback if wiki-studio 0.2.0 is not out: ship tasks 5–8 (extra at `>=0.1`, lint adapter, no gate, no schema test); tasks 9–10 move to 0.5.1 and the README says the gate is not yet active
 
 ---
 
@@ -47,11 +48,13 @@
 | 14 | [P] | Lifecycle tasks, four groups, five to eight each, benchmark task format, naive and informed references, oracles; CI test of references with no model call (FR-013) | `eval/lifecycle-suite/tasks/**`, `eval/lifecycle-suite/oracles/**`, `tests/unit/test_lifecycle_suite.py` | build | [x] |
 | 15 | | `runner.py --demo`: stub agent, scripted sessions, simulated compaction and hook events; CI test (FR-014, SC-4) | `eval/lifecycle-suite/runner.py`, `tests/unit/test_lifecycle_demo.py` | build | [x] |
 | 16 | [P] | `receipt.schema.json` (v1) and validator; trial validity per FR-015a (invalid only for verified harness failure or no compaction before the evaluation stage; timeouts and hook failures are valid failures), stage and compaction timestamps, hook results; diagnostics as numerator and denominator; `scan_secrets.py` with planted-secret fixture; report step deriving `report-<version>.md`, exclusions and pairings from receipts alone, byte-reproducible (FR-015a, FR-017, FR-018) | `eval/lifecycle-suite/{records,diagnostics,scan_secrets,report}.py`, `eval/lifecycle-suite/receipt.schema.json`, `eval/lifecycle-suite/fixtures/**`, `tests/unit/test_lifecycle_records.py` | build | [x] |
+| 17a | | `wiki_studio` arm (FR-012, amended 2026-10-17): copy `config.frozen.json` and `instruction.md` from wiki-studio `v0.4.0` `docs/agent-arm/`, adding its groups (`lc-wiki`) and the pinned version (`0.4.0`); runner: `ARM_NAMES`, skip the arm outside its groups with no receipt, refuse to start when `wiki-studio --version` on the session `PATH` differs from the pin; `receipt.schema.json` arm enum; `report.py` treated arms as a list (`memkernel` everywhere, `wiki_studio` on `lc-wiki` in its own comparison) and its persistence sentence; the two diagnostics of FR-018 (`wiki-studio ingest`/`query` in Bash, Write/Edit under the wiki); demo and tests (persistence rule for seven arms, groups skip, version check, instruction within 5 percent of memkernel's block, diagnostics) | `eval/lifecycle-suite/arms/wiki_studio/**`, `eval/lifecycle-suite/{runner,report,diagnostics}.py`, `eval/lifecycle-suite/receipt.schema.json`, `tests/unit/test_lifecycle_{arms,records,demo}.py` | build | [ ] |
 | 17 | [P] | `check_freeze.py <code-freeze-sha>` reading `PREREG_COMMIT`: allowlist, version-line-only diff, preregistration lock; synthetic-repo test incl. a moved `PREREG_COMMIT` and no commit touching the file, both rejected (FR-017) | `eval/check_freeze.py`, `tests/unit/test_check_freeze.py` | build | [x] |
 
 **Checkpoint US3** — verify before continuing:
 - [x] `poetry run pytest tests/unit/test_lifecycle_*.py tests/unit/test_check_freeze.py -q` green on Python 3.11; `ruff check eval/` clean
-- [x] `python eval/lifecycle-suite/runner.py --demo` passes with no credentials (SC-4)
+- [x] `python eval/lifecycle-suite/runner.py demo` passes with no credentials (SC-4)
+- [ ] Task 17a: the same checks green with seven arms; `runner.py demo` covers `wiki_studio` on the demo wiki task
 - [x] The runner contains no retrieval-grid code and no statistics beyond FR-017's counts and paired differences (FR-011)
 
 ---
@@ -60,10 +63,10 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 18 | | Calibration on the chosen Claude model, on a disposable machine or container with no personal credentials and a separate low-limit key revoked afterwards: live compaction with `PreCompact`/`PostCompact` recorded (or `lc-compact` dropped), per-arm token usage by class, the session settings that put compaction between the exposure and evaluation stages, wiring failures; record configuration, cost, exclusions; freeze tasks and arm configurations (FR-015, FR-015a) | `eval/lifecycle-suite/calibration/**` | driver | [ ] |
+| 18 | | Calibration on the chosen Claude model (`claude-sonnet-5-5`, cap $30, approved 2026-10-17), every arm including `wiki_studio` on the `lc-wiki` calibration task, on a disposable machine or container with no personal credentials, in a dedicated Console workspace whose $30 monthly spend limit is verified before the first session, with a new key scoped to it, revoked and the workspace archived afterwards: live compaction with `PreCompact`/`PostCompact` recorded (or `lc-compact` dropped), per-arm token usage by class, the session settings that put compaction between the exposure and evaluation stages, wiring failures; record configuration, cost, exclusions; freeze tasks and arm configurations (FR-015, FR-015a) | `eval/lifecycle-suite/calibration/**` | driver | [ ] |
 | 19 | | Code freeze: `main` after US2 + US3 with version `0.5.0rc1`; preregistration commit adding only `preregistration.md` (budget from calibration at explicit prices, the FR-015a validity rules and minimum valid pairs); `PREREG_COMMIT`; push and post the SHA and sha256 on #17 before any measured session (FR-016, FR-017) | `eval/lifecycle-suite/preregistration.md`, `eval/lifecycle-suite/PREREG_COMMIT` | driver | [ ] |
-| 20 | | Measured run under the same isolation as calibration (disposable machine, separate low-limit key revoked afterwards), all arms and every group calibration kept; `scan_secrets.py` and operator review; commit receipts (FR-017, FR-018) | `eval/lifecycle-suite/results/<run_id>/**` | driver | [ ] |
-| 21 | | `report-0.5.0.md` labelled maintainer-run supplemental evaluation, with the data-handling section of FR-018 (machine, no personal credentials, key limit, revocation date); README evidence line; CHANGELOG `[0.5.0]`; version 0.5.0; `check_freeze.py` passes (FR-017, FR-019) | `eval/lifecycle-suite/report-0.5.0.md`, `README.md`, `CHANGELOG.md`, `pyproject.toml`, `src/memkernel/__init__.py` | build | [ ] |
+| 20 | | Measured run under the same isolation as calibration (disposable machine; its own dedicated workspace with the preregistered budget as its verified spend limit and a key scoped to it, revoked and the workspace archived afterwards), all arms and every group calibration kept; `scan_secrets.py` and operator review; commit receipts (FR-017, FR-018) | `eval/lifecycle-suite/results/<run_id>/**` | driver | [ ] |
+| 21 | | `report-0.5.0.md` labelled maintainer-run supplemental evaluation, with the data-handling section of FR-018 (machine, no personal credentials, workspace and verified spend limit, key revocation and workspace archive date); README evidence line; CHANGELOG `[0.5.0]`; version 0.5.0; `check_freeze.py` passes (FR-017, FR-019) | `eval/lifecycle-suite/report-0.5.0.md`, `README.md`, `CHANGELOG.md`, `pyproject.toml`, `src/memkernel/__init__.py` | build | [ ] |
 | 22 | | **After the `v0.5.0` tag**: roadmap ticks in a post-release commit; reply on #17 with the report link and its limits (FR-017) | `docs/roadmap.md`, issue #17 | driver | [ ] |
 
 **Checkpoint US4**:

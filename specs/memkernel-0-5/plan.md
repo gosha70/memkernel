@@ -12,9 +12,12 @@ origin:
     - https://github.com/gosha70/memkernel/issues/17
     - https://github.com/gosha70/wiki-studio
     - https://github.com/gosha70/wiki-studio/blob/v0.1.0/docs/consumers.md
+    - https://github.com/gosha70/wiki-studio/issues/10
+    - https://github.com/gosha70/wiki-studio/tree/v0.4.0/docs/agent-arm
   transcripts:
     - specs/memkernel-0-5/origin/2026-10-15-decisions.md
     - specs/memkernel-0-5/origin/2026-10-16-option-b.md
+    - specs/memkernel-0-5/origin/2026-10-17-wiki-studio-arm.md
   origin_claim: |
     Show strong evidence of how memkernel helps with memory and context
     management, and state clearly what it is and what it is not (it is not a
@@ -54,7 +57,8 @@ to register an arm, HTTP hosting behind the broker, untested Claude route).
 The evidence for the lifecycle claims therefore comes from a **maintainer-run
 supplemental evaluation**: a minimal stdlib runner in `eval/lifecycle-suite/`
 that orchestrates the four lifecycle groups only, on tasks in the
-benchmark's executable task format, with six arms whose persistence rules
+benchmark's executable task format, with seven arms (the seventh,
+`wiki_studio`, on `lc-wiki` only) whose persistence rules
 are frozen and identical in what each arm is told and allowed to save. A
 credential-free demonstration with simulated events comes first; a
 calibration run on a Claude model proves live compaction and fixes the
