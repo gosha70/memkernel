@@ -203,9 +203,34 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
         f"cache read {totals['cache_read']}, output {totals['output']}",
         f"- Invalid sessions: {', '.join(f'{k}: {v}' for k, v in sorted(reasons.items())) or 'none'}",
         f"- Live compaction proven: {params.get('live_compaction_proven', 'not recorded')}",
+        "- Calibration sessions are not graded; no pass/fail exists for them.",
         "",
+        *_usage_ranges(calibration),
     ]
     return "\n".join(out)
+
+
+TOKEN_CLASSES = ("input", "cache_write", "cache_read", "output")
+
+
+def _usage_ranges(sessions: list[dict[str, Any]]) -> list[str]:
+    """Per-arm, per-session min / median / max of each token class: the budget's range, not a point."""
+    if not sessions:
+        return []
+    from statistics import median
+
+    lines = [
+        "| Arm | Sessions | " + " | ".join(f"{c} min / median / max" for c in TOKEN_CLASSES) + " |",
+        "|---|---|" + "---|" * len(TOKEN_CLASSES),
+    ]
+    for arm in sorted({r["arm"] for r in sessions}):
+        rows = [r for r in sessions if r["arm"] == arm]
+        cells = []
+        for cls in TOKEN_CLASSES:
+            values = sorted(r["tokens"][cls] for r in rows)
+            cells.append(f"{values[0]} / {median(values):g} / {values[-1]}")
+        lines.append(f"| {arm} | {len(rows)} | " + " | ".join(cells) + " |")
+    return [*lines, ""]
 
 
 def main(argv: list[str]) -> int:

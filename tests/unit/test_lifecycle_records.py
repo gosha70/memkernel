@@ -368,3 +368,86 @@ def test_closing_stdout_before_exiting_still_times_out(tmp_path: Path) -> None:
     )
     assert result.timed_out is True
     assert time.monotonic() - started < 3
+
+
+def test_calibration_runs_are_never_graded_and_measured_runs_are(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Calibration receipts carry usage and stream evidence only; measured grading is unchanged."""
+    import sys as _sys
+
+    graded: list[str] = []
+    real_grade = runner.grade
+
+    def spy(task: object, arm: object, final: object, cfg: object, earlier_timeout: bool = False) -> None:
+        graded.append(cfg.phase)  # type: ignore[attr-defined]
+        real_grade(task, arm, final, cfg, earlier_timeout=earlier_timeout)
+
+    monkeypatch.setattr(runner, "grade", spy)
+
+    def run(phase: str) -> list[dict[str, Any]]:
+        root = tmp_path / phase
+        root.mkdir()
+        cfg = runner.RunConfig(
+            run_root=root,
+            run_id=phase,
+            phase=phase,
+            model="stub",
+            code_sha="c",
+            preregistration_sha256="p" if phase == "measured" else None,
+            agent_cmd=(_sys.executable, str(runner.SUITE_DIR / "stub_agent.py")),
+            memkernel_cmd="stub",
+            memkernel_python=_sys.executable,
+            tasks_root=runner.SUITE_DIR / "fixtures" / "demo-tasks",
+            oracles_root=runner.SUITE_DIR / "fixtures" / "demo-oracles",
+            timeout_s=60.0,
+            hook_command_override=(_sys.executable, "-c", "import sys; sys.stdin.read()"),
+        )
+        monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+        path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    calibration = run("calibration")
+    evaluation = [r for r in calibration if r["stage"] == "evaluation"]
+    assert evaluation and all(r["outcome"] is None and r["checker_passed"] is None for r in evaluation)
+    assert "calibration" not in graded
+
+    measured = run("measured")
+    assert [r["outcome"] for r in measured if r["stage"] == "evaluation"] == ["passed"]
+    assert graded == ["measured"]
+
+
+def test_calibration_report_shows_per_session_usage_ranges_by_token_class() -> None:
+    receipts = [
+        _trial(
+            "memkernel",
+            "t9",
+            0,
+            phase="calibration",
+            outcome=None,
+            checker_passed=None,
+            tokens={"input": 10, "cache_write": 100, "cache_read": 1000, "output": 5},
+        ),
+        _trial(
+            "memkernel",
+            "t9",
+            1,
+            phase="calibration",
+            outcome=None,
+            checker_passed=None,
+            tokens={"input": 30, "cache_write": 300, "cache_read": 3000, "output": 15},
+        ),
+        _trial(
+            "bare",
+            "t9",
+            0,
+            phase="calibration",
+            outcome=None,
+            checker_passed=None,
+            tokens={"input": 7, "cache_write": 0, "cache_read": 70, "output": 2},
+        ),
+    ]
+    text = report.render(receipts, PARAMS)
+    assert "| memkernel | 2 | 10 / 20 / 30 | 100 / 200 / 300 | 1000 / 2000 / 3000 | 5 / 10 / 15 |" in text
+    assert "| bare | 1 | 7 / 7 / 7 | 0 / 0 / 0 | 70 / 70 / 70 | 2 / 2 / 2 |" in text
+    assert "not graded" in text
