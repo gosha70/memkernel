@@ -61,6 +61,7 @@ BASE_TOOLS = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
 ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel")
 COMPACT_PROMPT = "/compact"
 CALIBRATION_PHASE = "calibration"
+STREAM_FILE = "stream.jsonl"
 PRIMARY_NAMESPACE = "primary"
 MEMORY_DIR_TOKEN = "{memory_dir}"
 ENV_PASSTHROUGH = ("PATH", "LANG", "LC_ALL", "TMPDIR", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL")
@@ -442,7 +443,7 @@ def run_session(
         wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger)
         env = _session_env(arm, dirs, chain_id, cfg)
         session_uuid = str(uuid.uuid4())
-        raw = dirs.root / "stream.jsonl"
+        raw = dirs.root / STREAM_FILE
         for index, step in enumerate(session.steps):
             if step.stage == "exposure":
                 exposure_at = utc_now()
@@ -582,8 +583,7 @@ def grade(task: Task, arm: Arm, final: SessionOutcome, cfg: RunConfig, earlier_t
 
 
 def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any = None) -> list[dict[str, Any]]:
-    chain_id = f"{task.task_id}.{arm.name}.r{run_index}"
-    chain_dir = cfg.run_root / cfg.run_id / chain_id
+    chain_dir = chain_dir_for(task, arm, run_index, cfg)
     chain_dir.mkdir(parents=True)
     state = ChainState()
     earlier_reads: set[str] = set()
@@ -611,6 +611,36 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
     return receipts
 
 
+def chain_dir_for(task: Task, arm: Arm, run_index: int, cfg: RunConfig) -> Path:
+    return cfg.run_root / cfg.run_id / f"{task.task_id}.{arm.name}.r{run_index}"
+
+
+def discard_session_state(chain_dir: Path) -> None:
+    """Delete what a calibration chain's agent left behind: ungraded calibration with workspace cleanup.
+
+    Workspaces, homes, Claude Code config directories (which hold its own session
+    files), stores and transcripts all go; each session's ``stream.jsonl`` stays,
+    because FR-018 keeps raw streams for wiring review and the secret scan. This is
+    not blinding: the stream still records the agent's edits and responses, so
+    reading it can reveal an outcome. A symlink is removed as a link and never
+    followed, so nothing outside ``chain_dir`` is touched. Called only after the
+    chain's receipts are on disk.
+    """
+    for entry in chain_dir.iterdir():
+        if entry.is_symlink() or not entry.is_dir():
+            entry.unlink()
+        elif entry.name.startswith("s") and entry.name[1:].isdigit():
+            for item in entry.iterdir():
+                if item.name == STREAM_FILE and item.is_file() and not item.is_symlink():
+                    continue
+                if item.is_symlink() or not item.is_dir():
+                    item.unlink()
+                else:
+                    shutil.rmtree(item)
+        else:
+            shutil.rmtree(entry)
+
+
 def _inside_checkout(path: Path) -> bool:
     probe = path if path.exists() else path.parent
     completed = subprocess.run(
@@ -635,6 +665,18 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
                 for arm in arms:
                     for receipt in run_chain(task, arm, run_index, cfg, observe):
                         sink.write(json.dumps(receipt, sort_keys=True) + "\n")
+                    sink.flush()
+                    os.fsync(sink.fileno())
+                    if cfg.phase == CALIBRATION_PHASE:  # receipts are durable before anything is deleted
+                        chain_dir = chain_dir_for(task, arm, run_index, cfg)
+                        try:
+                            discard_session_state(chain_dir)
+                        except OSError as exc:
+                            raise SystemExit(
+                                f"calibration cleanup failed in {chain_dir}: {exc}; the receipts written so far "
+                                f"are in {receipts_path}; remove what is left of that chain by hand, then rerun "
+                                "the remaining chains under a new run id"
+                            ) from exc
     return receipts_path
 
 
