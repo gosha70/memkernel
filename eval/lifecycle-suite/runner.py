@@ -615,6 +615,9 @@ def chain_dir_for(task: Task, arm: Arm, run_index: int, cfg: RunConfig) -> Path:
     return cfg.run_root / cfg.run_id / f"{task.task_id}.{arm.name}.r{run_index}"
 
 
+_DIR_NOFOLLOW = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
 def discard_session_state(chain_dir: Path) -> None:
     """Delete what a calibration chain's agent left behind: ungraded calibration with workspace cleanup.
 
@@ -622,23 +625,54 @@ def discard_session_state(chain_dir: Path) -> None:
     files), stores and transcripts all go; each session's ``stream.jsonl`` stays,
     because FR-018 keeps raw streams for wiring review and the secret scan. This is
     not blinding: the stream still records the agent's edits and responses, so
-    reading it can reveal an outcome. A symlink is removed as a link and never
-    followed, so nothing outside ``chain_dir`` is touched. Called only after the
-    chain's receipts are on disk.
+    reading it can reveal an outcome. Called only after the chain's receipts are on
+    disk.
+
+    Traversal is by directory descriptor, opened with ``O_NOFOLLOW`` from the chain
+    root down, and every removal is relative to the descriptor it was found under,
+    so a symlink at any level, the root included, is never followed even if a
+    process the agent left running swaps a directory for a link mid-cleanup.
     """
-    for entry in chain_dir.iterdir():
-        if entry.is_symlink() or not entry.is_dir():
-            entry.unlink()
-        elif entry.name.startswith("s") and entry.name[1:].isdigit():
-            for item in entry.iterdir():
-                if item.name == STREAM_FILE and item.is_file() and not item.is_symlink():
-                    continue
-                if item.is_symlink() or not item.is_dir():
-                    item.unlink()
-                else:
-                    shutil.rmtree(item)
-        else:
-            shutil.rmtree(entry)
+    if not shutil.rmtree.avoids_symlink_attacks:
+        raise OSError("this platform's shutil.rmtree is not safe against symlink attacks; refusing to clean up")
+    try:
+        root_fd = os.open(chain_dir, _DIR_NOFOLLOW)
+    except OSError as exc:  # ELOOP / ENOTDIR: the root is a link or not a directory
+        raise OSError(f"refusing to clean {chain_dir}: not a real directory ({exc})") from exc
+    try:
+        with os.scandir(root_fd) as entries:
+            names = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries]
+        for name, is_dir in names:
+            if is_dir and name.startswith("s") and name[1:].isdigit():
+                _clean_session(name, root_fd)
+            else:
+                _remove_entry(name, is_dir, root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _clean_session(name: str, parent_fd: int) -> None:
+    session_fd = os.open(name, _DIR_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        with os.scandir(session_fd) as entries:
+            items = [
+                (entry.name, entry.is_dir(follow_symlinks=False), entry.is_file(follow_symlinks=False))
+                for entry in entries
+            ]
+        for item, is_dir, is_file in items:
+            if item == STREAM_FILE and is_file:
+                continue
+            _remove_entry(item, is_dir, session_fd)
+    finally:
+        os.close(session_fd)
+
+
+def _remove_entry(name: str, is_dir: bool, parent_fd: int) -> None:
+    """Remove ``name`` under ``parent_fd``; a directory replaced by a link since the scan makes rmtree refuse."""
+    if is_dir:
+        shutil.rmtree(name, dir_fd=parent_fd)
+    else:
+        os.unlink(name, dir_fd=parent_fd)
 
 
 def _inside_checkout(path: Path) -> bool:

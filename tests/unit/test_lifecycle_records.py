@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -453,6 +454,70 @@ def test_calibration_cleanup_never_follows_a_symlink_out_of_the_chain(tmp_path: 
     assert sorted(p.relative_to(chain).as_posix() for p in chain.rglob("*")) == ["s0", "s0/stream.jsonl"]
     assert (outside / "sentinel.txt").read_text(encoding="utf-8") == "keep\n"
     assert (outside / "sub" / "sentinel.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_calibration_cleanup_refuses_a_chain_root_that_is_a_symlink(tmp_path: Path) -> None:
+    unrelated = tmp_path / "unrelated"
+    (unrelated / "s0" / "workspace").mkdir(parents=True)
+    (unrelated / "keep.txt").write_text("keep\n", encoding="utf-8")
+    (unrelated / "s0" / "workspace" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    chain = tmp_path / "chain"
+    chain.symlink_to(unrelated, target_is_directory=True)
+
+    with pytest.raises(OSError, match="not a real directory"):
+        runner.discard_session_state(chain)
+
+    assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    assert (unrelated / "s0" / "workspace" / "keep.txt").is_file()
+    assert chain.is_symlink()
+
+
+def test_a_directory_swapped_for_a_link_mid_cleanup_is_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+    chain = tmp_path / "chain"
+    (chain / "s0" / "workspace").mkdir(parents=True)
+    (chain / "s0" / runner.STREAM_FILE).write_text("{}\n", encoding="utf-8")
+    real_remove = runner._remove_entry
+
+    def swap_then_remove(name: str, is_dir: bool, parent_fd: int) -> None:
+        if name == "workspace":  # scanned as a directory, now a link to elsewhere
+            shutil.rmtree(chain / "s0" / "workspace")
+            (chain / "s0" / "workspace").symlink_to(outside, target_is_directory=True)
+        real_remove(name, is_dir, parent_fd)
+
+    monkeypatch.setattr(runner, "_remove_entry", swap_then_remove)
+    with pytest.raises(OSError):
+        runner.discard_session_state(chain)
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_a_symlinked_chain_root_stops_a_calibration_run_with_the_receipts_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chain directory swapped for a link once its sessions end (an agent's leftover process could do it)."""
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "keep.txt").write_text("keep\n", encoding="utf-8")
+    real_run_chain = runner.run_chain
+
+    def run_then_swap(task: object, arm: object, run_index: int, cfg: object, observe: object = None) -> object:
+        receipts = real_run_chain(task, arm, run_index, cfg, observe)  # type: ignore[arg-type]
+        chain = runner.chain_dir_for(task, arm, run_index, cfg)  # type: ignore[arg-type]
+        shutil.rmtree(chain)
+        chain.symlink_to(unrelated, target_is_directory=True)
+        return receipts
+
+    monkeypatch.setattr(runner, "run_chain", run_then_swap)
+    with pytest.raises(SystemExit, match="calibration cleanup failed"):
+        _stub_run(tmp_path / "calibration", monkeypatch, "calibration", ["bare"])
+
+    assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    receipts = (tmp_path / "calibration" / "calibration" / "receipts.jsonl").read_text(encoding="utf-8")
+    assert len(receipts.splitlines()) == 2
 
 
 def test_a_failed_calibration_cleanup_stops_the_run_with_the_receipts_on_disk(
