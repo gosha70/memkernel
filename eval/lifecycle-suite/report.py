@@ -228,9 +228,14 @@ def _usage_ranges(sessions: list[dict[str, Any]]) -> list[str]:
         cells = []
         for cls in TOKEN_CLASSES:
             values = sorted(r["tokens"][cls] for r in rows)
-            cells.append(f"{values[0]} / {median(values):g} / {values[-1]}")
+            cells.append(f"{values[0]} / {_count(median(values))} / {values[-1]}")
         lines.append(f"| {arm} | {len(rows)} | " + " | ".join(cells) + " |")
     return [*lines, ""]
+
+
+def _count(value: float) -> str:
+    """A token count as digits, never in exponent form; a median of two counts may end in .5."""
+    return f"{value:.0f}" if value == int(value) else f"{value:.1f}"
 
 
 def main(argv: list[str]) -> int:

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import copy
 import json
+import re
+import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -370,12 +372,35 @@ def test_closing_stdout_before_exiting_still_times_out(tmp_path: Path) -> None:
     assert time.monotonic() - started < 3
 
 
+def _stub_run(root: Path, monkeypatch: pytest.MonkeyPatch, phase: str, arms: list[str]) -> list[dict[str, Any]]:
+    """One demo-retain chain per arm through the real runner with the stub agent, in ``phase``."""
+    import sys as _sys
+
+    root.mkdir()
+    cfg = runner.RunConfig(
+        run_root=root,
+        run_id=phase,
+        phase=phase,
+        model="stub",
+        code_sha="c",
+        preregistration_sha256="p" if phase == "measured" else None,
+        agent_cmd=(_sys.executable, str(runner.SUITE_DIR / "stub_agent.py")),
+        memkernel_cmd="stub",
+        memkernel_python=_sys.executable,
+        tasks_root=runner.SUITE_DIR / "fixtures" / "demo-tasks",
+        oracles_root=runner.SUITE_DIR / "fixtures" / "demo-oracles",
+        timeout_s=60.0,
+        hook_command_override=(_sys.executable, "-c", "import sys; sys.stdin.read()"),
+    )
+    monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    path = runner.run(cfg, ["demo-retain"], arms, runs=1)
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
 def test_calibration_runs_are_never_graded_and_measured_runs_are(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Calibration receipts carry usage and stream evidence only; measured grading is unchanged."""
-    import sys as _sys
-
     graded: list[str] = []
     real_grade = runner.grade
 
@@ -385,36 +410,129 @@ def test_calibration_runs_are_never_graded_and_measured_runs_are(
 
     monkeypatch.setattr(runner, "grade", spy)
 
-    def run(phase: str) -> list[dict[str, Any]]:
-        root = tmp_path / phase
-        root.mkdir()
-        cfg = runner.RunConfig(
-            run_root=root,
-            run_id=phase,
-            phase=phase,
-            model="stub",
-            code_sha="c",
-            preregistration_sha256="p" if phase == "measured" else None,
-            agent_cmd=(_sys.executable, str(runner.SUITE_DIR / "stub_agent.py")),
-            memkernel_cmd="stub",
-            memkernel_python=_sys.executable,
-            tasks_root=runner.SUITE_DIR / "fixtures" / "demo-tasks",
-            oracles_root=runner.SUITE_DIR / "fixtures" / "demo-oracles",
-            timeout_s=60.0,
-            hook_command_override=(_sys.executable, "-c", "import sys; sys.stdin.read()"),
-        )
-        monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
-        path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-
-    calibration = run("calibration")
+    calibration = _stub_run(tmp_path / "calibration", monkeypatch, "calibration", ["bare"])
     evaluation = [r for r in calibration if r["stage"] == "evaluation"]
     assert evaluation and all(r["outcome"] is None and r["checker_passed"] is None for r in evaluation)
     assert "calibration" not in graded
 
-    measured = run("measured")
+    measured = _stub_run(tmp_path / "measured", monkeypatch, "measured", ["bare"])
     assert [r["outcome"] for r in measured if r["stage"] == "evaluation"] == ["passed"]
     assert graded == ["measured"]
+
+
+def test_calibration_keeps_only_receipts_and_streams_so_nothing_can_be_graded_by_hand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arms = ["bare", "claude_md", "fs_grep", "memkernel"]  # workspace, transcript and store carry-over all covered
+    _stub_run(tmp_path / "calibration", monkeypatch, "calibration", arms)
+    run_dir = tmp_path / "calibration" / "calibration"
+    kept = sorted(p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*") if p.is_file())
+    streams = [path for path in kept if path != "receipts.jsonl"]
+    assert "receipts.jsonl" in kept and len(streams) == len(arms) * 2  # demo-retain has two sessions
+    assert all(re.fullmatch(r"[^/]+/s\d+/stream\.jsonl", path) for path in streams), kept
+    assert not any(p.name == "workspace" for p in run_dir.rglob("*"))
+
+    _stub_run(tmp_path / "measured", monkeypatch, "measured", ["bare"])
+    measured = tmp_path / "measured" / "measured"
+    assert any(p.name == "workspace" and p.is_dir() for p in measured.rglob("*"))  # measured runs keep everything
+
+
+def test_calibration_cleanup_never_follows_a_symlink_out_of_the_chain(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "sentinel.txt").write_text("keep\n", encoding="utf-8")
+    (outside / "sub" / "sentinel.txt").write_text("keep\n", encoding="utf-8")
+    chain = tmp_path / "chain"
+    (chain / "s0" / "workspace").mkdir(parents=True)
+    (chain / "s0" / runner.STREAM_FILE).write_text("{}\n", encoding="utf-8")
+    (chain / "s42").symlink_to(outside, target_is_directory=True)  # looks like a session directory
+    (chain / "s0" / "home").symlink_to(outside / "sub", target_is_directory=True)  # a link inside a session
+    (chain / "memory").symlink_to(outside, target_is_directory=True)
+
+    runner.discard_session_state(chain)
+
+    assert sorted(p.relative_to(chain).as_posix() for p in chain.rglob("*")) == ["s0", "s0/stream.jsonl"]
+    assert (outside / "sentinel.txt").read_text(encoding="utf-8") == "keep\n"
+    assert (outside / "sub" / "sentinel.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_calibration_cleanup_refuses_a_chain_root_that_is_a_symlink(tmp_path: Path) -> None:
+    unrelated = tmp_path / "unrelated"
+    (unrelated / "s0" / "workspace").mkdir(parents=True)
+    (unrelated / "keep.txt").write_text("keep\n", encoding="utf-8")
+    (unrelated / "s0" / "workspace" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    chain = tmp_path / "chain"
+    chain.symlink_to(unrelated, target_is_directory=True)
+
+    with pytest.raises(OSError, match="not a real directory"):
+        runner.discard_session_state(chain)
+
+    assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    assert (unrelated / "s0" / "workspace" / "keep.txt").is_file()
+    assert chain.is_symlink()
+
+
+def test_a_directory_swapped_for_a_link_mid_cleanup_is_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+    chain = tmp_path / "chain"
+    (chain / "s0" / "workspace").mkdir(parents=True)
+    (chain / "s0" / runner.STREAM_FILE).write_text("{}\n", encoding="utf-8")
+    real_remove = runner._remove_entry
+
+    def swap_then_remove(name: str, is_dir: bool, parent_fd: int) -> None:
+        if name == "workspace":  # scanned as a directory, now a link to elsewhere
+            shutil.rmtree(chain / "s0" / "workspace")
+            (chain / "s0" / "workspace").symlink_to(outside, target_is_directory=True)
+        real_remove(name, is_dir, parent_fd)
+
+    monkeypatch.setattr(runner, "_remove_entry", swap_then_remove)
+    with pytest.raises(OSError):
+        runner.discard_session_state(chain)
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_a_symlinked_chain_root_stops_a_calibration_run_with_the_receipts_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chain directory swapped for a link once its sessions end (an agent's leftover process could do it)."""
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "keep.txt").write_text("keep\n", encoding="utf-8")
+    real_run_chain = runner.run_chain
+
+    def run_then_swap(task: object, arm: object, run_index: int, cfg: object, observe: object = None) -> object:
+        receipts = real_run_chain(task, arm, run_index, cfg, observe)  # type: ignore[arg-type]
+        chain = runner.chain_dir_for(task, arm, run_index, cfg)  # type: ignore[arg-type]
+        shutil.rmtree(chain)
+        chain.symlink_to(unrelated, target_is_directory=True)
+        return receipts
+
+    monkeypatch.setattr(runner, "run_chain", run_then_swap)
+    with pytest.raises(SystemExit, match="calibration cleanup failed"):
+        _stub_run(tmp_path / "calibration", monkeypatch, "calibration", ["bare"])
+
+    assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    receipts = (tmp_path / "calibration" / "calibration" / "receipts.jsonl").read_text(encoding="utf-8")
+    assert len(receipts.splitlines()) == 2
+
+
+def test_a_failed_calibration_cleanup_stops_the_run_with_the_receipts_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(chain_dir: Path) -> None:
+        raise PermissionError(13, "Permission denied", str(chain_dir))
+
+    monkeypatch.setattr(runner, "discard_session_state", refuse)
+    with pytest.raises(SystemExit, match="calibration cleanup failed"):
+        _stub_run(tmp_path / "calibration", monkeypatch, "calibration", ["bare", "fs_grep"])
+
+    receipts = (tmp_path / "calibration" / "calibration" / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(receipts) == 2  # the first chain's two sessions, written before cleanup was attempted
+    assert {json.loads(line)["arm"] for line in receipts} == {"bare"}  # the run stopped at the failure
 
 
 def test_calibration_report_shows_per_session_usage_ranges_by_token_class() -> None:
@@ -451,3 +569,16 @@ def test_calibration_report_shows_per_session_usage_ranges_by_token_class() -> N
     assert "| memkernel | 2 | 10 / 20 / 30 | 100 / 200 / 300 | 1000 / 2000 / 3000 | 5 / 10 / 15 |" in text
     assert "| bare | 1 | 7 / 7 / 7 | 0 / 0 / 0 | 70 / 70 / 70 | 2 / 2 / 2 |" in text
     assert "not graded" in text
+
+
+def test_calibration_usage_medians_print_as_counts_not_in_exponent_form() -> None:
+    def session(arm: str, index: int, count: int) -> dict[str, Any]:
+        tokens = {"input": count, "cache_write": count, "cache_read": count, "output": count}
+        return _trial(arm, "t9", index, phase="calibration", outcome=None, checker_passed=None, tokens=tokens)
+
+    text = report.render(
+        [session("memkernel", 0, 1_234_567), session("bare", 0, 999_999), session("bare", 1, 1_000_002)], PARAMS
+    )
+    assert "| memkernel | 1 | 1234567 / 1234567 / 1234567 |" in text
+    assert "999999 / 1000000.5 / 1000002" in text
+    assert "e+" not in text

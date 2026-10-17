@@ -61,6 +61,7 @@ BASE_TOOLS = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
 ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel")
 COMPACT_PROMPT = "/compact"
 CALIBRATION_PHASE = "calibration"
+STREAM_FILE = "stream.jsonl"
 PRIMARY_NAMESPACE = "primary"
 MEMORY_DIR_TOKEN = "{memory_dir}"
 ENV_PASSTHROUGH = ("PATH", "LANG", "LC_ALL", "TMPDIR", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL")
@@ -442,7 +443,7 @@ def run_session(
         wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger)
         env = _session_env(arm, dirs, chain_id, cfg)
         session_uuid = str(uuid.uuid4())
-        raw = dirs.root / "stream.jsonl"
+        raw = dirs.root / STREAM_FILE
         for index, step in enumerate(session.steps):
             if step.stage == "exposure":
                 exposure_at = utc_now()
@@ -582,8 +583,7 @@ def grade(task: Task, arm: Arm, final: SessionOutcome, cfg: RunConfig, earlier_t
 
 
 def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any = None) -> list[dict[str, Any]]:
-    chain_id = f"{task.task_id}.{arm.name}.r{run_index}"
-    chain_dir = cfg.run_root / cfg.run_id / chain_id
+    chain_dir = chain_dir_for(task, arm, run_index, cfg)
     chain_dir.mkdir(parents=True)
     state = ChainState()
     earlier_reads: set[str] = set()
@@ -611,6 +611,70 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
     return receipts
 
 
+def chain_dir_for(task: Task, arm: Arm, run_index: int, cfg: RunConfig) -> Path:
+    return cfg.run_root / cfg.run_id / f"{task.task_id}.{arm.name}.r{run_index}"
+
+
+_DIR_NOFOLLOW = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def discard_session_state(chain_dir: Path) -> None:
+    """Delete what a calibration chain's agent left behind: ungraded calibration with workspace cleanup.
+
+    Workspaces, homes, Claude Code config directories (which hold its own session
+    files), stores and transcripts all go; each session's ``stream.jsonl`` stays,
+    because FR-018 keeps raw streams for wiring review and the secret scan. This is
+    not blinding: the stream still records the agent's edits and responses, so
+    reading it can reveal an outcome. Called only after the chain's receipts are on
+    disk.
+
+    Traversal is by directory descriptor, opened with ``O_NOFOLLOW`` from the chain
+    root down, and every removal is relative to the descriptor it was found under,
+    so a symlink at any level, the root included, is never followed even if a
+    process the agent left running swaps a directory for a link mid-cleanup.
+    """
+    if not shutil.rmtree.avoids_symlink_attacks:
+        raise OSError("this platform's shutil.rmtree is not safe against symlink attacks; refusing to clean up")
+    try:
+        root_fd = os.open(chain_dir, _DIR_NOFOLLOW)
+    except OSError as exc:  # ELOOP / ENOTDIR: the root is a link or not a directory
+        raise OSError(f"refusing to clean {chain_dir}: not a real directory ({exc})") from exc
+    try:
+        with os.scandir(root_fd) as entries:
+            names = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries]
+        for name, is_dir in names:
+            if is_dir and name.startswith("s") and name[1:].isdigit():
+                _clean_session(name, root_fd)
+            else:
+                _remove_entry(name, is_dir, root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _clean_session(name: str, parent_fd: int) -> None:
+    session_fd = os.open(name, _DIR_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        with os.scandir(session_fd) as entries:
+            items = [
+                (entry.name, entry.is_dir(follow_symlinks=False), entry.is_file(follow_symlinks=False))
+                for entry in entries
+            ]
+        for item, is_dir, is_file in items:
+            if item == STREAM_FILE and is_file:
+                continue
+            _remove_entry(item, is_dir, session_fd)
+    finally:
+        os.close(session_fd)
+
+
+def _remove_entry(name: str, is_dir: bool, parent_fd: int) -> None:
+    """Remove ``name`` under ``parent_fd``; a directory replaced by a link since the scan makes rmtree refuse."""
+    if is_dir:
+        shutil.rmtree(name, dir_fd=parent_fd)
+    else:
+        os.unlink(name, dir_fd=parent_fd)
+
+
 def _inside_checkout(path: Path) -> bool:
     probe = path if path.exists() else path.parent
     completed = subprocess.run(
@@ -635,6 +699,18 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
                 for arm in arms:
                     for receipt in run_chain(task, arm, run_index, cfg, observe):
                         sink.write(json.dumps(receipt, sort_keys=True) + "\n")
+                    sink.flush()
+                    os.fsync(sink.fileno())
+                    if cfg.phase == CALIBRATION_PHASE:  # receipts are durable before anything is deleted
+                        chain_dir = chain_dir_for(task, arm, run_index, cfg)
+                        try:
+                            discard_session_state(chain_dir)
+                        except OSError as exc:
+                            raise SystemExit(
+                                f"calibration cleanup failed in {chain_dir}: {exc}; the receipts written so far "
+                                f"are in {receipts_path}; remove what is left of that chain by hand, then rerun "
+                                "the remaining chains under a new run id"
+                            ) from exc
     return receipts_path
 
 
