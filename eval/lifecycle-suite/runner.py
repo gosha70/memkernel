@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from diagnostics import read_paths, session_diagnostics
+from diagnostics import WIKI_DIR, read_paths, session_diagnostics
 from records import (
     CONNECTED_STATUSES,
     SCHEMA_VERSION,
@@ -58,9 +58,10 @@ HOOK_SCRIPTS = {
     "PostCompact": "post-compact.py",
 }
 BASE_TOOLS = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
-ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel")
+ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio")
 COMPACT_PROMPT = "/compact"
 CALIBRATION_PHASE = "calibration"
+MEASURED_PHASE = "measured"
 STREAM_FILE = "stream.jsonl"
 PRIMARY_NAMESPACE = "primary"
 MEMORY_DIR_TOKEN = "{memory_dir}"
@@ -81,6 +82,11 @@ class Arm:
     mcp: bool
     hooks: tuple[str, ...]
     config_sha256: str
+    groups: tuple[str, ...] = ()  # empty: every group; otherwise the only groups this arm runs on (FR-012)
+    cli_pin: tuple[str, str] | None = None  # (command, version) that must be on the session PATH for a paid run
+
+    def runs_on(self, task: Task) -> bool:
+        return not self.groups or task.group in self.groups
 
 
 def load_arm(name: str, arms_dir: Path = ARMS_DIR) -> Arm:
@@ -99,6 +105,8 @@ def load_arm(name: str, arms_dir: Path = ARMS_DIR) -> Arm:
         mcp=bool(config.get("mcp", False)),
         hooks=tuple(config.get("hooks", [])),
         config_sha256=sha256_bytes(raw + b"\0" + instruction),
+        groups=tuple(config.get("groups", [])),
+        cli_pin=(config["cli_pin"]["command"], config["cli_pin"]["version"]) if config.get("cli_pin") else None,
     )
 
 
@@ -258,7 +266,7 @@ def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str
         "MEMKERNEL_PROJECT_ID": f"lc_{sha256_text(chain_id + '/' + dirs.namespace)[:16]}",
         "MEMKERNEL_CHROMA_PERSIST_PATH": str(dirs.store),
         "MEMKERNEL_PROJECT_ROOT": str(dirs.workspace),
-        "MEMKERNEL_WIKI_DIR": str(dirs.workspace / "knowledge" / "wiki"),
+        "MEMKERNEL_WIKI_DIR": str(dirs.workspace / WIKI_DIR),
         "HOME": str(dirs.home),
     }
     if cfg.shared_cache is not None:
@@ -683,6 +691,26 @@ def _inside_checkout(path: Path) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "true"
 
 
+def check_cli_pin(arm: Arm) -> None:
+    """Refuse a paid run unless ``arm``'s pinned command reports its pinned version on the session PATH."""
+    if arm.cli_pin is None:
+        return
+    command, version = arm.cli_pin
+    env = {key: os.environ[key] for key in ENV_PASSTHROUGH if key in os.environ and key != "ANTHROPIC_API_KEY"}
+    try:
+        completed = subprocess.run(
+            [command, "--version"], capture_output=True, text=True, env=env, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(
+            f"{arm.name}: `{command} --version` could not run ({exc}); install {command}=={version}"
+        ) from exc
+    reported = completed.stdout.strip().split()[-1:] if completed.returncode == 0 else []
+    if reported != [version]:
+        found = completed.stdout.strip() or completed.stderr.strip() or f"exit {completed.returncode}"
+        raise SystemExit(f"{arm.name}: `{command} --version` reports {found!r}, the arm is frozen at {version}")
+
+
 def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, observe: Any = None) -> Path:
     if _inside_checkout(cfg.run_root):
         raise SystemExit(f"refusing to run inside a git checkout: {cfg.run_root}")
@@ -693,10 +721,15 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     receipts_path = out / "receipts.jsonl"
     tasks = [load_task(cfg.tasks_root / task_id) for task_id in task_ids]
     arms = [load_arm(name) for name in arm_names]
+    if cfg.phase in (CALIBRATION_PHASE, MEASURED_PHASE):
+        for arm in arms:
+            check_cli_pin(arm)
     with receipts_path.open("w", encoding="utf-8") as sink:
         for run_index in range(runs):
             for task in tasks:
                 for arm in arms:
+                    if not arm.runs_on(task):  # e.g. wiki_studio outside lc-wiki: no chain, no receipt
+                        continue
                     for receipt in run_chain(task, arm, run_index, cfg, observe):
                         sink.write(json.dumps(receipt, sort_keys=True) + "\n")
                     sink.flush()
@@ -761,7 +794,15 @@ def demo() -> int:
 def check_demo(seen: dict[tuple[str, str, int], dict[str, bool]], receipts: list[dict[str, Any]]) -> list[str]:
     failures: list[str] = []
     rules = {arm: load_arm(arm) for arm in ARM_NAMES}
+    demo_tasks = {task_id: load_task(SUITE_DIR / "fixtures" / "demo-tasks" / task_id) for task_id in DEMO_TASKS}
     for arm_name, arm in rules.items():
+        for task_id, task in demo_tasks.items():
+            ran = any(key[:2] == (task_id, arm_name) for key in seen)
+            if ran != arm.runs_on(task):
+                verb, rule = ("ran", "exclude") if ran else ("did not run", "include")
+                failures.append(f"{arm_name}: {verb} on {task_id}, but its groups {rule} {task.group}")
+        if ("demo-retain", arm_name, 1) not in seen:
+            continue
         retain = seen[("demo-retain", arm_name, 1)]
         if retain["workspace_note"] != arm.persist_workspace:
             failures.append(
@@ -773,6 +814,9 @@ def check_demo(seen: dict[tuple[str, str, int], dict[str, bool]], receipts: list
             )
         if retain["store_marker"] != arm.persist_store:
             failures.append(f"{arm_name}: store carry-over {retain['store_marker']} != rule {arm.persist_store}")
+    for arm_name in rules:
+        if ("demo-wiki", arm_name, 1) not in seen:
+            continue
         wiki = seen[("demo-wiki", arm_name, 1)]
         if not wiki["wiki_page"]:
             failures.append(f"{arm_name}: the lc-wiki shared artifact did not reach the destination session")
@@ -805,7 +849,7 @@ def main(argv: list[str]) -> int:
     p_run.add_argument("--runs", type=int, default=1)
     p_run.add_argument("--run-root", type=Path, required=True)
     p_run.add_argument("--run-id", required=True)
-    p_run.add_argument("--phase", choices=("calibration", "measured"), required=True)
+    p_run.add_argument("--phase", choices=(CALIBRATION_PHASE, MEASURED_PHASE), required=True)
     p_run.add_argument("--model", required=True)
     p_run.add_argument("--code-sha", required=True)
     p_run.add_argument("--preregistration", type=Path)
@@ -817,7 +861,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo()
-    if args.phase == "measured" and args.preregistration is None:
+    if args.phase == MEASURED_PHASE and args.preregistration is None:
         parser.error("a measured run needs --preregistration")
     cfg = RunConfig(
         run_root=args.run_root.resolve(),

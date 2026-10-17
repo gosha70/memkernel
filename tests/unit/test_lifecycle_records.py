@@ -124,6 +124,8 @@ def test_summary_and_diagnostics_are_counts_with_denominators(tmp_path: Path) ->
         "calls_before_first_retain": {"numerator": 3, "denominator": 4},
         "recall_to_use": {"numerator": 1, "denominator": 2},
         "hooks_succeeded": {"numerator": 1, "denominator": 2},
+        "wiki_studio_nested_model_calls": {"numerator": 0, "denominator": 0},
+        "direct_wiki_writes": {"numerator": 0, "denominator": 0},
     }
 
 
@@ -185,11 +187,12 @@ PARAMS = {
     "preregistration_commit": "p1",
     "tag": "v0.5.0",
     "model": "m",
-    "arms": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel"],
+    "arms": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio"],
     "primary_comparators": ["claude_md", "fs_grep"],
     "secondary_comparators": ["bare"],
     "min_pairs_inferential": 30,
     "min_valid_pairs_lc_compact": 3,
+    "min_valid_pairs_wiki_studio": 2,
     "live_compaction_proven": "yes",
 }
 
@@ -582,3 +585,144 @@ def test_calibration_usage_medians_print_as_counts_not_in_exponent_form() -> Non
     assert "| memkernel | 1 | 1234567 / 1234567 / 1234567 |" in text
     assert "999999 / 1000000.5 / 1000002" in text
     assert "e+" not in text
+
+
+def _use(name: str, **fields: Any) -> Any:
+    return records.ToolUse(ts="t", name=name, tool_id=f"{name}-{len(fields)}-{sorted(fields.items())}", input=fields)
+
+
+def test_wiki_studio_diagnostics_count_nested_models_and_writes_that_bypass_the_gate(tmp_path: Path) -> None:
+    summary = records.StreamSummary(
+        tool_uses=[
+            _use("Bash", command='wiki-studio find "retry backoff"'),
+            _use("Bash", command='cd x && wiki-studio --root . query "what is the backoff?"'),
+            _use("Bash", command="/opt/bin/wiki-studio ingest notes.md; echo done"),
+            _use("Bash", command='wiki-studio propose --from "$D" --promote'),
+            _use("Bash", command='grep -r "query" knowledge/wiki'),  # the word, not the verb
+            _use("Write", file_path=str(tmp_path / "knowledge" / "wiki" / "decisions" / "x.md")),
+            _use("Edit", file_path="knowledge/wiki/index.md"),
+            _use("Write", file_path=str(tmp_path / "backoff.py")),
+            _use("Write", file_path=str(tmp_path / "knowledge" / "wikipedia.md")),
+        ]
+    )
+    result = diagnostics.session_diagnostics(summary, tmp_path, set(), [])
+    assert result["wiki_studio_nested_model_calls"] == {"numerator": 2, "denominator": 5}
+    assert result["direct_wiki_writes"] == {"numerator": 2, "denominator": 4}
+
+
+def test_an_arm_outside_its_groups_gets_no_chain_and_no_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned: list[str] = []
+    monkeypatch.setattr(runner, "check_cli_pin", lambda arm: pinned.append(arm.name))
+    receipts = _stub_run(tmp_path / "measured", monkeypatch, "measured", ["wiki_studio", "bare"])  # demo-retain only
+    assert {r["arm"] for r in receipts} == {"bare"}
+    assert not (tmp_path / "measured" / "measured" / "demo-retain.wiki_studio.r0").exists()
+    assert pinned == ["wiki_studio", "bare"]  # every arm is checked before a paid run starts
+
+
+def _fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | None) -> None:
+    import os
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if output is not None:
+        script = bin_dir / "wiki-studio"
+        script.write_text(f"#!/bin/sh\necho '{output}'\n", encoding="utf-8")
+        script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin")
+
+
+@pytest.mark.parametrize(("output", "accepted"), [("0.4.0", True), ("0.3.1", False), (None, False)])
+def test_a_paid_run_refuses_to_start_unless_the_pinned_cli_version_is_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | None, accepted: bool
+) -> None:
+    _fake_cli(tmp_path, monkeypatch, output)
+    arm = runner.load_arm("wiki_studio")
+    if accepted:
+        runner.check_cli_pin(arm)
+    else:
+        with pytest.raises(SystemExit, match="wiki_studio"):
+            runner.check_cli_pin(arm)
+    runner.check_cli_pin(runner.load_arm("bare"))  # arms without a pin never look
+
+
+def test_the_demo_runs_no_cli_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_cli(tmp_path, monkeypatch, None)  # no wiki-studio on PATH at all
+    monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    assert runner.demo() == 0
+
+
+def test_the_report_gives_wiki_studio_its_own_table_outside_memkernels_label() -> None:
+    receipts = [
+        _trial("memkernel", "w1", 0, group="lc-wiki"),
+        _trial("claude_md", "w1", 0, group="lc-wiki", outcome="failed", checker_passed=False),
+        _trial("fs_grep", "w1", 0, group="lc-wiki", outcome="failed", checker_passed=False),
+        _trial("wiki_studio", "w1", 0, group="lc-wiki"),
+    ]
+    text = report.render(receipts, PARAMS)
+    assert "| wiki_studio vs | Valid pairs |" in text
+    assert "| claude_md (primary) | 1 | 0 | 1 | 0 | 0 | 0 |" in text
+    assert "**wiki_studio not measured:** fewer than 2 valid pairs" in text
+    assert "| wiki_studio (primary)" not in text and "| wiki_studio (secondary)" not in text  # never a comparator
+    without = report.render([r for r in receipts if r["arm"] != "wiki_studio"], PARAMS)
+    label = text.split("## Label", 1)[1].split("##", 1)[0]
+    assert label == without.split("## Label", 1)[1].split("##", 1)[0]  # memkernel's label is unchanged
+
+
+@pytest.mark.parametrize(
+    ("command", "verbs"),
+    [
+        ("echo wiki-studio query", []),
+        ("printf 'wiki-studio ingest notes.md\\n'", []),
+        ('grep -rn "wiki-studio query" README.md', []),
+        ("cat > HOWTO.md <<EOF\nwiki-studio query 'x'\nEOF", []),
+        ("echo '$(wiki-studio query q)'", []),
+        ("env FOO=1 wiki-studio query q", ["query"]),
+        ("X=1 wiki-studio --root . ingest a.md", ["ingest"]),
+        ("bash -c 'wiki-studio ingest notes.md'", ["ingest"]),
+        ("python3 -m wiki_studio query q", ["query"]),
+        ('echo "$(wiki-studio query q)"', ["query"]),
+        ("(cd a && wiki-studio query q) | tee out", ["query"]),
+        ('wiki-studio propose --from "$D" --promote', ["propose"]),
+    ],
+)
+def test_only_executed_wiki_studio_commands_count(command: str, verbs: list[str]) -> None:
+    """Printed or quoted command examples are text, not executions (review of task 17a)."""
+    assert diagnostics._wiki_studio_verbs(command) == verbs
+
+
+def test_the_report_shows_both_new_diagnostics_and_flags_a_nested_model() -> None:
+    def trial(arm: str, nested: tuple[int, int], writes: tuple[int, int]) -> dict[str, Any]:
+        diag = {
+            "wiki_studio_nested_model_calls": {"numerator": nested[0], "denominator": nested[1]},
+            "direct_wiki_writes": {"numerator": writes[0], "denominator": writes[1]},
+        }
+        return _trial(arm, "w1", 0, group="lc-wiki", diagnostics=diag)
+
+    clean = report.render([trial("wiki_studio", (0, 3), (0, 1)), trial("claude_md", (0, 2), (2, 2))], PARAMS)
+    assert "| wiki_studio | 0/3 | 0/1 |" in clean and "| claude_md | 0/2 | 2/2 |" in clean
+    assert "Token accounting incomplete" not in clean
+
+    nested = report.render([trial("wiki_studio", (1, 3), (2, 2)), trial("claude_md", (0, 2), (2, 2))], PARAMS)
+    assert "| wiki_studio | 1/3 | 2/2 |" in nested
+    assert "**Token accounting incomplete:** 1 Bash call(s) in this group ran `wiki-studio ingest`" in nested
+    assert nested != clean
+
+
+def test_an_absent_preregistered_comparator_counts_as_zero_pairs() -> None:
+    receipts = [
+        _trial("wiki_studio", "w1", 0, group="lc-wiki"),
+        _trial("claude_md", "w1", 0, group="lc-wiki"),
+        _trial("wiki_studio", "w2", 0, group="lc-wiki"),
+        _trial("claude_md", "w2", 0, group="lc-wiki"),
+    ]  # no fs_grep receipts at all
+    text = report.render(receipts, PARAMS)
+    second = text.split("| wiki_studio vs |", 1)[1]
+    assert "| claude_md (primary) | 2 |" in second and "| fs_grep (primary) | 0 |" in second
+    assert "**wiki_studio not measured:** fewer than 2 valid pairs" in text
+
+    lenient = {**PARAMS, "min_pairs_inferential": 1}
+    memkernel_only_vs_claude_md = report.render([_trial("memkernel", "t1", 0), _trial("claude_md", "t1", 0)], lenient)
+    assert "| fs_grep (primary) | 0 |" in memkernel_only_vs_claude_md
+    assert "Descriptive:" in memkernel_only_vs_claude_md  # a missing primary comparator is never inferential

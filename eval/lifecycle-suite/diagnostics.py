@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +16,19 @@ if TYPE_CHECKING:
     from records import StreamSummary
 
 READ_TOOL = "Read"
+BASH_TOOL = "Bash"
+WRITE_TOOLS = ("Write", "Edit")
+WIKI_DIR = "knowledge/wiki"  # the lc-wiki shared artifact, at this path in every workspace
+WIKI_STUDIO = "wiki-studio"
+NESTED_MODEL_VERBS = ("ingest", "query")  # wiki-studio verbs that start a model the receipts cannot see
+_VALUE_FLAGS = ("--root", "--wiki-dir", "--proposals-dir", "--backend", "--output-dir")
+_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "{", "}", "!"}
+_WRAPPERS = {"env", "command", "exec", "nohup", "time", "sudo", "uvx", "nice"}  # run the next word as a command
+_SHELLS = {"sh", "bash", "zsh", "dash"}
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SINGLE_QUOTED = re.compile(r"'[^']*'")
+_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")  # $(...) and `...` run their contents, even inside an argument
 
 
 def _ratio(numerator: int, denominator: int) -> dict[str, int]:
@@ -34,6 +49,78 @@ def read_paths(summary: StreamSummary, workspace: Path) -> list[str]:
         for use in summary.tool_uses
         if use.name == READ_TOOL and use.input.get("file_path")
     ]
+
+
+def _command_lines(command: str) -> list[str]:
+    """The lines of a shell script that are commands: heredoc bodies are data, not commands."""
+    lines, delimiter = [], None
+    for line in command.splitlines():
+        if delimiter is not None:
+            if line.strip() == delimiter:
+                delimiter = None
+            continue
+        lines.append(line)
+        match = _HEREDOC.search(line)
+        if match:
+            delimiter = match.group(2)
+    return lines
+
+
+def _simple_commands(line: str) -> list[list[str]]:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        tokens = line.split()
+    commands, current = [], []
+    for token in tokens:
+        if token in _SEPARATORS:
+            if current:
+                commands.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        commands.append(current)
+    return commands
+
+
+def _wiki_studio_verbs(command: str, depth: int = 0) -> list[str]:
+    """The wiki-studio verbs a Bash command line executes; words passed as arguments (echo, grep) never count."""
+    verbs: list[str] = []
+    for line in _command_lines(command):
+        if depth < 3:
+            for match in _SUBSTITUTION.finditer(_SINGLE_QUOTED.sub("''", line)):  # '...' is literal text
+                verbs += _wiki_studio_verbs(match.group(1) or match.group(2) or "", depth + 1)
+        for words in _simple_commands(line):
+            index = 0
+            while index < len(words) and (_ASSIGNMENT.match(words[index]) or words[index] in _WRAPPERS):
+                index += 1
+                while index < len(words) and words[index].startswith("-") and words[index - 1] == "env":
+                    index += 1  # env's own flags
+            if index >= len(words):
+                continue
+            program, args = Path(words[index]).name, words[index + 1 :]
+            if program in _SHELLS and "-c" in args and depth < 3:
+                script_at = args.index("-c") + 1
+                if script_at < len(args):
+                    verbs += _wiki_studio_verbs(args[script_at], depth + 1)
+                continue
+            module_run = program.startswith("python") and args[:2] == ["-m", "wiki_studio"]
+            if module_run or (program == "pipx" and args[:2] == ["run", WIKI_STUDIO]):
+                args = args[2:]
+            elif program != WIKI_STUDIO:
+                continue
+            rest = iter(args)
+            for arg in rest:
+                if arg.startswith("--"):
+                    if arg in _VALUE_FLAGS:
+                        next(rest, None)
+                    continue
+                verbs.append(arg)
+                break
+    return verbs
 
 
 def _ref_ids(text: str) -> list[str]:
@@ -66,9 +153,23 @@ def session_diagnostics(
             used.add(str(use.input["ref_id"]))
     unique_returned = list(dict.fromkeys(returned))
 
+    bash = [use for use in summary.tool_uses if use.name == BASH_TOOL]
+    nested = sum(
+        1 for use in bash if set(_wiki_studio_verbs(str(use.input.get("command", "")))) & set(NESTED_MODEL_VERBS)
+    )
+    writes = [use for use in summary.tool_uses if use.name in WRITE_TOOLS]
+    wiki_writes = sum(
+        1
+        for use in writes
+        if (_relative(str(use.input.get("file_path", "")), workspace) + "/").startswith(WIKI_DIR + "/")
+    )
+
     return {
         "re_reads_after_resume": _ratio(re_reads, len(reads)),
         "calls_before_first_retain": _ratio(first_retain, total_calls),
         "recall_to_use": _ratio(sum(1 for ref in unique_returned if ref in used), len(unique_returned)),
         "hooks_succeeded": _ratio(sum(1 for h in hooks if h["exit_status"] == 0), len(hooks)),
+        # read for wiki_studio: a nested model whose tokens are not in the receipt, and pages that bypassed the gate
+        "wiki_studio_nested_model_calls": _ratio(nested, len(bash)),
+        "direct_wiki_writes": _ratio(wiki_writes, len(writes)),
     }

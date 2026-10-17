@@ -61,6 +61,20 @@ def test_demo_detects_missing_compaction_hooks() -> None:
         }
         for task in ("demo-retain", "demo-wiki")
         for arm in runner.ARM_NAMES
+        if task == "demo-wiki" or arm != "wiki_studio"
     }
     failures = runner.check_demo(full, receipts)
     assert any("hook events not recorded" in f for f in failures)
+
+
+def test_the_demo_check_flags_wiki_studio_running_outside_lc_wiki() -> None:
+    seen = {
+        (task, arm, position): {"workspace_note": False, "transcripts": False, "store_marker": False, "wiki_page": True}
+        for task in ("demo-retain", "demo-wiki", "demo-compact")
+        for arm in runner.ARM_NAMES
+        for position in (0, 1)
+    }
+    failures = runner.check_demo(seen, [])
+    assert "wiki_studio: ran on demo-retain, but its groups exclude lc-retain" in failures
+    assert "wiki_studio: ran on demo-compact, but its groups exclude lc-compact" in failures
+    assert not any(f.startswith("wiki_studio") and "demo-wiki" in f for f in failures)
