@@ -300,12 +300,14 @@ class WikiExporter:
 class _WikiSnapshot:
     """Every file a gated export can write, taken before it starts, so a failure restores exactly that.
 
-    wiki-studio 0.3.1's promote rolls back only the writes that completed, and
-    only on ``OSError``: a page or ``index.md`` whose write failed part-way stays
-    as it was left. Its commit step writes every ``*.md`` of the staged wiki that
+    wiki-studio's promote (0.3.1 and 0.4.0, gosha70/wiki-studio#21) rolls back only
+    the writes that completed, and only on ``OSError``: a page or ``index.md`` whose
+    write failed part-way stays as it was left. Its commit step writes every ``*.md`` of the staged wiki that
     differs from the live one, plus ``.audit/**/plan.json``, so the snapshot holds
     all of those as bytes (not only the files memkernel's edits change), and any
-    such file that appears during the export is removed again.
+    such file that appears during the export is removed again. The cost is one
+    read of every page per gated export, which is negligible at the size of a
+    project wiki (tens to hundreds of pages).
     """
 
     wiki_dir: Path
