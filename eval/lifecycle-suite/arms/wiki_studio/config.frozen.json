@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "arm": "wiki_studio",
+  "note": "The wiki-studio CLI (pinned version on PATH) used from Bash with no model backend: the instruction tells the agent to read the wiki with find and record knowledge through propose --promote; nothing persists beyond the lc-wiki shared artifact.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": false
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit"
+  ],
+  "mcp": false,
+  "hooks": [],
+  "shared_artifact_rule": "lc-wiki tasks: the task's shared_artifact directory from the source session is copied into the destination workspace for every arm (FR-012).",
+  "groups": [
+    "lc-wiki"
+  ],
+  "cli_pin": {
+    "command": "wiki-studio",
+    "version": "0.4.0"
+  },
+  "source": {
+    "repository": "gosha70/wiki-studio",
+    "tag": "v0.4.0",
+    "commit": "e9ec3fa53a98e8de50774bc455658b7687937fff",
+    "path": "docs/agent-arm/",
+    "instruction_sha256": "c231bb4077e058da89470455b7f318aafc6966e8f07ead74ab2413a835c6355b",
+    "config_sha256": "51c4b11e14417727927367e743a296d55246eae94bf5003e5173ceccdf4a9eb5",
+    "added_here": [
+      "groups",
+      "cli_pin",
+      "source"
+    ]
+  }
+}

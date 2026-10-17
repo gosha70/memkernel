@@ -19,7 +19,7 @@
     "chain_length": {"type": "integer"},
     "stage": {"type": "string", "enum": ["exposure", "intermediate", "evaluation"]},
     "namespace_sha256": {"type": "string"},
-    "arm": {"type": "string", "enum": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel"]},
+    "arm": {"type": "string", "enum": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio"]},
     "task_id": {"type": "string"},
     "group": {"type": "string", "enum": ["lc-retain", "lc-reval", "lc-wiki", "lc-compact"]},
     "run_index": {"type": "integer"},

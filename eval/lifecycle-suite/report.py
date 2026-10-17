@@ -27,6 +27,12 @@ from typing import Any
 from records import read_receipts, validate_receipt
 
 TREATMENT = "memkernel"
+REPORTED_DIAGNOSTICS = {  # receipt key: report column (FR-018); read for wiki_studio, counted for every arm
+    "wiki_studio_nested_model_calls": "Bash calls running `wiki-studio ingest`/`query` (of all Bash calls)",
+    "direct_wiki_writes": "Write/Edit calls under the wiki (of all Write/Edit calls)",
+}
+NESTED_MODEL_DIAGNOSTIC = "wiki_studio_nested_model_calls"
+SECOND_TREATMENT = "wiki_studio"  # its own comparison, never in memkernel's label (FR-016)
 GROUPS = ("lc-retain", "lc-reval", "lc-wiki", "lc-compact")
 COMPACT_GROUP = "lc-compact"
 
@@ -42,6 +48,7 @@ class Trial:
     invalid_reason: str | None
     outcome: str | None
     tokens: dict[str, int]
+    diagnostics: dict[str, tuple[int, int]]  # summed over the trial's sessions: (numerator, denominator)
 
 
 def assemble(receipts: list[dict[str, Any]]) -> list[Trial]:
@@ -66,6 +73,13 @@ def assemble(receipts: list[dict[str, Any]]) -> list[Trial]:
             # a timeout in any session is the trial's outcome (FR-015a)
             outcome = "timeout" if any(r["outcome"] == "timeout" for r in sessions) else last["outcome"]
         tokens = {key: sum(r["tokens"][key] for r in sessions) for key in first["tokens"]}
+        diagnostics = {
+            name: (
+                sum(r.get("diagnostics", {}).get(name, {}).get("numerator", 0) for r in sessions),
+                sum(r.get("diagnostics", {}).get(name, {}).get("denominator", 0) for r in sessions),
+            )
+            for name in REPORTED_DIAGNOSTICS
+        }
         trials.append(
             Trial(
                 run_id,
@@ -77,6 +91,7 @@ def assemble(receipts: list[dict[str, Any]]) -> list[Trial]:
                 invalid,
                 outcome,
                 tokens,
+                diagnostics,
             )
         )
     return trials
@@ -107,12 +122,12 @@ def _arm_table(trials: list[Trial], group: str, arms: list[str]) -> list[str]:
     return lines
 
 
-def _pairs(trials: list[Trial], group: str, comparator: str) -> dict[str, int]:
+def _pairs(trials: list[Trial], group: str, comparator: str, treatment: str = TREATMENT) -> dict[str, int]:
     index = {(t.run_id, t.task_id, t.run_index, t.arm): t for t in trials if t.group == group}
     counts = {"pairs": 0, "both": 0, "treatment_only": 0, "comparator_only": 0, "neither": 0, "pairs_removed": 0}
     keys = sorted({(t.run_id, t.task_id, t.run_index) for t in trials if t.group == group})
     for run_id, task_id, run_index in keys:  # pairs never cross runs
-        treated = index.get((run_id, task_id, run_index, TREATMENT))
+        treated = index.get((run_id, task_id, run_index, treatment))
         other = index.get((run_id, task_id, run_index, comparator))
         if treated is None or other is None:
             continue
@@ -123,6 +138,59 @@ def _pairs(trials: list[Trial], group: str, comparator: str) -> dict[str, int]:
         counts["pairs"] += 1
         counts["both" if a and b else "treatment_only" if a else "comparator_only" if b else "neither"] += 1
     return counts
+
+
+def _diagnostics_table(trials: list[Trial], group: str, arms: list[str]) -> list[str]:
+    """Instruction diagnostics per arm over every trial of the group; a nested model is flagged, never hidden."""
+    lines = [
+        "| Arm | " + " | ".join(REPORTED_DIAGNOSTICS.values()) + " |",
+        "|---|" + "---|" * len(REPORTED_DIAGNOSTICS),
+    ]
+    nested = 0
+    for arm in arms:
+        rows = [t for t in trials if t.group == group and t.arm == arm]
+        if not rows:
+            continue
+        cells = []
+        for name in REPORTED_DIAGNOSTICS:
+            numerator = sum(t.diagnostics[name][0] for t in rows)
+            cells.append(f"{numerator}/{sum(t.diagnostics[name][1] for t in rows)}")
+            if name == NESTED_MODEL_DIAGNOSTIC:
+                nested += numerator
+        lines.append(f"| {arm} | " + " | ".join(cells) + " |")
+    if nested:
+        lines += [
+            "",
+            f"**Token accounting incomplete:** {nested} Bash call(s) in this group ran `wiki-studio ingest` or "
+            "`query`, which start a model whose tokens are not in the receipts.",
+        ]
+    return lines
+
+
+def _second_treatment_table(
+    trials: list[Trial], group: str, comparators: list[str], params: dict[str, Any]
+) -> list[str]:
+    """wiki_studio against the primary comparators; its pairs never count toward memkernel's label."""
+    minimum = int(params["min_valid_pairs_wiki_studio"])
+    lines = [
+        f"| {SECOND_TREATMENT} vs | Valid pairs | Both pass | {SECOND_TREATMENT} only | Comparator only "
+        "| Neither | Pairs removed |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    counts = []
+    for comparator in comparators:
+        c = _pairs(trials, group, comparator, SECOND_TREATMENT)
+        counts.append(c["pairs"])
+        lines.append(
+            f"| {comparator} (primary) | {c['pairs']} | {c['both']} | {c['treatment_only']} "
+            f"| {c['comparator_only']} | {c['neither']} | {c['pairs_removed']} |"
+        )
+    if min(counts, default=0) < minimum:
+        lines += [
+            "",
+            f"**{SECOND_TREATMENT} not measured:** fewer than {minimum} valid pairs against a primary comparator.",
+        ]
+    return lines
 
 
 def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
@@ -144,7 +212,10 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
         "reset to the task fixture every session, unlike a real project where files persist too. `claude_md` "
         "keeps only its files, `fs_grep` only earlier transcripts, and `bare`, `placebo` and `protocol` nothing. "
         "The primary comparison is therefore the memory store alone against files alone, not memkernel against "
-        "a typical project setup.",
+        "a typical project setup. `wiki_studio` (wiki-studio's command-line tool, told never to run "
+        "its model-backed verbs; the diagnostics count any call that did) keeps nothing beyond the lc-wiki "
+        "shared wiki and runs on lc-wiki only; it is compared with the same file-based arms in its own table, "
+        "never with memkernel.",
         "",
         f"- Code-freeze SHA: `{params['code_sha']}`",
         f"- Preregistration commit: `{params['preregistration_commit']}`",
@@ -163,9 +234,7 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
             "| memkernel vs | Valid pairs | Both pass | memkernel only | Comparator only | Neither | Pairs removed |",
             "|---|---|---|---|---|---|---|",
         ]
-        for comparator in [*primary, *secondary]:
-            if comparator not in arms:
-                continue
+        for comparator in [*primary, *secondary]:  # preregistered: an absent arm shows as 0 valid pairs
             c = _pairs(trials, group, comparator)
             kind = "primary" if comparator in primary else "secondary"
             out.append(
@@ -175,9 +244,12 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
             if comparator in primary:
                 labels.append(c["pairs"])
         if group == COMPACT_GROUP:
-            smallest = min((_pairs(trials, group, c)["pairs"] for c in primary if c in arms), default=0)
+            smallest = min((_pairs(trials, group, c)["pairs"] for c in primary), default=0)
             if smallest < min_compact:
                 out += ["", f"**Not measured:** fewer than {min_compact} valid pairs against a primary comparator."]
+        if any(t.group == group and t.arm == SECOND_TREATMENT for t in trials):
+            out += ["", *_second_treatment_table(trials, group, list(primary), params)]
+        out += ["", *_diagnostics_table(trials, group, arms)]
         out.append("")
     inferential = bool(labels) and min(labels) >= min_inferential
     out += [
