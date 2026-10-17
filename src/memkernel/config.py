@@ -76,6 +76,9 @@ class MemKernelSettings(BaseSettings):
     # LLM wiki bridge: directory holding the markdown wiki (index.md, decisions/, ...).
     # Empty = no wiki configured; wiki_export/wiki_import then require an explicit path.
     wiki_dir: str = ""
+    # Where wiki-studio patch-sets are written before promote (memkernel[wiki], ADR-010).
+    # Empty = <project_root>/.memkernel/wiki-proposals; set it to request the gate explicitly.
+    wiki_proposals_dir: str = ""
 
     # Server
     transport: Literal["stdio", "streamable-http"] = "stdio"

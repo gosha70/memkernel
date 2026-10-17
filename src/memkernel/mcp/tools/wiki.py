@@ -42,16 +42,23 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         With the memkernel[wiki] extra installed, "lint" carries wiki-studio's violations, audit
         errors and health findings for the whole wiki after the export (curated pages included);
         without the extra it is null and "lint_hint" says how to enable it; if the lint pass itself
-        failed it is null and "lint_error" says why. The files written are the same in every case.
+        failed it is null and "lint_error" says why. With wiki-studio >= 0.3 the pages go through its
+        promote gate (index.md and log.md are scaffolded first); a rejected export, or an installed but
+        broken wiki-studio, writes nothing and reports "gate_error". The pages, index.md and log.md
+        written are the same either way.
         """
         app_ctx = _context(ctx)
+        proposals = app_ctx.settings.wiki_proposals_dir
         exporter = WikiExporter(
             app_ctx.memory_service,
             _resolve_wiki_dir(wiki_dir, app_ctx.settings),
             project_root=Path(app_ctx.settings.project_root),
+            proposals_dir=Path(proposals) if proposals else None,
         )
         report = exporter.export()
         payload: dict[str, Any] = {"written": report.written, "skipped": report.skipped}
+        if report.gate_error is not None:
+            payload["gate_error"] = report.gate_error
         if report.lint is not None:
             payload["lint"] = report.lint.model_dump(mode="json")
         elif report.lint_error is not None:

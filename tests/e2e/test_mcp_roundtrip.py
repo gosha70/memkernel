@@ -344,6 +344,7 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
         project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}",
         chroma_persist_path="",
         wiki_dir=str(wiki_dir),
+        project_root=str(tmp_path),  # the gate's proposals default to <project_root>/.memkernel/wiki-proposals
     )
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 

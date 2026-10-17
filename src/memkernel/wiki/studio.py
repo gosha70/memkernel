@@ -14,6 +14,7 @@ to a copilot CLI, and memkernel runs inside one.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 INSTALL_HINT = "install memkernel[wiki] for lint and health"
+GATE_BACKEND = "memkernel"
+GATE_RATIONALE = "memkernel export"
 
 
 class HealthItem(BaseModel):
@@ -112,3 +115,78 @@ def lint_wiki(wiki_dir: Path, project_root: Path, *, require_studio: bool = Fals
     except Exception as exc:  # third-party failure of an installed package: wrapped, never silent
         logger.warning("wiki-studio lint failed for %s: %s", wiki_dir, exc)
         raise LintError(f"wiki-studio lint failed: {exc}") from exc
+
+
+class GateError(RuntimeError):
+    """wiki-studio's gate rejected or failed to apply an export; the pages were not written."""
+
+
+@dataclass(frozen=True)
+class GatedPage:
+    """One page of an export as the gate needs it: the page itself plus its index and log lines."""
+
+    path: str  # wiki-relative, e.g. "decisions/use-arq.md"
+    content: str
+    index_line: str | None  # one line of the export's single append-index edit; None = no entry
+    log_line: str | None  # one line of the export's single append-log edit; None = no entry
+
+
+def gate_available() -> Any | None:
+    """Return ``wiki_studio.api`` when it offers the proposal gate (wiki-studio >= 0.3), else ``None``.
+
+    ``None`` means absent or an older wiki-studio without the gate, where the
+    direct writer is the supported fallback. A present but broken package
+    raises :class:`GateError`: the validator is installed, so its failure must
+    not be mistaken for its absence and let pages through unchecked.
+    """
+    try:
+        api = load_studio()
+    except LintError as exc:
+        raise GateError(str(exc)) from exc
+    if api is None or not hasattr(api, "propose") or not hasattr(api, "PageEdit"):
+        return None
+    return api
+
+
+def propose_and_promote(
+    api: Any, pages: list[GatedPage], wiki_dir: Path, project_root: Path, proposals_dir: Path, name: str
+) -> None:
+    """Write ``pages`` as one patch-set and apply it through wiki-studio's promote gate.
+
+    ``index.md`` and ``log.md`` must already exist: the gate appends to them but
+    refuses to create them. Raises :class:`GateError` on any rejection or
+    failure; wiki-studio validates before writing, so a rejected patch-set
+    leaves the wiki as it was.
+    """
+    # One append per file: wiki-studio 0.3.1 keeps only the last of several appends to the same file in a
+    # patch-set, so every index line goes into a single append-index edit and every log line into one append-log.
+    index_lines = [page.index_line for page in pages if page.index_line is not None]
+    log_lines = [page.log_line for page in pages if page.log_line is not None]
+    try:  # every wiki-studio call is inside the boundary, setup included, so the caller's cleanup always runs
+        from wiki_studio.paths import WikiPaths
+
+        edits = [
+            api.PageEdit(path=page.path, action="create", new_content=page.content, rationale=GATE_RATIONALE)
+            for page in pages
+        ]
+        if index_lines:
+            edits.append(
+                api.PageEdit(
+                    path="index.md",
+                    action="append-index",
+                    new_content="\n".join(index_lines),
+                    rationale=GATE_RATIONALE,
+                )
+            )
+        if log_lines:
+            edits.append(
+                api.PageEdit(
+                    path="log.md", action="append-log", new_content="\n".join(log_lines), rationale=GATE_RATIONALE
+                )
+            )
+        paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir, proposals_dir=proposals_dir)
+        proposal = api.propose(edits, paths, name=name, source="memkernel wiki_export", backend=GATE_BACKEND)
+        api.promote(proposal, paths)
+    except Exception as exc:  # any rejection or failure of the installed gate is reported, never raised raw
+        logger.warning("wiki-studio gate rejected the export to %s: %s", wiki_dir, exc)
+        raise GateError(f"wiki-studio gate rejected the export: {exc}") from exc

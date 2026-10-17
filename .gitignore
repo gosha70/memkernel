@@ -183,3 +183,6 @@ cython_debug/
 /.claude
 /doc_internal
 AGENTS.md
+
+# memkernel's own local state: ChromaDB store and wiki-studio proposals (never committed)
+.memkernel/

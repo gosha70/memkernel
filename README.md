@@ -57,7 +57,7 @@ pipx install memkernel
 pipx install --python python3.11 memkernel
 # optional: wiki-studio lint and health findings on wiki_export (ADR-010)
 pipx install "memkernel[wiki]"
-pipx inject memkernel "wiki-studio>=0.1,<1"   # add it to an existing install
+pipx inject memkernel "wiki-studio>=0.3.1,<1"   # add it to an existing install
 ```
 
 **As a library inside a project**, install it into that project's virtual environment:
@@ -246,6 +246,7 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_RECALL_WEIGHT_RECENCY` | `0.3` | Weight of recency in the final recall score |
 | `MEMKERNEL_RECALL_WEIGHT_IMPORTANCE` | `0.3` | Weight of importance in the final recall score |
 | `MEMKERNEL_WIKI_DIR` | `` | Directory of the LLM wiki used by `wiki_export` / `wiki_import` (empty = pass `wiki_dir` explicitly) |
+| `MEMKERNEL_WIKI_PROPOSALS_DIR` | `""` | Where wiki-studio patch-sets are written before promote (`memkernel[wiki]`); empty means `<project root>/.memkernel/wiki-proposals`. Setting it requests the gate: without wiki-studio installed, a warning is logged. |
 | `MEMKERNEL_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
 | `MEMKERNEL_HOST` | `127.0.0.1` | Host for `streamable-http` transport |
 | `MEMKERNEL_PORT` | `8765` | Port for `streamable-http` transport |
@@ -325,7 +326,11 @@ Long-term memory has a human-readable twin: a markdown wiki in the [LLM Wiki](ht
 - `wiki_export` compiles every long-term memory that has no page yet into a **draft** page under `decisions/`, `concepts/` or `workflows/`, with the required sections and a `memkernel://<project>/<ref_id>` citation. Existing pages are never overwritten.
 - `wiki_import` indexes curated pages as long-term memories so `recall` finds the reviewed version; a changed page supersedes its earlier memory.
 
-Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. The standalone maintainer that owns this page schema is [wiki-studio](https://github.com/gosha70/wiki-studio). With the `memkernel[wiki]` extra installed, every `wiki_export` response carries wiki-studio's lint and health findings for the whole wiki after the export, curated pages included, under `lint` (`violations`, `audit_errors`, `pages_checked`, `health` items with `kind`, `severity`, `pages`, `description`); without it `lint` is `null` and `lint_hint` says how to enable it; if the lint pass itself fails, `lint` is `null` and `lint_error` says why. The files written are the same in every case. Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md) and [`docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`](docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md).
+Set `MEMKERNEL_WIKI_DIR` (for example `knowledge/wiki`) or pass `wiki_dir` to the tools. The standalone maintainer that owns this page schema is [wiki-studio](https://github.com/gosha70/wiki-studio). With the `memkernel[wiki]` extra installed, every `wiki_export` response carries wiki-studio's lint and health findings for the whole wiki after the export, curated pages included, under `lint` (`violations`, `audit_errors`, `pages_checked`, `health` items with `kind`, `severity`, `pages`, `description`); without it `lint` is `null` and `lint_hint` says how to enable it; if the lint pass itself fails, `lint` is `null` and `lint_error` says why. The files written are the same in every case.
+
+With wiki-studio 0.3.1 or later installed, `wiki_export` writes through wiki-studio's promote gate: it first writes `index.md` and `log.md` if they are missing (the gate cannot create them), then proposes every new page with its index and log lines as one patch-set and promotes it. A rejected export writes nothing and the response carries `gate_error`; so does an installed wiki-studio that fails to import or to build the patch-set, rather than falling back to the direct writer. Patch-sets go to `MEMKERNEL_WIKI_PROPOSALS_DIR`, by default `.memkernel/wiki-proposals/` under the project root. Commit `<wiki>/.audit/`, wiki-studio's audit trail of promoted proposals; ignore `.memkernel/wiki-proposals/`.
+
+Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md) and [`docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`](docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md).
 
 ### Revalidation and store health
 

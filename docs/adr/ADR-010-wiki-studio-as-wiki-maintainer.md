@@ -63,3 +63,29 @@ without it; the MCP tool count stays below ten.
   schema drift test.
 - The wiki-studio recipe that runs `memkernel wiki_export` as a shell command
   is wrong (it is an MCP tool); reported upstream in the same issue.
+
+## Note (2026-10-16)
+
+The floor for the extra and the dev dependency is `wiki-studio>=0.3.1,<1`,
+not `>=0.2` as written above. wiki-studio 0.2.0 shipped `api.propose` and
+`wiki_studio.schema` (gosha70/wiki-studio#7), and a probe on 0.2.0, 0.3.0 and
+0.3.1 found the same gate behaviour, but CI tests only the locked version
+(0.3.1), and 0.3.1 is the first release with `py.typed`
+(gosha70/wiki-studio#17), which lets memkernel drop its mypy override. The
+gated export writes the `index.md`/`log.md` scaffold directly because the gate
+refuses to create either, and sends all index lines as one `append-index`
+edit and all log lines as one `append-log` edit, because 0.3.1 keeps only the
+last of several appends to the same file in one patch-set.
+
+Once the extra is installed, the gate is the only write path, and the export
+fails closed. A wiki-studio that is installed but fails to import, or fails
+while the patch-set is being built, writes nothing and reports `gate_error`.
+Before 0.5.0 such an export still wrote the pages. Only a missing extra, or a
+wiki-studio without the gate, uses the direct writer. wiki-studio 0.3.1's
+promote rolls back only the writes that completed, and only on `OSError`, so
+a page or `index.md` whose write fails part-way is left as it is. memkernel
+therefore snapshots every file promote's commit step can write (every
+`*.md` in the wiki and every `.audit/**/plan.json`, not only the files its own
+edits change) before the scaffold is written. On any failure it restores
+those files and removes any new ones. If that restore is itself
+incomplete, `gate_error` says which paths it could not restore.
