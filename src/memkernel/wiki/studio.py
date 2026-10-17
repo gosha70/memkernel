@@ -159,7 +159,8 @@ def propose_and_promote(
     leaves the wiki as it was.
     """
     # One append per file: wiki-studio 0.3.1 keeps only the last of several appends to the same file in a
-    # patch-set, so every index line goes into a single append-index edit and every log line into one append-log.
+    # patch-set (fixed in 0.4.0, wiki-studio#18; kept while the floor is 0.3.1), so every index line goes into a
+    # single append-index edit and every log line into one append-log.
     index_lines = [page.index_line for page in pages if page.index_line is not None]
     log_lines = [page.log_line for page in pages if page.log_line is not None]
     try:  # every wiki-studio call is inside the boundary, setup included, so the caller's cleanup always runs

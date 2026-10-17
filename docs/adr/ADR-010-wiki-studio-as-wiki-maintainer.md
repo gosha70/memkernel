@@ -89,3 +89,14 @@ therefore snapshots every file promote's commit step can write (every
 edits change) before the scaffold is written. On any failure it restores
 those files and removes any new ones. If that restore is itself
 incomplete, `gate_error` says which paths it could not restore.
+
+## Note (2026-10-17)
+
+The development lock moves to wiki-studio 0.4.0, so CI tests the release that
+`>=0.3.1,<1` gives a new install. The floor stays at 0.3.1: memkernel uses no
+0.4.0 addition (`api.init`, `edits_from_dir`, `find`), and its gated export
+passes on both versions. 0.4.0 fixes the multiple-append defect
+(gosha70/wiki-studio#18), but the export keeps sending one combined
+`append-index` and one combined `append-log` edit, because 0.3.1 still needs
+it and it is correct on 0.4.0. The partial-write rollback gap is unchanged in
+0.4.0 (gosha70/wiki-studio#21), so the snapshot and restore stay.
