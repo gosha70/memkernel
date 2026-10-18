@@ -1,0 +1,8 @@
+# Calibration tasks (FR-015): one per group, a second lc-compact because live
+# compaction is the riskiest wiring. Calibration is discarded wholesale, so it
+# may use measured tasks; none of its outcomes is graded or enters the results.
+lc-retain-rounding
+lc-reval-timeout-units
+lc-wiki-backoff
+lc-compact-port
+lc-compact-name-order
