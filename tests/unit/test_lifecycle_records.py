@@ -8,6 +8,7 @@ import copy
 import json
 import re
 import shutil
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -674,6 +675,24 @@ def test_the_report_gives_wiki_studio_its_own_table_outside_memkernels_label() -
     ("command", "verbs"),
     [
         ("echo wiki-studio query", []),
+        ("wiki-studio \\\nquery q", ["query"]),  # backslash-newline continuation (review of #31)
+        ("printf '%s\\n' ';' wiki-studio query", []),  # a quoted separator is text
+        ("# $(wiki-studio query q)\necho done", []),  # a comment runs nothing
+        ("echo hi # wiki-studio query", []),
+        ("cat > /dev/null <<EOF\n$(wiki-studio query x)\nEOF", ["query"]),  # unquoted heredoc expands
+        ("cat > /dev/null <<'EOF'\n$(wiki-studio query x)\nEOF", []),  # quoted heredoc does not
+        ("wiki-studio query q > out.txt 2>&1", ["query"]),
+        (">out.txt wiki-studio ingest b", ["ingest"]),
+        ("if true; then wiki-studio query q; fi", ["query"]),
+        ("{ wiki-studio ingest a; }", ["ingest"]),
+        ("true || wiki-studio query q", ["query"]),  # static: a conditional command still counts
+        ('cat <<< "hello"\nwiki-studio query q', ["query"]),  # a here-string has no body (review of #31)
+        ("cat <<EOF\n'$(wiki-studio query q)'\nEOF", ["query"]),  # body quotes do not stop expansion
+        ('cat <<< "$(wiki-studio ingest a)"', ["ingest"]),
+        ("cat <<EOF\n\\$(wiki-studio query q)\nEOF", []),  # an escaped $ is literal in a heredoc
+        ('eval "wiki-studio query q"', ["query"]),
+        ("sh <<EOF\nwiki-studio query q\nEOF", ["query"]),  # a shell reading its script from a heredoc
+        ("w=wiki-studio; $w query q", []),  # known gap: the program is only known at run time
         ("printf 'wiki-studio ingest notes.md\\n'", []),
         ('grep -rn "wiki-studio query" README.md', []),
         ("cat > HOWTO.md <<EOF\nwiki-studio query 'x'\nEOF", []),
@@ -726,3 +745,63 @@ def test_an_absent_preregistered_comparator_counts_as_zero_pairs() -> None:
     memkernel_only_vs_claude_md = report.render([_trial("memkernel", "t1", 0), _trial("claude_md", "t1", 0)], lenient)
     assert "| fs_grep (primary) | 0 |" in memkernel_only_vs_claude_md
     assert "Descriptive:" in memkernel_only_vs_claude_md  # a missing primary comparator is never inferential
+
+
+BASH_AGREEMENT_CASES = [  # every case here runs the same way whatever the conditions evaluate to
+    "wiki-studio find 'retry backoff'",
+    "wiki-studio \\\nquery q",
+    "printf '%s\\n' ';' wiki-studio query",
+    "# $(wiki-studio query q)\necho done",
+    "echo wiki-studio query",
+    'grep -rn "wiki-studio query" . || true',
+    "cat > /dev/null <<EOF\nwiki-studio query x\nEOF",
+    "cat > /dev/null <<EOF\n$(wiki-studio query x)\nEOF",
+    "cat > /dev/null <<'EOF'\n$(wiki-studio query x)\nEOF",
+    "echo '$(wiki-studio query q)'",
+    'echo "$(wiki-studio query q)"',
+    "x=`wiki-studio ingest a`",
+    "env FOO=1 wiki-studio query q",
+    "bash -c 'wiki-studio ingest notes.md'",
+    "(cd a && wiki-studio query q) | cat",
+    "wiki-studio query q > out.txt 2>&1",
+    "if true; then wiki-studio query q; fi",
+    'echo "a;b" && wiki-studio propose --from "$D" --promote',
+    'echo "$(echo wiki-studio query)"',
+    'cat <<< "hello"\nwiki-studio query q',
+    "cat <<EOF\n'$(wiki-studio query q)'\nEOF",
+    'cat <<< "$(wiki-studio ingest a)"',
+    "cat <<EOF\n\\$(wiki-studio query q)\nEOF",
+    'cat <<EOF\n"`wiki-studio ingest b`"\nEOF\nwiki-studio lint',
+    'eval "wiki-studio query q"',
+    "sh <<EOF\nwiki-studio query q\nEOF",
+    "cat <<-EOF\n\t$(wiki-studio query q)\n\tEOF",
+    "wiki-studio query q & wait",
+    '"wiki-studio" query q',
+    "for i in 1; do wiki-studio ingest a; done",
+    "case x in x) wiki-studio query q;; esac",
+    "echo $(( 1 << 2 )); wiki-studio lint",
+    'echo "#" wiki-studio query',
+    "cat <<EOF; wiki-studio lint\nbody $(wiki-studio query q)\nEOF",
+]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_the_detector_agrees_with_bash_on_what_runs(tmp_path: Path) -> None:
+    """Ground truth: Bash itself runs each case against a stub wiki-studio that logs its verb."""
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "a").mkdir()
+    log = tmp_path / "log"
+    stub = tmp_path / "bin" / "wiki-studio"
+    stub.write_text(
+        '#!/bin/sh\nfor a in "$@"; do case "$a" in --root|--wiki-dir|--proposals-dir|--backend|--output-dir) '
+        'skip=1; continue;; --*) continue;; esac; if [ -n "$skip" ]; then skip=; continue; fi; '
+        f"echo \"$a\" >> '{log}'; break; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "D": str(tmp_path)}
+    for case in BASH_AGREEMENT_CASES:
+        log.unlink(missing_ok=True)
+        subprocess.run(["bash", "-c", case], cwd=tmp_path, env=env, capture_output=True, timeout=20, check=False)
+        executed = log.read_text(encoding="utf-8").split() if log.exists() else []
+        assert diagnostics._wiki_studio_verbs(case) == executed, case
