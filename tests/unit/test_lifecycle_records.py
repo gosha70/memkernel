@@ -8,6 +8,7 @@ import copy
 import json
 import re
 import shutil
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -124,6 +125,8 @@ def test_summary_and_diagnostics_are_counts_with_denominators(tmp_path: Path) ->
         "calls_before_first_retain": {"numerator": 3, "denominator": 4},
         "recall_to_use": {"numerator": 1, "denominator": 2},
         "hooks_succeeded": {"numerator": 1, "denominator": 2},
+        "wiki_studio_nested_model_calls": {"numerator": 0, "denominator": 0},
+        "direct_wiki_writes": {"numerator": 0, "denominator": 0},
     }
 
 
@@ -185,11 +188,12 @@ PARAMS = {
     "preregistration_commit": "p1",
     "tag": "v0.5.0",
     "model": "m",
-    "arms": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel"],
+    "arms": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio"],
     "primary_comparators": ["claude_md", "fs_grep"],
     "secondary_comparators": ["bare"],
     "min_pairs_inferential": 30,
     "min_valid_pairs_lc_compact": 3,
+    "min_valid_pairs_wiki_studio": 2,
     "live_compaction_proven": "yes",
 }
 
@@ -582,3 +586,222 @@ def test_calibration_usage_medians_print_as_counts_not_in_exponent_form() -> Non
     assert "| memkernel | 1 | 1234567 / 1234567 / 1234567 |" in text
     assert "999999 / 1000000.5 / 1000002" in text
     assert "e+" not in text
+
+
+def _use(name: str, **fields: Any) -> Any:
+    return records.ToolUse(ts="t", name=name, tool_id=f"{name}-{len(fields)}-{sorted(fields.items())}", input=fields)
+
+
+def test_wiki_studio_diagnostics_count_nested_models_and_writes_that_bypass_the_gate(tmp_path: Path) -> None:
+    summary = records.StreamSummary(
+        tool_uses=[
+            _use("Bash", command='wiki-studio find "retry backoff"'),
+            _use("Bash", command='cd x && wiki-studio --root . query "what is the backoff?"'),
+            _use("Bash", command="/opt/bin/wiki-studio ingest notes.md; echo done"),
+            _use("Bash", command='wiki-studio propose --from "$D" --promote'),
+            _use("Bash", command='grep -r "query" knowledge/wiki'),  # the word, not the verb
+            _use("Write", file_path=str(tmp_path / "knowledge" / "wiki" / "decisions" / "x.md")),
+            _use("Edit", file_path="knowledge/wiki/index.md"),
+            _use("Write", file_path=str(tmp_path / "backoff.py")),
+            _use("Write", file_path=str(tmp_path / "knowledge" / "wikipedia.md")),
+        ]
+    )
+    result = diagnostics.session_diagnostics(summary, tmp_path, set(), [])
+    assert result["wiki_studio_nested_model_calls"] == {"numerator": 2, "denominator": 5}
+    assert result["direct_wiki_writes"] == {"numerator": 2, "denominator": 4}
+
+
+def test_an_arm_outside_its_groups_gets_no_chain_and_no_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned: list[str] = []
+    monkeypatch.setattr(runner, "check_cli_pin", lambda arm: pinned.append(arm.name))
+    receipts = _stub_run(tmp_path / "measured", monkeypatch, "measured", ["wiki_studio", "bare"])  # demo-retain only
+    assert {r["arm"] for r in receipts} == {"bare"}
+    assert not (tmp_path / "measured" / "measured" / "demo-retain.wiki_studio.r0").exists()
+    assert pinned == ["wiki_studio", "bare"]  # every arm is checked before a paid run starts
+
+
+def _fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | None) -> None:
+    import os
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if output is not None:
+        script = bin_dir / "wiki-studio"
+        script.write_text(f"#!/bin/sh\necho '{output}'\n", encoding="utf-8")
+        script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin")
+
+
+@pytest.mark.parametrize(("output", "accepted"), [("0.4.0", True), ("0.3.1", False), (None, False)])
+def test_a_paid_run_refuses_to_start_unless_the_pinned_cli_version_is_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | None, accepted: bool
+) -> None:
+    _fake_cli(tmp_path, monkeypatch, output)
+    arm = runner.load_arm("wiki_studio")
+    if accepted:
+        runner.check_cli_pin(arm)
+    else:
+        with pytest.raises(SystemExit, match="wiki_studio"):
+            runner.check_cli_pin(arm)
+    runner.check_cli_pin(runner.load_arm("bare"))  # arms without a pin never look
+
+
+def test_the_demo_runs_no_cli_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_cli(tmp_path, monkeypatch, None)  # no wiki-studio on PATH at all
+    monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    assert runner.demo() == 0
+
+
+def test_the_report_gives_wiki_studio_its_own_table_outside_memkernels_label() -> None:
+    receipts = [
+        _trial("memkernel", "w1", 0, group="lc-wiki"),
+        _trial("claude_md", "w1", 0, group="lc-wiki", outcome="failed", checker_passed=False),
+        _trial("fs_grep", "w1", 0, group="lc-wiki", outcome="failed", checker_passed=False),
+        _trial("wiki_studio", "w1", 0, group="lc-wiki"),
+    ]
+    text = report.render(receipts, PARAMS)
+    assert "| wiki_studio vs | Valid pairs |" in text
+    assert "| claude_md (primary) | 1 | 0 | 1 | 0 | 0 | 0 |" in text
+    assert "**wiki_studio not measured:** fewer than 2 valid pairs" in text
+    assert "| wiki_studio (primary)" not in text and "| wiki_studio (secondary)" not in text  # never a comparator
+    without = report.render([r for r in receipts if r["arm"] != "wiki_studio"], PARAMS)
+    label = text.split("## Label", 1)[1].split("##", 1)[0]
+    assert label == without.split("## Label", 1)[1].split("##", 1)[0]  # memkernel's label is unchanged
+
+
+@pytest.mark.parametrize(
+    ("command", "verbs"),
+    [
+        ("echo wiki-studio query", []),
+        ("wiki-studio \\\nquery q", ["query"]),  # backslash-newline continuation (review of #31)
+        ("printf '%s\\n' ';' wiki-studio query", []),  # a quoted separator is text
+        ("# $(wiki-studio query q)\necho done", []),  # a comment runs nothing
+        ("echo hi # wiki-studio query", []),
+        ("cat > /dev/null <<EOF\n$(wiki-studio query x)\nEOF", ["query"]),  # unquoted heredoc expands
+        ("cat > /dev/null <<'EOF'\n$(wiki-studio query x)\nEOF", []),  # quoted heredoc does not
+        ("wiki-studio query q > out.txt 2>&1", ["query"]),
+        (">out.txt wiki-studio ingest b", ["ingest"]),
+        ("if true; then wiki-studio query q; fi", ["query"]),
+        ("{ wiki-studio ingest a; }", ["ingest"]),
+        ("true || wiki-studio query q", ["query"]),  # static: a conditional command still counts
+        ('cat <<< "hello"\nwiki-studio query q', ["query"]),  # a here-string has no body (review of #31)
+        ("cat <<EOF\n'$(wiki-studio query q)'\nEOF", ["query"]),  # body quotes do not stop expansion
+        ('cat <<< "$(wiki-studio ingest a)"', ["ingest"]),
+        ("cat <<EOF\n\\$(wiki-studio query q)\nEOF", []),  # an escaped $ is literal in a heredoc
+        ('eval "wiki-studio query q"', ["query"]),
+        ("sh <<EOF\nwiki-studio query q\nEOF", ["query"]),  # a shell reading its script from a heredoc
+        ("w=wiki-studio; $w query q", []),  # known gap: the program is only known at run time
+        ("printf 'wiki-studio ingest notes.md\\n'", []),
+        ('grep -rn "wiki-studio query" README.md', []),
+        ("cat > HOWTO.md <<EOF\nwiki-studio query 'x'\nEOF", []),
+        ("echo '$(wiki-studio query q)'", []),
+        ("env FOO=1 wiki-studio query q", ["query"]),
+        ("X=1 wiki-studio --root . ingest a.md", ["ingest"]),
+        ("bash -c 'wiki-studio ingest notes.md'", ["ingest"]),
+        ("python3 -m wiki_studio query q", ["query"]),
+        ('echo "$(wiki-studio query q)"', ["query"]),
+        ("(cd a && wiki-studio query q) | tee out", ["query"]),
+        ('wiki-studio propose --from "$D" --promote', ["propose"]),
+    ],
+)
+def test_only_executed_wiki_studio_commands_count(command: str, verbs: list[str]) -> None:
+    """Printed or quoted command examples are text, not executions (review of task 17a)."""
+    assert diagnostics._wiki_studio_verbs(command) == verbs
+
+
+def test_the_report_shows_both_new_diagnostics_and_flags_a_nested_model() -> None:
+    def trial(arm: str, nested: tuple[int, int], writes: tuple[int, int]) -> dict[str, Any]:
+        diag = {
+            "wiki_studio_nested_model_calls": {"numerator": nested[0], "denominator": nested[1]},
+            "direct_wiki_writes": {"numerator": writes[0], "denominator": writes[1]},
+        }
+        return _trial(arm, "w1", 0, group="lc-wiki", diagnostics=diag)
+
+    clean = report.render([trial("wiki_studio", (0, 3), (0, 1)), trial("claude_md", (0, 2), (2, 2))], PARAMS)
+    assert "| wiki_studio | 0/3 | 0/1 |" in clean and "| claude_md | 0/2 | 2/2 |" in clean
+    assert "Token accounting incomplete" not in clean
+
+    nested = report.render([trial("wiki_studio", (1, 3), (2, 2)), trial("claude_md", (0, 2), (2, 2))], PARAMS)
+    assert "| wiki_studio | 1/3 | 2/2 |" in nested
+    assert "**Token accounting incomplete:** 1 Bash call(s) in this group ran `wiki-studio ingest`" in nested
+    assert nested != clean
+
+
+def test_an_absent_preregistered_comparator_counts_as_zero_pairs() -> None:
+    receipts = [
+        _trial("wiki_studio", "w1", 0, group="lc-wiki"),
+        _trial("claude_md", "w1", 0, group="lc-wiki"),
+        _trial("wiki_studio", "w2", 0, group="lc-wiki"),
+        _trial("claude_md", "w2", 0, group="lc-wiki"),
+    ]  # no fs_grep receipts at all
+    text = report.render(receipts, PARAMS)
+    second = text.split("| wiki_studio vs |", 1)[1]
+    assert "| claude_md (primary) | 2 |" in second and "| fs_grep (primary) | 0 |" in second
+    assert "**wiki_studio not measured:** fewer than 2 valid pairs" in text
+
+    lenient = {**PARAMS, "min_pairs_inferential": 1}
+    memkernel_only_vs_claude_md = report.render([_trial("memkernel", "t1", 0), _trial("claude_md", "t1", 0)], lenient)
+    assert "| fs_grep (primary) | 0 |" in memkernel_only_vs_claude_md
+    assert "Descriptive:" in memkernel_only_vs_claude_md  # a missing primary comparator is never inferential
+
+
+BASH_AGREEMENT_CASES = [  # every case here runs the same way whatever the conditions evaluate to
+    "wiki-studio find 'retry backoff'",
+    "wiki-studio \\\nquery q",
+    "printf '%s\\n' ';' wiki-studio query",
+    "# $(wiki-studio query q)\necho done",
+    "echo wiki-studio query",
+    'grep -rn "wiki-studio query" . || true',
+    "cat > /dev/null <<EOF\nwiki-studio query x\nEOF",
+    "cat > /dev/null <<EOF\n$(wiki-studio query x)\nEOF",
+    "cat > /dev/null <<'EOF'\n$(wiki-studio query x)\nEOF",
+    "echo '$(wiki-studio query q)'",
+    'echo "$(wiki-studio query q)"',
+    "x=`wiki-studio ingest a`",
+    "env FOO=1 wiki-studio query q",
+    "bash -c 'wiki-studio ingest notes.md'",
+    "(cd a && wiki-studio query q) | cat",
+    "wiki-studio query q > out.txt 2>&1",
+    "if true; then wiki-studio query q; fi",
+    'echo "a;b" && wiki-studio propose --from "$D" --promote',
+    'echo "$(echo wiki-studio query)"',
+    'cat <<< "hello"\nwiki-studio query q',
+    "cat <<EOF\n'$(wiki-studio query q)'\nEOF",
+    'cat <<< "$(wiki-studio ingest a)"',
+    "cat <<EOF\n\\$(wiki-studio query q)\nEOF",
+    'cat <<EOF\n"`wiki-studio ingest b`"\nEOF\nwiki-studio lint',
+    'eval "wiki-studio query q"',
+    "sh <<EOF\nwiki-studio query q\nEOF",
+    "cat <<-EOF\n\t$(wiki-studio query q)\n\tEOF",
+    "wiki-studio query q & wait",
+    '"wiki-studio" query q',
+    "for i in 1; do wiki-studio ingest a; done",
+    "case x in x) wiki-studio query q;; esac",
+    "echo $(( 1 << 2 )); wiki-studio lint",
+    'echo "#" wiki-studio query',
+    "cat <<EOF; wiki-studio lint\nbody $(wiki-studio query q)\nEOF",
+]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_the_detector_agrees_with_bash_on_what_runs(tmp_path: Path) -> None:
+    """Ground truth: Bash itself runs each case against a stub wiki-studio that logs its verb."""
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "a").mkdir()
+    log = tmp_path / "log"
+    stub = tmp_path / "bin" / "wiki-studio"
+    stub.write_text(
+        '#!/bin/sh\nfor a in "$@"; do case "$a" in --root|--wiki-dir|--proposals-dir|--backend|--output-dir) '
+        'skip=1; continue;; --*) continue;; esac; if [ -n "$skip" ]; then skip=; continue; fi; '
+        f"echo \"$a\" >> '{log}'; break; done\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "D": str(tmp_path)}
+    for case in BASH_AGREEMENT_CASES:
+        log.unlink(missing_ok=True)
+        subprocess.run(["bash", "-c", case], cwd=tmp_path, env=env, capture_output=True, timeout=20, check=False)
+        executed = log.read_text(encoding="utf-8").split() if log.exists() else []
+        assert diagnostics._wiki_studio_verbs(case) == executed, case

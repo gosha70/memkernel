@@ -26,7 +26,9 @@ EXPECTED = {  # arm: (workspace, transcripts, store)
     "claude_md": (True, False, False),
     "fs_grep": (False, True, False),
     "memkernel": (False, False, True),
+    "wiki_studio": (False, False, False),
 }
+WIKI_STUDIO_INSTRUCTION_SHA256 = "c231bb4077e058da89470455b7f318aafc6966e8f07ead74ab2413a835c6355b"  # v0.4.0 blob
 
 
 def _task(tmp_path: Path, *, shared: bool = False, namespace: str = "primary") -> object:
@@ -128,3 +130,40 @@ def test_arm_config_hash_covers_the_instruction(tmp_path: Path) -> None:
     before = runner.load_arm("placebo", arms).config_sha256
     (arms / "placebo" / "instruction.md").write_text("changed\n", encoding="utf-8")
     assert runner.load_arm("placebo", arms).config_sha256 != before
+
+
+def test_wiki_studio_arm_is_wiki_studio_v040_byte_for_byte_plus_three_keys() -> None:
+    """The instruction and the upstream keys are exactly docs/agent-arm/ at wiki-studio v0.4.0 (e9ec3fa)."""
+    import hashlib
+
+    config = json.loads((SUITE_DIR / "arms" / "wiki_studio" / "config.frozen.json").read_text(encoding="utf-8"))
+    source = config["source"]
+    assert source["tag"] == "v0.4.0" and source["commit"].startswith("e9ec3fa")
+    assert source["added_here"] == ["groups", "cli_pin", "source"]
+    instruction = runner.load_arm("wiki_studio").instruction
+    assert hashlib.sha256(instruction).hexdigest() == source["instruction_sha256"] == WIKI_STUDIO_INSTRUCTION_SHA256
+    upstream = {key: value for key, value in config.items() if key not in source["added_here"]}
+    assert hashlib.sha256((json.dumps(upstream, indent=2) + "\n").encode()).hexdigest() == source["config_sha256"]
+
+
+def test_wiki_studio_runs_on_lc_wiki_only_with_its_cli_pinned() -> None:
+    arm = runner.load_arm("wiki_studio")
+    assert arm.groups == ("lc-wiki",) and arm.cli_pin == ("wiki-studio", "0.4.0")
+    assert arm.allowed_tools == runner.BASE_TOOLS and not arm.mcp and not arm.hooks
+    groups = {runner.load_task(path).group: runner.load_task(path) for path in (SUITE_DIR / "tasks").iterdir()}
+    assert {group for group, task in groups.items() if arm.runs_on(task)} == {"lc-wiki"}
+    assert all(
+        runner.load_arm(name).runs_on(task) for name in EXPECTED if name != "wiki_studio" for task in groups.values()
+    )
+
+
+def test_wiki_studio_instruction_is_length_matched_within_five_percent() -> None:
+    memkernel = len(runner.load_arm("memkernel").instruction)
+    wiki_studio = len(runner.load_arm("wiki_studio").instruction)
+    assert abs(wiki_studio - memkernel) / memkernel <= 0.05
+
+
+def test_wiki_studio_instruction_never_runs_a_nested_model() -> None:
+    text = runner.load_arm("wiki_studio").instruction.decode()
+    assert "wiki-studio find" in text and 'wiki-studio propose --from "$D" --promote' in text
+    assert "Run wiki-studio ingest or wiki-studio query: they start another model." in text  # listed under Never
