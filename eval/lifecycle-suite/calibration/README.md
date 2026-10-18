@@ -109,16 +109,28 @@ $V preflight     # asks for the key (hidden) and the workspace ID; spends nothin
                  # expect "workspace: wrkspc_... (matches CALIBRATION_WORKSPACE_ID)"
 $V calibrate     # the paid run: type 'calibrate', then the key and workspace ID again.
                  # It runs in the foreground; keep the Mac awake (for example: caffeinate -i $V calibrate)
-$V fetch         # copies the VM's runs to ./calibration-runs on your Mac
-$V destroy       # deletes the VM and everything in it
+$V fetch         # copies the VM's runs to ./calibration-runs and verifies every file (sha256);
+                 # expect "copied and verified N file(s)"
+$V destroy       # deletes the VM; refuses while it holds runs that were not fetched and verified
 ```
 
 Build from the commit you calibrate (`35b2ff0`, or a later `main` if it moved).
 The image holds its own copy of `run.sh`, and `build.sh` builds only a clean
 commit, so the receipts' `code_sha` identifies the image's code.
 
-If something fails part-way, `$V destroy` and start again from `$V create`.
-Nothing in the VM is worth keeping except what `$V fetch` copies.
+**If something fails part-way, fetch before anything else.** A failed or
+interrupted calibration can already hold receipts, raw streams and partial
+results, and the report needs them (FR-015, FR-018). The order is always:
+
+1. `$V fetch`. It must end with "copied and verified N file(s)". If it reports
+   a mismatch or a missing file, or fails at all, **keep the VM** and run
+   `$V fetch` again, to a fresh directory if needed, until it succeeds.
+2. Check the local copy yourself: `ls -R calibration-runs`.
+3. Only then `$V destroy`, and start again from `$V create` if you need to.
+
+`$V destroy` enforces this. It refuses while the VM's runs differ from the
+last verified fetch. `$V destroy --discard` overrides it and throws those runs
+away, so use it only when you are sure nothing in them is needed.
 
 ## 4. Run it with Docker directly (Linux host or cloud VM)
 
@@ -145,7 +157,10 @@ arm's `mktemp -d` drafts, in memory, where they vanish with the container.
 
 1. Revoke the key, then archive the workspace, which archives every key in it.
    Note the date for the report (FR-018).
-2. Delete the VM (`vm.sh destroy`, or delete the cloud VM).
+2. Fetch and verify the runs (`vm.sh fetch`, which must report "copied and
+   verified"), check the local copy, and only then delete the VM
+   (`vm.sh destroy`, or delete the cloud VM after copying `calibration-runs/`
+   off it). If fetching fails, keep the VM until it succeeds.
 3. Review `calibration-runs/<run id>/` yourself, including the secret-scan
    output, before anything from it is committed.
 4. Record the configuration, cost and exclusion reasons (FR-015). The cost is

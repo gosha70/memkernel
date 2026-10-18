@@ -11,7 +11,9 @@
 #   vm.sh preflight         ask for the key and workspace ID (hidden), check them; spends nothing
 #   vm.sh calibrate         ask again, then the paid calibration run
 #   vm.sh fetch [DEST]      copy the VM's runs directory to DEST on your Mac (default ./calibration-runs)
-#   vm.sh destroy           stop and delete the VM and everything in it
+#                           and verify the copy file by file (sha256); run it after every run, failed ones too
+#   vm.sh destroy           delete the VM; refuses while it holds runs that were not fetched and verified
+#   vm.sh destroy --discard delete the VM even so, throwing those runs away
 #
 # The key is read at a hidden prompt and handed to the VM on stdin. It is never written to a
 # file, never put on a command line, and the host environment is never forwarded (no --preserve-env).
@@ -22,10 +24,25 @@ repo_url=https://github.com/gosha70/memkernel.git
 guest_repo=memkernel        # under the VM user's home
 guest_runs=runs             # under the VM user's home, mounted at /runs in the container
 docker_flags="--rm --tmpfs /tmp:rw,size=1g"
+fetched_manifest=.calibration-fetched   # under the VM user's home: the manifest of the last verified fetch
+
+# Runs in the guest shell, which does not inherit this script's pipefail: any failure must fail the whole inventory.
+manifest_cmd="set -euo pipefail; cd ~/$guest_runs && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum"
+readable_cmd="sudo chmod -R a+rX ~/$guest_runs"   # rootless Docker writes the runs as a subordinate uid
+
+vm_state() {  # prints present or absent; exits non-zero when Lima cannot say
+  local names
+  names=$(limactl list -q 2>/dev/null) || return 1
+  if printf '%s\n' "$names" | grep -qx "$vm"; then echo present; else echo absent; fi
+}
 
 in_vm() {  # run a bash script in the VM, from the VM user's home, with nothing from the host environment
   # stdin is closed: only run_container may read the secrets that arrive on stdin
   limactl shell --workdir / "$vm" -- bash -lc "cd ~ && $1" </dev/null
+}
+
+in_vm_stdin() {  # like in_vm, but the VM command reads this script's stdin
+  limactl shell --workdir / "$vm" -- bash -lc "cd ~ && $1"
 }
 
 image_tag() {
@@ -114,10 +131,51 @@ case "${1:-}" in
   fetch)
     dest=${2:-calibration-runs}
     mkdir -p "$dest"
+    in_vm "$readable_cmd"   # the VM is throwaway; readable runs are needed for the copy and the inventory
     limactl copy -r "$vm:$guest_runs/." "$dest/"
-    echo "copied the VM's runs to $dest"
+    chmod 755 "$dest"   # the copy carries over the VM directory's 1777 mode
+    if ! remote=$(in_vm "$manifest_cmd"); then
+      echo "vm.sh: could not list the VM's runs; nothing is marked fetched. Keep the VM and retry." >&2
+      exit 1
+    fi
+    files=0 bad=0
+    while read -r sum path; do
+      [ -n "$path" ] || continue
+      files=$((files + 1))
+      local_sum=$(shasum -a 256 "$dest/$path" 2>/dev/null | cut -d' ' -f1)
+      if [ "$local_sum" != "$sum" ]; then
+        if [ -z "$local_sum" ]; then echo "vm.sh: missing locally: $path" >&2; else echo "vm.sh: mismatch: $path" >&2; fi
+        bad=$((bad + 1))
+      fi
+    done <<< "$remote"
+    if [ "$bad" -ne 0 ]; then
+      echo "vm.sh: $bad of $files file(s) in $dest do not match the VM; nothing is marked fetched. Keep the VM and retry." >&2
+      exit 1
+    fi
+    printf '%s\n' "$remote" | in_vm_stdin "cat > ~/$fetched_manifest"
+    echo "copied and verified $files file(s) from the VM's runs to $dest (sha256 per file)"
     ;;
   destroy)
+    if ! state=$(vm_state); then
+      echo "vm.sh: Lima could not list its VMs; not deleting anything. Check 'limactl list' and retry." >&2
+      exit 1
+    fi
+    if [ "$state" = absent ]; then
+      echo "vm.sh: there is no VM named $vm; nothing to delete"
+      exit 0
+    fi
+    if [ "${2:-}" != "--discard" ]; then  # fail closed: any doubt about the runs keeps the VM
+      refuse() {
+        echo "vm.sh: $1; the VM is kept. Run: vm.sh fetch (then destroy). To throw the runs away: vm.sh destroy --discard" >&2
+        exit 1
+      }
+      in_vm "$readable_cmd" || refuse "could not make the VM's runs readable (is the VM running? limactl start $vm)"
+      current=$(in_vm "$manifest_cmd") || refuse "could not list the VM's runs"
+      fetched=$(in_vm "cat ~/$fetched_manifest 2>/dev/null || true") || refuse "could not read the last verified fetch"
+      if [ -n "$current" ] && [ "$current" != "$fetched" ]; then
+        refuse "the VM holds runs that were not fetched and verified since they last changed"
+      fi
+    fi
     limactl delete --force "$vm"
     echo "VM $vm deleted"
     ;;
