@@ -28,7 +28,9 @@ EXPECTED = {  # arm: (workspace, transcripts, store)
     "memkernel": (False, False, True),
     "wiki_studio": (False, False, False),
 }
-WIKI_STUDIO_INSTRUCTION_SHA256 = "c231bb4077e058da89470455b7f318aafc6966e8f07ead74ab2413a835c6355b"  # v0.4.0 blob
+WIKI_STUDIO_INSTRUCTION_SHA256 = (
+    "c231bb4077e058da89470455b7f318aafc6966e8f07ead74ab2413a835c6355b"  # v0.4.1 blob (identical to v0.4.0)
+)
 
 
 def _task(tmp_path: Path, *, shared: bool = False, namespace: str = "primary") -> object:
@@ -133,12 +135,12 @@ def test_arm_config_hash_covers_the_instruction(tmp_path: Path) -> None:
 
 
 def test_wiki_studio_arm_is_wiki_studio_v040_byte_for_byte_plus_three_keys() -> None:
-    """The instruction and the upstream keys are exactly docs/agent-arm/ at wiki-studio v0.4.0 (e9ec3fa)."""
+    """The instruction and the upstream keys are exactly docs/agent-arm/ at wiki-studio v0.4.1 (8b5c8af)."""
     import hashlib
 
     config = json.loads((SUITE_DIR / "arms" / "wiki_studio" / "config.frozen.json").read_text(encoding="utf-8"))
     source = config["source"]
-    assert source["tag"] == "v0.4.0" and source["commit"].startswith("e9ec3fa")
+    assert source["tag"] == "v0.4.1" and source["commit"].startswith("8b5c8af")
     assert source["added_here"] == ["groups", "cli_pin", "source"]
     instruction = runner.load_arm("wiki_studio").instruction
     assert hashlib.sha256(instruction).hexdigest() == source["instruction_sha256"] == WIKI_STUDIO_INSTRUCTION_SHA256
@@ -148,7 +150,7 @@ def test_wiki_studio_arm_is_wiki_studio_v040_byte_for_byte_plus_three_keys() -> 
 
 def test_wiki_studio_runs_on_lc_wiki_only_with_its_cli_pinned() -> None:
     arm = runner.load_arm("wiki_studio")
-    assert arm.groups == ("lc-wiki",) and arm.cli_pin == ("wiki-studio", "0.4.0")
+    assert arm.groups == ("lc-wiki",) and arm.cli_pin == ("wiki-studio", "0.4.1")
     assert arm.allowed_tools == runner.BASE_TOOLS and not arm.mcp and not arm.hooks
     groups = {runner.load_task(path).group: runner.load_task(path) for path in (SUITE_DIR / "tasks").iterdir()}
     assert {group for group, task in groups.items() if arm.runs_on(task)} == {"lc-wiki"}

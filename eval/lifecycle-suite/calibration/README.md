@@ -9,7 +9,7 @@ except the receipts and raw streams.
 
 The image holds one commit, from `git archive`. Its Python dependencies are installed from that commit's `poetry.lock` with hashes, except torch, which is the locked version from PyTorch's CPU index, without its CUDA packages. It also holds pinned tools:
 - Claude Code 2.1.288
-- wiki-studio 0.4.0
+- wiki-studio 0.4.1
 - memkernel and its embedding model, downloaded at build time
 
 Only `/runs` is mounted. The API key goes in with `docker run` and is never
@@ -66,7 +66,7 @@ arm's `mktemp -d` drafts, in memory, where they vanish with the container.
 `calibrate` runs `preflight` again, then the runner (`--phase calibration`,
 all seven arms, `wiki_studio` on `lc-wiki` only), then `scan_secrets.py` over
 the run. The scan also runs when the runner fails, over whatever output exists, and the exit status is the runner's, or the scan's if the runner succeeded. `environment.txt` (the image's `pip freeze` and tool versions) is copied into the run directory. The runner also refuses to start unless `wiki-studio --version`
-reports 0.4.0. `demo` runs the credential-free stub demonstration in the same
+reports 0.4.1. `demo` runs the credential-free stub demonstration in the same
 image and needs no key.
 
 Rebuild the image from the commit being calibrated right before the run. The

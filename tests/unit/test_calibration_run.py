@@ -38,7 +38,7 @@ def _setup(tmp_path: Path, *, workspace: str = WORKSPACE) -> dict[str, str]:
     for directory in (bin_dir, suite / "calibration", runs):
         directory.mkdir(parents=True)
     _executable(bin_dir / "claude", "#!/bin/sh\necho '2.1.288 (Claude Code)'\n")
-    _executable(bin_dir / "wiki-studio", "#!/bin/sh\necho 0.4.0\n")
+    _executable(bin_dir / "wiki-studio", "#!/bin/sh\necho 0.4.1\n")
     _executable(bin_dir / "sha256sum", '#!/bin/sh\necho "0000  $1"\n')
     _executable(
         bin_dir / "curl",

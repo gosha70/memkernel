@@ -24,12 +24,12 @@
   ],
   "cli_pin": {
     "command": "wiki-studio",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "source": {
     "repository": "gosha70/wiki-studio",
-    "tag": "v0.4.0",
-    "commit": "e9ec3fa53a98e8de50774bc455658b7687937fff",
+    "tag": "v0.4.1",
+    "commit": "8b5c8afe2b8f6a8a766596a3ed9729933f9c0e83",
     "path": "docs/agent-arm/",
     "instruction_sha256": "c231bb4077e058da89470455b7f318aafc6966e8f07ead74ab2413a835c6355b",
     "config_sha256": "51c4b11e14417727927367e743a296d55246eae94bf5003e5173ceccdf4a9eb5",
