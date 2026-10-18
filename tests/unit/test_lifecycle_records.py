@@ -634,7 +634,7 @@ def _fake_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | Non
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin")
 
 
-@pytest.mark.parametrize(("output", "accepted"), [("0.4.0", True), ("0.3.1", False), (None, False)])
+@pytest.mark.parametrize(("output", "accepted"), [("0.4.1", True), ("0.4.0", False), ("0.3.1", False), (None, False)])
 def test_a_paid_run_refuses_to_start_unless_the_pinned_cli_version_is_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str | None, accepted: bool
 ) -> None:

@@ -18,6 +18,7 @@ origin:
     - specs/memkernel-0-5/origin/2026-10-15-decisions.md
     - specs/memkernel-0-5/origin/2026-10-16-option-b.md
     - specs/memkernel-0-5/origin/2026-10-17-wiki-studio-arm.md
+    - specs/memkernel-0-5/origin/2026-10-18-wiki-studio-0-4-1.md
   origin_claim: |
     Show strong evidence of how memkernel helps with memory and context
     management, and state clearly what it is and what it is not (it is not a

@@ -34,7 +34,7 @@ All notable changes to this project are documented here. The format follows
   appears when wiki-studio's promote gate rejects an export (nothing is
   written then).
 - `memkernel[wiki]` now requires `wiki-studio>=0.3.1,<1` (it ships `py.typed`;
-  the mypy override is gone). CI tests against wiki-studio 0.4.0.
+  the mypy override is gone). CI tests against wiki-studio 0.4.1.
 
 ## [0.4.1] - 2026-10-15
 

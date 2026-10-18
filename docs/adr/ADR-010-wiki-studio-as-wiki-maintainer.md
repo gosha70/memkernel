@@ -100,3 +100,14 @@ passes on both versions. 0.4.0 fixes the multiple-append defect
 `append-index` and one combined `append-log` edit, because 0.3.1 still needs
 it and it is correct on 0.4.0. The partial-write rollback gap is unchanged in
 0.4.0 (gosha70/wiki-studio#21), so the snapshot and restore stay.
+
+## Note (2026-10-18)
+
+The development lock moves to wiki-studio 0.4.1, the version the lifecycle
+suite's `wiki_studio` arm pins, so CI tests the release the measured run uses.
+0.4.1 fixes promote's rollback (gosha70/wiki-studio#21): a target is recorded
+before its write and rollback runs on any exception, so a write that fails
+part-way leaves the wiki as it was. memkernel's snapshot and restore stay,
+because the floor is still 0.3.1. Removing them with the floor raised to 0.4.1
+is a separate change after the measured run, never while the protocol is
+frozen.

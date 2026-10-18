@@ -300,7 +300,7 @@ class WikiExporter:
 class _WikiSnapshot:
     """Every file a gated export can write, taken before it starts, so a failure restores exactly that.
 
-    wiki-studio's promote (0.3.1 and 0.4.0, gosha70/wiki-studio#21) rolls back only
+    wiki-studio's promote before 0.4.1 (gosha70/wiki-studio#21) rolls back only
     the writes that completed, and only on ``OSError``: a page or ``index.md`` whose
     write failed part-way stays as it was left. Its commit step writes every ``*.md`` of the staged wiki that
     differs from the live one, plus ``.audit/**/plan.json``, so the snapshot holds
