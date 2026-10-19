@@ -39,6 +39,10 @@ case "$1" in
     HOME="$STUB_GUEST_HOME" PATH="$STUB_GUEST_PATH" exec bash -c "$cmd" ;;
   copy)
     shift; [ "$1" = -r ] && shift
+    if [ "${2#*:}" != "$2" ]; then  # host -> guest
+      cp -R "$1" "$STUB_GUEST_HOME/${2#*:}" || exit $?
+      exit 0
+    fi
     src="${1#*:}"; dest="$2"
     cp -R "$STUB_GUEST_HOME/$src" "$dest" || exit $?
     if [ -n "${STUB_CORRUPT:-}" ]; then
@@ -62,6 +66,29 @@ def _env(tmp_path: Path, *, sudo: str = "run") -> dict[str, str]:
     sudo_body = 'exec "$@"\n' if sudo == "run" else "exit 0\n"
     (guest_bin / "sudo").write_text("#!/bin/sh\n" + sudo_body, encoding="utf-8")
     (guest_bin / "sudo").chmod(0o755)
+    # docker in the guest, with tags: STUB_TAGS holds "tag id" lines; "load" points STUB_LOAD_TAG at STUB_LOAD_ID
+    (guest_bin / "docker").write_text(
+        "#!/bin/bash\n"
+        'tags="$STUB_TAGS"; touch "$tags"\n'
+        'lookup() { if [[ "$1" == sha256:* ]]; then grep -q " $1$" "$tags" && echo "$1"; '
+        'else awk -v t="$1" \'$1 == t {print $2}\' "$tags" | tail -1; fi; }\n'
+        # moving a tag keeps the old image, as real docker does (dangling, still addressable by ID)
+        'set_tag() { grep "^$1 " "$tags" | sed "s/^[^ ]* /@old /" > "$tags.new"; '
+        'grep -v "^$1 " "$tags" >> "$tags.new"; echo "$1 $2" >> "$tags.new"; mv "$tags.new" "$tags"; }\n'
+        'case "$1" in\n'
+        # load moves the tag, then exits with STUB_LOAD_EXIT (a load that fails part-way)
+        '  load) cat > /dev/null; echo load >> "$STUB_DOCKER_LOG"; set_tag "$STUB_LOAD_TAG" "$STUB_LOAD_ID"; '
+        'exit "${STUB_LOAD_EXIT:-0}";;\n'
+        '  tag) id=$(lookup "$2"); [ -n "$id" ] || exit 1; '
+        'echo "tag $2 $3" >> "$STUB_DOCKER_LOG"; set_tag "$3" "$id";;\n'
+        '  image) if [ "$2" = rm ]; then grep -v " $3$" "$tags" > "$tags.new"; mv "$tags.new" "$tags"; '
+        'echo "rm $3" >> "$STUB_DOCKER_LOG"; exit 0; fi; '
+        'id=$(lookup "${@: -1}"); [ -n "$id" ] || exit 1; echo "$id";;\n'
+        "  *) exit 98;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    (guest_bin / "docker").chmod(0o755)
     system = "/usr/bin:/bin:/usr/sbin:/sbin"
     return {
         "PATH": f"{host_bin}{os.pathsep}{system}",
@@ -69,6 +96,8 @@ def _env(tmp_path: Path, *, sudo: str = "run") -> dict[str, str]:
         "STUB_GUEST_HOME": str(guest_home),
         "STUB_LOG": str(tmp_path / "limactl.log"),
         "STUB_DELETED": str(tmp_path / "DELETED"),
+        "STUB_DOCKER_LOG": str(tmp_path / "docker.log"),
+        "STUB_TAGS": str(tmp_path / "docker-tags"),
         "STUB_VMS": "mk-calibration",
     }
 
@@ -161,3 +190,178 @@ def test_an_empty_runs_directory_may_be_destroyed_and_discard_overrides(tmp_path
     _write_run(env)
     result = _run(env, "destroy", "--discard")
     assert result.returncode == 0 and _deleted(env)
+
+
+TAG = "memkernel-calibration:12a3ff3b60e3"
+IMAGE_ID = "sha256:" + "ba4dc322" * 8  # the image the archive carries
+OTHER_ID = "sha256:" + "f97e82e2" * 8  # another build of the same commit: same tag, different ID
+
+
+def _saved_image(tmp_path: Path, **record: str | None) -> Path:
+    """A gzip archive and its save-image record; pass a field as None to leave it out."""
+    import gzip
+    import hashlib
+
+    archive = tmp_path / "image.tar.gz"
+    archive.write_bytes(gzip.compress(b"not a real image, the stub docker only drains it"))
+    fields = {"image": TAG, "image id": IMAGE_ID, "archive sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
+    fields.update(record)
+    lines = [f"{key}: {value}" for key, value in fields.items() if value is not None]
+    (tmp_path / "image.tar.gz.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return archive
+
+
+def _load_env(tmp_path: Path, loads_as: str = IMAGE_ID, selected: str | None = None) -> dict[str, str]:
+    """The archive loads as ``loads_as`` under TAG; ``selected`` is an image already selected under TAG."""
+    env = {**_env(tmp_path), "STUB_LOAD_TAG": TAG, "STUB_LOAD_ID": loads_as}
+    if selected is not None:
+        Path(env["STUB_TAGS"]).write_text(f"{TAG} {selected}\n", encoding="utf-8")
+        home = Path(env["STUB_GUEST_HOME"])
+        (home / ".calibration-image").write_text(selected + "\n", encoding="utf-8")
+        (home / ".calibration-tag").write_text(TAG + "\n", encoding="utf-8")
+    return env
+
+
+def _selected(env: dict[str, str]) -> str:
+    path = Path(env["STUB_GUEST_HOME"]) / ".calibration-image"
+    return path.read_text(encoding="utf-8").strip() if path.exists() else ""
+
+
+def _tag_points_at(env: dict[str, str]) -> str:
+    lines = Path(env["STUB_TAGS"]).read_text(encoding="utf-8").splitlines()
+    return next((line.split()[1] for line in lines if line.split()[0] == TAG), "")
+
+
+def _loaded(env: dict[str, str]) -> bool:
+    log = Path(env["STUB_DOCKER_LOG"])
+    return log.exists() and "load" in log.read_text(encoding="utf-8").split()
+
+
+def test_load_image_verifies_and_selects_by_image_id(tmp_path: Path) -> None:
+    env = _load_env(tmp_path)
+    archive = _saved_image(tmp_path)
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 0, result.stderr
+    assert _loaded(env) and _selected(env) == IMAGE_ID  # the immutable ID, not the tag
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        ({"image": None}, "no valid image tag"),
+        ({"image id": None}, "no valid image ID"),
+        ({"archive sha256": None}, "no valid archive sha256"),
+        ({"image id": "sha256:short"}, "no valid image ID"),
+        ({"archive sha256": "0" * 64}, "does not match its recorded sha256"),
+    ],
+)
+def test_load_image_refuses_an_incomplete_or_wrong_record_before_loading(
+    tmp_path: Path, record: dict[str, str | None], message: str
+) -> None:
+    env = _load_env(tmp_path, selected=OTHER_ID)
+    archive = _saved_image(tmp_path, **record)
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and message in result.stderr and "nothing was loaded" in result.stderr
+    assert not _loaded(env) and _selected(env) == OTHER_ID and _tag_points_at(env) == OTHER_ID
+
+
+def test_load_image_refuses_a_missing_record(tmp_path: Path) -> None:
+    """Review of #35: a missing sidecar used to skip every check and exit 0."""
+    env = _load_env(tmp_path)
+    archive = _saved_image(tmp_path)
+    (tmp_path / "image.tar.gz.txt").unlink()
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and "no record" in result.stderr and not _loaded(env)
+
+
+def test_a_rejected_load_that_moved_the_selected_tag_puts_it_back(tmp_path: Path) -> None:
+    """Review of #35: the selected image and the archive share a tag but not an ID. docker load moves the
+    tag; the ID check rejects the archive; the selection (by ID) and the tag must both end where they began."""
+    env = _load_env(tmp_path, loads_as=OTHER_ID, selected=IMAGE_ID)
+    archive = _saved_image(tmp_path)  # records IMAGE_ID, but the archive actually carries OTHER_ID
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and "is not the recorded" in result.stderr
+    assert "loaded or partly loaded and is rejected" in result.stderr and "nothing was loaded" not in result.stderr
+    assert _loaded(env)
+    assert _selected(env) == IMAGE_ID and _tag_points_at(env) == IMAGE_ID  # nothing ends up pointing elsewhere
+
+
+def test_runs_use_the_selected_id_even_if_the_tag_moves(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    Path(env["STUB_TAGS"]).write_text(f"{TAG} {OTHER_ID}\n{TAG}-old {IMAGE_ID}\n", encoding="utf-8")
+    result = _run(env, "save-image", str(tmp_path / "out.tar.gz"))  # the tag no longer points at the selection
+    assert result.returncode == 1 and "no longer points at the selected image" in result.stderr
+
+
+def test_load_image_refuses_a_copy_that_differs_inside_the_vm(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=OTHER_ID)
+    archive = _saved_image(tmp_path)
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "limactl"
+    stub.write_text(  # the host -> guest copy arrives altered
+        stub.read_text(encoding="utf-8").replace(
+            'cp -R "$1" "$STUB_GUEST_HOME/${2#*:}" || exit $?',
+            'cp -R "$1" "$STUB_GUEST_HOME/${2#*:}" || exit $?; echo x >> "$STUB_GUEST_HOME/${2#*:}"',
+        ),
+        encoding="utf-8",
+    )
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and not _loaded(env)
+    assert _selected(env) == OTHER_ID and _tag_points_at(env) == OTHER_ID
+
+
+def test_an_older_tag_selection_is_pinned_to_its_id_once(tmp_path: Path) -> None:
+    env = _load_env(tmp_path)
+    Path(env["STUB_TAGS"]).write_text(f"{TAG} {IMAGE_ID}\n", encoding="utf-8")
+    (Path(env["STUB_GUEST_HOME"]) / ".calibration-image").write_text(TAG + "\n", encoding="utf-8")  # old format
+    _run(env, "save-image", str(tmp_path / "pinned.tar.gz"))  # the stub has no docker save; pinning is the test
+    assert _selected(env) == IMAGE_ID  # resolved and stored by ID before anything else
+
+
+@pytest.mark.parametrize("legacy", [False, True], ids=["selected-by-id", "legacy-tag-selection"])
+def test_a_load_that_moves_the_shared_tag_and_then_fails_keeps_the_original_selection(
+    tmp_path: Path, legacy: bool
+) -> None:
+    """Review of #35: docker load repoints the shared tag, then exits 17. The selection must stay the original
+    image (a legacy tag-format selection is pinned to its ID before loading) and the tag must point back at it."""
+    env = {**_load_env(tmp_path, loads_as=OTHER_ID, selected=IMAGE_ID), "STUB_LOAD_EXIT": "17"}
+    if legacy:
+        (Path(env["STUB_GUEST_HOME"]) / ".calibration-image").write_text(TAG + "\n", encoding="utf-8")
+        (Path(env["STUB_GUEST_HOME"]) / ".calibration-tag").unlink()
+    archive = _saved_image(tmp_path)
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and "docker load failed" in result.stderr
+    assert "loaded or partly loaded and is rejected" in result.stderr
+    assert _loaded(env)
+    assert _selected(env) == IMAGE_ID  # by ID, also for the legacy selection, which still names the moved tag
+    assert _tag_points_at(env) == IMAGE_ID  # the shared tag was put back
+
+
+def _removed(env: dict[str, str]) -> list[str]:
+    log = Path(env["STUB_DOCKER_LOG"])
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return [line.split()[1] for line in lines if line.startswith("rm ")]
+
+
+def test_a_successful_load_moves_the_selection_to_the_new_id(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, loads_as=IMAGE_ID, selected=OTHER_ID)  # another image is selected before
+    archive = _saved_image(tmp_path)
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 0, result.stderr
+    assert _selected(env) == IMAGE_ID and _tag_points_at(env) == IMAGE_ID and _removed(env) == []
+
+
+def test_a_rejected_load_removes_the_image_it_put_under_the_tag_by_id(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, loads_as=OTHER_ID, selected=IMAGE_ID)
+    archive = _saved_image(tmp_path)  # records IMAGE_ID; the archive carries OTHER_ID
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and f"removed the rejected image {OTHER_ID}" in result.stderr
+    assert _removed(env) == [OTHER_ID]  # by ID, not by tag
+    assert _selected(env) == IMAGE_ID and _tag_points_at(env) == IMAGE_ID
+
+
+def test_a_rejected_load_never_removes_the_selected_or_previous_image(tmp_path: Path) -> None:
+    env = {**_load_env(tmp_path, loads_as=IMAGE_ID, selected=IMAGE_ID), "STUB_LOAD_EXIT": "17"}
+    archive = _saved_image(tmp_path)  # the failed load put the already-selected image under the tag
+    result = _run(env, "load-image", str(archive))
+    assert result.returncode == 1 and _removed(env) == []
+    assert _selected(env) == IMAGE_ID

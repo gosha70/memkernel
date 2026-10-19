@@ -1,0 +1,10 @@
+{
+  "task_id": "wiring-wiki-bridge",
+  "group": "lc-wiki",
+  "kind": "wiring",
+  "sessions": [
+    {"steps": [{"stage": "exposure", "prompt": "wiring check: no agent runs; the check drives the MCP tools itself"}]},
+    {"namespace": "second", "steps": [{"stage": "evaluation", "prompt": "wiring check: no agent runs"}]}
+  ],
+  "shared_artifact": "knowledge/wiki"
+}

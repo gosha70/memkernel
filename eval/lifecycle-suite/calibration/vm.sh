@@ -12,6 +12,11 @@
 #   vm.sh calibrate         ask again, then the paid calibration run
 #   vm.sh fetch [DEST]      copy the VM's runs directory to DEST on your Mac (default ./calibration-runs)
 #                           and verify the copy file by file (sha256); run it after every run, failed ones too
+#   vm.sh save-image [FILE] copy the built image out of the VM as a verified .tar.gz on your Mac
+#                           (default ~/memkernel-calibration-image-<image id 12>.tar.gz)
+#   vm.sh load-image FILE   load a saved image into this VM and check its image ID
+#   vm.sh wiring            the credential-free wiki-bridge wiring check (task 18a): mounts
+#                           eval/lifecycle-suite/wiring/ read-only into the built image, runs it there
 #   vm.sh destroy           delete the VM; refuses while it holds runs that were not fetched and verified
 #   vm.sh destroy --discard delete the VM even so, throwing those runs away
 #
@@ -45,11 +50,27 @@ in_vm_stdin() {  # like in_vm, but the VM command reads this script's stdin
   limactl shell --workdir / "$vm" -- bash -lc "cd ~ && $1"
 }
 
-image_tag() {
-  in_vm "cat ~/.calibration-image" 2>/dev/null || {
-    echo "vm.sh: no image built yet; run: vm.sh build" >&2
+# The selected image is kept by its immutable ID in ~/.calibration-image (tag in ~/.calibration-tag, for
+# display and save-image only): loading another archive may repoint a tag, never an ID.
+selected_image() {
+  local value
+  value=$(in_vm "cat ~/.calibration-image" 2>/dev/null) || {
+    echo "vm.sh: no image selected yet; run: vm.sh build (or vm.sh load-image FILE)" >&2
     exit 1
   }
+  if [[ ! "$value" =~ ^sha256:[0-9a-f]{64}$ ]]; then  # an older vm.sh stored the tag: pin it to its ID once
+    local tag=$value
+    value=$(in_vm "docker image inspect --format '{{.Id}}' '$tag'") || {
+      echo "vm.sh: the selected tag $tag no longer resolves to an image" >&2
+      exit 1
+    }
+    in_vm "echo '$value' > ~/.calibration-image && echo '$tag' > ~/.calibration-tag"
+  fi
+  printf '%s\n' "$value"
+}
+
+selected_tag() {
+  in_vm "cat ~/.calibration-tag 2>/dev/null || true"
 }
 
 read_secrets() {  # prints the key and the workspace ID on two lines, for the VM's stdin only
@@ -63,7 +84,7 @@ read_secrets() {  # prints the key and the workspace ID on two lines, for the VM
 
 run_container() {  # $1 = run.sh mode; secrets arrive on stdin as two lines
   local tag
-  tag=$(image_tag)
+  tag=$(selected_image)
   limactl shell --workdir / "$vm" -- bash -lc "
     set -euo pipefail
     IFS= read -r ANTHROPIC_API_KEY || { echo 'vm.sh: no key arrived on stdin' >&2; exit 1; }
@@ -110,13 +131,102 @@ case "${1:-}" in
       cd ~/$guest_repo && git checkout --quiet '$sha'
       eval/lifecycle-suite/calibration/build.sh
       tag=memkernel-calibration:\$(git rev-parse HEAD | cut -c1-12)
-      echo \"\$tag\" > ~/.calibration-image
+      id=\$(docker image inspect --format '{{.Id}}' \"\$tag\")
+      echo \"\$id\" > ~/.calibration-image
+      echo \"\$tag\" > ~/.calibration-tag
       echo \"image: \$tag\"
-      echo \"image id: \$(docker image inspect --format '{{.Id}}' \"\$tag\")\"
+      echo \"image id: \$id\"
       docker run --rm --entrypoint sh \"\$tag\" -c 'grep \"^#\" /opt/environment.txt'"
     ;;
+  save-image)
+    id=$(selected_image)
+    tag=$(selected_tag)
+    [ -n "$tag" ] || { echo "vm.sh: the selected image has no recorded tag" >&2; exit 1; }
+    if [ "$(in_vm "docker image inspect --format '{{.Id}}' '$tag'")" != "$id" ]; then
+      echo "vm.sh: the tag $tag no longer points at the selected image $id; not saving" >&2
+      exit 1
+    fi
+    id12=$(printf '%s' "${id#sha256:}" | cut -c1-12)
+    out=${2:-$HOME/memkernel-calibration-image-$id12.tar.gz}
+    in_vm "set -euo pipefail; docker save '$tag' | gzip -1 > ~/calibration-image.tar.gz; sha256sum ~/calibration-image.tar.gz | cut -d' ' -f1 > ~/calibration-image.sha256"
+    limactl copy "$vm:calibration-image.tar.gz" "$out"
+    remote_sum=$(in_vm "cat ~/calibration-image.sha256")
+    local_sum=$(shasum -a 256 "$out" | cut -d' ' -f1)
+    if [ "$remote_sum" != "$local_sum" ]; then
+      echo "vm.sh: the saved image does not match the VM's copy; keep the VM and retry" >&2
+      exit 1
+    fi
+    printf '%s\n%s\n%s\n' "image: $tag" "image id: $id" "archive sha256: $local_sum" > "$out.txt"
+    echo "saved $tag ($id) to $out, verified (sha256 $local_sum); details in $out.txt"
+    ;;
+  load-image)
+    file=${2:?usage: vm.sh load-image FILE   (FILE.txt from save-image must sit next to it)}
+    meta="$file.txt"
+    fail() { echo "vm.sh: $1; nothing was loaded and the selected image is unchanged" >&2; exit 1; }  # before docker load
+    [ -f "$file" ] || fail "no archive at $file"
+    [ -f "$meta" ] || fail "no record at $meta (written by save-image)"
+    tag=$(sed -n 's/^image: //p' "$meta")
+    expected=$(sed -n 's/^image id: //p' "$meta")
+    archive_sum=$(sed -n 's/^archive sha256: //p' "$meta")
+    [[ "$tag" =~ ^memkernel-calibration:[0-9a-f]{12}$ ]] || fail "the record has no valid image tag"
+    [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the record has no valid image ID"
+    [[ "$archive_sum" =~ ^[0-9a-f]{64}$ ]] || fail "the record has no valid archive sha256"
+    [ "$(shasum -a 256 "$file" | cut -d' ' -f1)" = "$archive_sum" ] || fail "the archive does not match its recorded sha256"
+    # Before anything moves: pin an existing selection to its immutable ID (an older vm.sh stored a tag, which a
+    # load could repoint), and note the image the tag points at now, to put it back if the load is rejected.
+    if in_vm "test -s ~/.calibration-image"; then
+      selected_image > /dev/null
+    fi
+    previous=$(in_vm "docker image inspect --format '{{.Id}}' '$tag' 2>/dev/null || true")
+    limactl copy "$file" "$vm:calibration-image.tar.gz"
+    in_vm "set -euo pipefail
+      [ \"\$(sha256sum ~/calibration-image.tar.gz | cut -d' ' -f1)\" = '$archive_sum' ]" \
+      || fail "the copy in the VM does not match the recorded sha256"
+    # From here docker load may have moved $tag: every failure restores the tag's previous image.
+    after_load() {
+      local moved_to cleanup="" selected=""
+      moved_to=$(in_vm "docker image inspect --format '{{.Id}}' '$tag' 2>/dev/null || true")
+      selected=$(in_vm "cat ~/.calibration-image 2>/dev/null || true")
+      if [ -n "$previous" ]; then
+        in_vm "docker tag '$previous' '$tag'" && restored="the tag $tag points at its previous image $previous again" \
+          || restored="restoring the tag $tag to $previous FAILED"
+      else
+        restored="the tag $tag did not exist before this load"
+      fi
+      # The image the failed load put under the tag is removed by ID, never by tag, and never the previous or
+      # selected image; no force, so docker refuses if anything still uses it.
+      if [ -n "$moved_to" ] && [ "$moved_to" != "$previous" ] && [ "$moved_to" != "$selected" ]; then
+        if in_vm "docker image rm '$moved_to' > /dev/null"; then
+          cleanup="; removed the rejected image $moved_to"
+        else
+          cleanup="; could not remove the rejected image $moved_to (remove it by ID: docker image rm $moved_to)"
+        fi
+      fi
+      echo "vm.sh: $1; the archive was loaded or partly loaded and is rejected; $restored$cleanup; the selected image (kept by ID) is unchanged; untagged layers a failed load leaves behind can be removed with: docker image prune" >&2
+      exit 1
+    }
+    in_vm "set -euo pipefail; gunzip -c ~/calibration-image.tar.gz | docker load" || after_load "docker load failed"
+    id=$(in_vm "docker image inspect --format '{{.Id}}' '$tag'") || after_load "the VM has no image $tag after loading"
+    [ "$id" = "$expected" ] || after_load "the loaded image ID $id is not the recorded $expected"
+    in_vm "echo '$id' > ~/.calibration-image && echo '$tag' > ~/.calibration-tag"   # select only after every check
+    echo "loaded and verified $tag ($id)"
+    ;;
+  wiring)
+    tag=$(selected_image)
+    here=$(cd "$(dirname "$0")/.." && pwd)/wiring
+    in_vm "rm -rf ~/wiring"
+    limactl copy -r "$here" "$vm:wiring"
+    check_sha=$(shasum -a 256 "$here/wiring_check.py" | cut -d' ' -f1)
+    echo "image: $(selected_tag)"
+    echo "image id: $tag"
+    echo "image code: $(in_vm "docker run --rm --entrypoint sh '$tag' -c 'echo \$CODE_SHA'")"
+    echo "check: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown) wiring_check.py sha256 $check_sha"
+    in_vm "docker run $docker_flags --entrypoint /opt/mk-venv/bin/python -v \$HOME/wiring:/check:ro '$tag' \
+      /check/wiring_check.py --suite /opt/memkernel/eval/lifecycle-suite \
+      --memkernel-cmd /opt/mk-venv/bin/memkernel --python /opt/mk-venv/bin/python --shared-cache /opt/cache"
+    ;;
   demo)
-    tag=$(image_tag)
+    tag=$(selected_image)
     in_vm "docker run $docker_flags '$tag' demo"
     ;;
   preflight)
