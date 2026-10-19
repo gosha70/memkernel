@@ -74,7 +74,9 @@ def test_a_transfer_that_leaks_more_than_the_wiki_fails_the_check(monkeypatch: p
     assert _steps(report)["only knowledge/wiki/ crossed over"] is False
 
 
-def _transfer(tmp_path: Path, *, leak: bool = False, edit_readme: bool = False, export: bool = True) -> dict[str, Any]:
+def _transfer(
+    tmp_path: Path, *, leak: bool = False, edit_readme: bool = False, drop_readme: bool = False, export: bool = True
+) -> dict[str, Any]:
     """Source session on the fixture, a page written as wiki_export would, then the runner's transfer."""
     check = _check_module()
     sys.path.insert(0, str(SUITE_DIR))
@@ -96,12 +98,14 @@ def _transfer(tmp_path: Path, *, leak: bool = False, edit_readme: bool = False, 
         shutil.copy(source.workspace / check.NOTES, destination.workspace / check.NOTES)
     if edit_readme:
         (destination.workspace / "README.md").write_text("changed\n", encoding="utf-8")
+    if drop_readme:
+        (destination.workspace / "README.md").unlink()
     return check.transfer_findings(task.tree, destination.workspace, runner.WIKI_DIR)
 
 
 def test_a_clean_transfer_carries_only_the_wiki(tmp_path: Path) -> None:
     findings = _transfer(tmp_path)
-    assert findings["only_wiki_crossed"] and not findings["changed_outside_wiki"]
+    assert findings["only_wiki_crossed"] and not findings["changed_outside_wiki"] and not findings["missing"]
     assert findings["crossed"] == ["knowledge/wiki/decisions/wiring-fact.md"]
 
 
@@ -113,6 +117,11 @@ def test_a_leaked_file_fails_the_transfer_judgement(tmp_path: Path) -> None:
 def test_a_changed_fixture_file_outside_the_wiki_is_reported(tmp_path: Path) -> None:
     findings = _transfer(tmp_path, edit_readme=True)
     assert findings["changed_outside_wiki"] == ["README.md"]
+
+
+def test_a_fixture_file_missing_from_the_destination_is_reported_not_raised(tmp_path: Path) -> None:
+    findings = _transfer(tmp_path, drop_readme=True)
+    assert findings["missing"] == ["README.md"] and findings["changed_outside_wiki"] == []
 
 
 def test_a_transfer_that_carries_nothing_fails(tmp_path: Path) -> None:

@@ -14,7 +14,8 @@ or outcome is touched. The steps:
    then ``wiki_export``; the store then holds exactly 1 record;
 2. transfer: the runner's own ``prepare_session`` builds the destination workspace
    under the memkernel arm's frozen rule; only ``knowledge/wiki/`` may differ
-   from the fixture (a ``NOTES.md`` written in the source workspace must not cross);
+   from the fixture, and no fixture file may be missing (a ``NOTES.md`` written in the
+   source workspace must not cross);
 3. destination namespace: the store holds 0 records (counted through memkernel's
    library, not inferred from search) and ``recall`` finds nothing; ``wiki_import``;
    the store then holds exactly the imported pages; ``recall`` finds the page and
@@ -64,20 +65,29 @@ def transfer_findings(fixture_tree: Path, destination: Path, wiki_dir: str) -> d
     """What crossed into the destination workspace, judged against the fixture alone (no server, no image).
 
     ``only_wiki_crossed`` holds when something crossed and everything that crossed lies under ``wiki_dir``
-    (so the source workspace's ``NOTES.md`` must not); ``changed_outside_wiki`` lists fixture files outside
-    the wiki whose bytes differ.
+    (so the source workspace's ``NOTES.md`` must not); ``missing`` lists fixture files absent from the
+    destination; ``changed_outside_wiki`` lists fixture files outside the wiki whose bytes differ.
+
+    It does not judge what lies under ``wiki_dir``: the memkernel arm's frozen rule carries that directory over
+    whole, by design, so a stray file written there would cross and still pass.
     """
     fixture_files = _files(fixture_tree)
     destination_files = _files(destination)
     crossed = sorted(destination_files - fixture_files)
+    missing = sorted(fixture_files - destination_files)
     wiki_prefix = wiki_dir + "/"
     changed_outside_wiki = sorted(
         rel
-        for rel in fixture_files
+        for rel in fixture_files & destination_files
         if not rel.startswith(wiki_prefix) and (destination / rel).read_bytes() != (fixture_tree / rel).read_bytes()
     )
     only_wiki = bool(crossed) and all(p.startswith(wiki_prefix) for p in crossed)
-    return {"crossed": crossed, "only_wiki_crossed": only_wiki, "changed_outside_wiki": changed_outside_wiki}
+    return {
+        "crossed": crossed,
+        "only_wiki_crossed": only_wiki,
+        "missing": missing,
+        "changed_outside_wiki": changed_outside_wiki,
+    }
 
 
 def _server_env(namespace_env: dict[str, str]) -> dict[str, str]:
@@ -183,6 +193,7 @@ def run_check(suite: Path, memkernel_cmd: str, python: str, shared_cache: Path |
             task, arm, 1, chain, runner.ChainState(workspace=source.workspace, transcripts=[])
         )
         findings = transfer_findings(task.tree, destination.workspace, runner.WIKI_DIR)
+        step("every fixture file is in the destination", not findings["missing"], missing=findings["missing"])
         step(
             "fixture files outside knowledge/wiki/ are byte-identical",
             not findings["changed_outside_wiki"],

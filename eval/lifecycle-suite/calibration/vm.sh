@@ -16,7 +16,9 @@
 #                           (default ~/memkernel-calibration-image-<image id 12>.tar.gz)
 #   vm.sh load-image FILE   load a saved image into this VM and check its image ID
 #   vm.sh wiring            the credential-free wiki-bridge wiring check (task 18a): mounts
-#                           eval/lifecycle-suite/wiring/ read-only into the built image, runs it there
+#                           eval/lifecycle-suite/wiring/ at this checkout's commit (refused when it has
+#                           uncommitted changes) read-only into the built image, runs it there; refuses
+#                           when the rest of eval/lifecycle-suite/ differs from the image's commit
 #   vm.sh destroy           delete the VM; refuses while it holds runs that were not fetched and verified
 #   vm.sh destroy --discard delete the VM even so, throwing those runs away
 #
@@ -71,6 +73,11 @@ selected_image() {
 
 selected_tag() {
   in_vm "cat ~/.calibration-tag 2>/dev/null || true"
+}
+
+remove_vm_archive() {  # EXIT trap of save-image and load-image: the archive (~3 GB) never outlives the command
+  in_vm "rm -f ~/calibration-image.tar.gz ~/calibration-image.sha256" \
+    || echo "vm.sh: could not remove ~/calibration-image.tar.gz in the VM; remove it: limactl shell $vm rm -f calibration-image.tar.gz" >&2
 }
 
 read_secrets() {  # prints the key and the workspace ID on two lines, for the VM's stdin only
@@ -148,6 +155,7 @@ case "${1:-}" in
     fi
     id12=$(printf '%s' "${id#sha256:}" | cut -c1-12)
     out=${2:-$HOME/memkernel-calibration-image-$id12.tar.gz}
+    trap remove_vm_archive EXIT
     in_vm "set -euo pipefail; docker save '$tag' | gzip -1 > ~/calibration-image.tar.gz; sha256sum ~/calibration-image.tar.gz | cut -d' ' -f1 > ~/calibration-image.sha256"
     limactl copy "$vm:calibration-image.tar.gz" "$out"
     remote_sum=$(in_vm "cat ~/calibration-image.sha256")
@@ -178,6 +186,7 @@ case "${1:-}" in
       selected_image > /dev/null
     fi
     previous=$(in_vm "docker image inspect --format '{{.Id}}' '$tag' 2>/dev/null || true")
+    trap remove_vm_archive EXIT
     limactl copy "$file" "$vm:calibration-image.tar.gz"
     in_vm "set -euo pipefail
       [ \"\$(sha256sum ~/calibration-image.tar.gz | cut -d' ' -f1)\" = '$archive_sum' ]" \
@@ -214,13 +223,41 @@ case "${1:-}" in
   wiring)
     tag=$(selected_image)
     here=$(cd "$(dirname "$0")/.." && pwd)/wiring
+    # The output ticks task 18a, so the check that runs must be exactly one commit's: refuse uncommitted changes,
+    # and copy that commit's files (git archive), not the working tree with whatever is ignored or untracked in it.
+    commit=$(git -C "$here" rev-parse HEAD) || { echo "vm.sh: $here is not in a git checkout" >&2; exit 1; }
+    if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
+      echo "vm.sh: $here has uncommitted changes; commit or stash them, so the check is exactly commit $commit:" >&2
+      git -C "$here" status --short -- . >&2
+      exit 1
+    fi
+    # The check runs the image's runner, arm and task code through internal functions: that code must be what
+    # the check was written against. Only wiring/ (mounted from here) and calibration/ (not on the check's path,
+    # the entrypoint is overridden) may differ between the image's commit and this one.
+    code=$(in_vm "docker run --rm --entrypoint sh '$tag' -c 'echo \$CODE_SHA'")
+    suite=$(dirname "$here")
+    if ! git -C "$suite" cat-file -e "$code^{commit}" 2>/dev/null; then
+      echo "vm.sh: the image's commit '$code' is not in this checkout (git fetch?); cannot compare the runner" >&2
+      exit 1
+    fi
+    drift=$(git -C "$suite" diff --name-only "$code" HEAD -- . ':(exclude)wiring' ':(exclude)calibration')
+    if [ -n "$drift" ]; then
+      echo "vm.sh: eval/lifecycle-suite/ differs between the image's commit $code and $commit outside wiring/ and" \
+        "calibration/; the check would not test the code it was written against:" >&2
+      printf '%s\n' "$drift" >&2
+      exit 1
+    fi
+    staged=$(mktemp -d)
+    trap 'rm -rf "$staged"' EXIT
+    git -C "$here" archive HEAD | tar -x -C "$staged"   # run from wiring/, git archive takes only that directory
     in_vm "rm -rf ~/wiring"
-    limactl copy -r "$here" "$vm:wiring"
-    check_sha=$(shasum -a 256 "$here/wiring_check.py" | cut -d' ' -f1)
+    limactl copy -r "$staged" "$vm:wiring"
+    check_sha=$(shasum -a 256 "$staged/wiring_check.py" | cut -d' ' -f1)
     echo "image: $(selected_tag)"
     echo "image id: $tag"
-    echo "image code: $(in_vm "docker run --rm --entrypoint sh '$tag' -c 'echo \$CODE_SHA'")"
-    echo "check: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown) wiring_check.py sha256 $check_sha"
+    echo "image code: $code"
+    echo "check: commit $commit (clean, copied with git archive) wiring_check.py sha256 $check_sha"
+    echo "runner: eval/lifecycle-suite/ outside wiring/ and calibration/ is identical at $code and $commit"
     in_vm "docker run $docker_flags --entrypoint /opt/mk-venv/bin/python -v \$HOME/wiring:/check:ro '$tag' \
       /check/wiring_check.py --suite /opt/memkernel/eval/lifecycle-suite \
       --memkernel-cmd /opt/mk-venv/bin/memkernel --python /opt/mk-venv/bin/python --shared-cache /opt/cache"

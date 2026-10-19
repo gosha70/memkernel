@@ -84,6 +84,9 @@ def _env(tmp_path: Path, *, sudo: str = "run") -> dict[str, str]:
         '  image) if [ "$2" = rm ]; then grep -v " $3$" "$tags" > "$tags.new"; mv "$tags.new" "$tags"; '
         'echo "rm $3" >> "$STUB_DOCKER_LOG"; exit 0; fi; '
         'id=$(lookup "${@: -1}"); [ -n "$id" ] || exit 1; echo "$id";;\n'
+        '  save) echo "save $2" >> "$STUB_DOCKER_LOG"; echo "image bytes of $2";;\n'
+        '  run) echo "run $*" >> "$STUB_DOCKER_LOG"; '
+        'if [[ "$*" == *CODE_SHA* ]]; then echo "${STUB_CODE_SHA:-unknown}"; else echo "stub run"; fi;;\n'
         "  *) exit 98;;\n"
         "esac\n",
         encoding="utf-8",
@@ -365,3 +368,140 @@ def test_a_rejected_load_never_removes_the_selected_or_previous_image(tmp_path: 
     result = _run(env, "load-image", str(archive))
     assert result.returncode == 1 and _removed(env) == []
     assert _selected(env) == IMAGE_ID
+
+
+def _vm_archive(env: dict[str, str]) -> bool:
+    home = Path(env["STUB_GUEST_HOME"])
+    return (home / "calibration-image.tar.gz").exists() or (home / "calibration-image.sha256").exists()
+
+
+def test_save_image_verifies_the_copy_and_removes_the_archive_from_the_vm(tmp_path: Path) -> None:
+    """Review of #36: the VM's disk is small; the ~3 GB archive must not stay in it."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    out = tmp_path / "saved.tar.gz"
+    result = _run(env, "save-image", str(out))
+    assert result.returncode == 0, result.stderr
+    assert "verified" in result.stdout and out.exists() and f"image id: {IMAGE_ID}" in Path(f"{out}.txt").read_text()
+    assert not _vm_archive(env)
+
+
+def test_load_image_removes_the_archive_from_the_vm_whether_it_loads_or_not(tmp_path: Path) -> None:
+    accepted = _load_env(tmp_path / "a")
+    assert _run(accepted, "load-image", str(_saved_image(tmp_path / "a"))).returncode == 0
+    rejected = _load_env(tmp_path / "r", loads_as=OTHER_ID, selected=IMAGE_ID)
+    assert _run(rejected, "load-image", str(_saved_image(tmp_path / "r"))).returncode == 1
+    assert not _vm_archive(accepted) and not _vm_archive(rejected)
+
+
+def _git(repo: Path) -> list[str]:
+    return ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+
+
+def _commit(repo: Path) -> str:
+    subprocess.run([*_git(repo), "add", "-A"], check=True)
+    subprocess.run([*_git(repo), "commit", "-q", "-m", "change"], check=True)
+    return _head(repo)
+
+
+def _wiring_checkout(tmp_path: Path) -> Path:
+    """A suite checkout holding runner.py, vm.sh and a committed wiring/ directory, plus an ignored file in it."""
+    repo = tmp_path / "repo"
+    (repo / "calibration").mkdir(parents=True)
+    (repo / "wiring" / "fixture").mkdir(parents=True)
+    shutil.copy(VM_SH, repo / "calibration" / "vm.sh")
+    (repo / "wiring" / "wiring_check.py").write_text("print('check')\n", encoding="utf-8")
+    (repo / "wiring" / "fixture" / "task.json").write_text("{}\n", encoding="utf-8")
+    (repo / "runner.py").write_text("RUNNER = 1\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(".DS_Store\n", encoding="utf-8")
+    subprocess.run([*_git(repo), "init", "-q"], check=True)
+    _commit(repo)
+    (repo / "wiring" / "fixture" / ".DS_Store").write_text("ignored, must not be copied\n", encoding="utf-8")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return subprocess.run([*_git(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _run_wiring(env: dict[str, str], repo: Path, image_commit: str | None = None) -> subprocess.CompletedProcess[str]:
+    """``image_commit`` is the CODE_SHA the stub image reports; by default the checkout's HEAD."""
+    return subprocess.run(
+        ["bash", str(repo / "calibration" / "vm.sh"), "wiring"],
+        env={**env, "HOME": str(repo.parent), "STUB_CODE_SHA": image_commit or _head(repo)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+def test_wiring_runs_exactly_the_committed_check_and_names_its_commit(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo = _wiring_checkout(tmp_path)
+    commit = _head(repo)
+    result = _run_wiring(env, repo)
+    assert result.returncode == 0, result.stderr
+    assert f"check: commit {commit} (clean" in result.stdout
+    copied = Path(env["STUB_GUEST_HOME"]) / "wiring"
+    assert sorted(p.relative_to(copied).as_posix() for p in copied.rglob("*") if p.is_file()) == [
+        "fixture/task.json",
+        "wiring_check.py",
+    ]
+    assert f"/check:ro {IMAGE_ID}" in Path(env["STUB_DOCKER_LOG"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+@pytest.mark.parametrize("change", ["edit", "untracked"])
+def test_wiring_refuses_uncommitted_changes_to_the_check(tmp_path: Path, change: str) -> None:
+    """Review of #36: the output ticks task 18a, so it must not name a commit the check does not match."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo = _wiring_checkout(tmp_path)
+    if change == "edit":
+        (repo / "wiring" / "wiring_check.py").write_text("print('edited')\n", encoding="utf-8")
+    else:
+        (repo / "wiring" / "fixture" / "extra.md").write_text("new\n", encoding="utf-8")
+    result = _run_wiring(env, repo)
+    assert result.returncode == 1 and "uncommitted changes" in result.stderr
+    assert not _check_ran(env)
+
+
+def _check_ran(env: dict[str, str]) -> bool:
+    log = Path(env["STUB_DOCKER_LOG"])
+    copied = (Path(env["STUB_GUEST_HOME"]) / "wiring").exists()
+    return copied or (log.exists() and "/check:ro" in log.read_text(encoding="utf-8"))
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+def test_wiring_runs_when_only_wiring_and_calibration_changed_since_the_image(tmp_path: Path) -> None:
+    """The real case: the image predates the check, and vm.sh changed with it; the runner did not."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo = _wiring_checkout(tmp_path)
+    image_commit = _head(repo)
+    (repo / "wiring" / "wiring_check.py").write_text("print('newer check')\n", encoding="utf-8")
+    (repo / "calibration" / "notes.md").write_text("vm.sh changed too\n", encoding="utf-8")
+    _commit(repo)
+    result = _run_wiring(env, repo, image_commit)
+    assert result.returncode == 0, result.stderr
+    assert f"image code: {image_commit}" in result.stdout and "is identical at" in result.stdout and _check_ran(env)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+def test_wiring_refuses_when_the_runner_differs_from_the_image(tmp_path: Path) -> None:
+    """Review of #36: the check calls the image's runner internals; a newer check on an older runner is refused."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo = _wiring_checkout(tmp_path)
+    image_commit = _head(repo)
+    (repo / "runner.py").write_text("RUNNER = 2\n", encoding="utf-8")
+    _commit(repo)
+    result = _run_wiring(env, repo, image_commit)
+    assert result.returncode == 1 and "differs between the image's commit" in result.stderr
+    assert "runner.py" in result.stderr and not _check_ran(env)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+def test_wiring_refuses_an_image_commit_this_checkout_does_not_have(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo = _wiring_checkout(tmp_path)
+    result = _run_wiring(env, repo, "0" * 40)
+    assert result.returncode == 1 and "is not in this checkout" in result.stderr and not _check_ran(env)
