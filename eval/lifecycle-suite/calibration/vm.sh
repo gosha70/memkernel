@@ -54,6 +54,16 @@ in_vm_stdin() {  # like in_vm, but the VM command reads this script's stdin
 
 # The selected image is kept by its immutable ID in ~/.calibration-image (tag in ~/.calibration-tag, for
 # display and save-image only): loading another archive may repoint a tag, never an ID.
+# Guest shell: select_image ID TAG replaces each file by a rename, never rewriting one in place (an empty value
+# removes it); the ID file goes last, since it alone decides what later commands run.
+select_sh='select_image() ( cd ~ && for kv in ".calibration-tag=$2" ".calibration-image=$1"; do
+  f=${kv%%=*}; v=${kv#*=}
+  if [ -n "$v" ]; then printf "%s\n" "$v" > "$f.new" && mv -f "$f.new" "$f" || exit 1; else rm -f "$f" || exit 1; fi
+done )'
+set_selection() {  # $1 image ID, $2 tag
+  in_vm "$select_sh; select_image '$1' '$2'"
+}
+
 selected_image() {
   local value
   value=$(in_vm "cat ~/.calibration-image" 2>/dev/null) || {
@@ -66,7 +76,7 @@ selected_image() {
       echo "vm.sh: the selected tag $tag no longer resolves to an image" >&2
       exit 1
     }
-    in_vm "echo '$value' > ~/.calibration-image && echo '$tag' > ~/.calibration-tag"
+    set_selection "$value" "$tag" || { echo "vm.sh: could not pin the selected tag $tag to $value" >&2; exit 1; }
   fi
   printf '%s\n' "$value"
 }
@@ -139,8 +149,8 @@ case "${1:-}" in
       eval/lifecycle-suite/calibration/build.sh
       tag=memkernel-calibration:\$(git rev-parse HEAD | cut -c1-12)
       id=\$(docker image inspect --format '{{.Id}}' \"\$tag\")
-      echo \"\$id\" > ~/.calibration-image
-      echo \"\$tag\" > ~/.calibration-tag
+      $select_sh
+      select_image \"\$id\" \"\$tag\"
       echo \"image: \$tag\"
       echo \"image id: \$id\"
       docker run --rm --entrypoint sh \"\$tag\" -c 'grep \"^#\" /opt/environment.txt'"
@@ -186,6 +196,8 @@ case "${1:-}" in
       selected_image > /dev/null
     fi
     previous=$(in_vm "docker image inspect --format '{{.Id}}' '$tag' 2>/dev/null || true")
+    previous_selection=$(in_vm "cat ~/.calibration-image 2>/dev/null || true")
+    previous_selection_tag=$(in_vm "cat ~/.calibration-tag 2>/dev/null || true")
     trap remove_vm_archive EXIT
     limactl copy "$file" "$vm:calibration-image.tar.gz"
     in_vm "set -euo pipefail
@@ -211,13 +223,20 @@ case "${1:-}" in
           cleanup="; could not remove the rejected image $moved_to (remove it by ID: docker image rm $moved_to)"
         fi
       fi
-      echo "vm.sh: $1; the archive was loaded or partly loaded and is rejected; $restored$cleanup; the selected image (kept by ID) is unchanged; untagged layers a failed load leaves behind can be removed with: docker image prune" >&2
+      echo "vm.sh: $1; the archive was loaded or partly loaded and is rejected; $restored$cleanup; the selected image is ${selected:-none}; untagged layers a failed load leaves behind can be removed with: docker image prune" >&2
       exit 1
     }
     in_vm "set -euo pipefail; gunzip -c ~/calibration-image.tar.gz | docker load" || after_load "docker load failed"
     id=$(in_vm "docker image inspect --format '{{.Id}}' '$tag'") || after_load "the VM has no image $tag after loading"
     [ "$id" = "$expected" ] || after_load "the loaded image ID $id is not the recorded $expected"
-    in_vm "echo '$id' > ~/.calibration-image && echo '$tag' > ~/.calibration-tag"   # select only after every check
+    if ! set_selection "$id" "$tag"; then   # select only after every check; a failure here rolls back too
+      if set_selection "$previous_selection" "$previous_selection_tag"; then
+        selection="the previous selection is restored"
+      else
+        selection="restoring the previous selection FAILED; check ~/.calibration-image and ~/.calibration-tag in the VM"
+      fi
+      after_load "could not record $id as the selection ($selection)"
+    fi
     echo "loaded and verified $tag ($id)"
     ;;
   wiring)
@@ -249,9 +268,11 @@ case "${1:-}" in
     fi
     staged=$(mktemp -d)
     trap 'rm -rf "$staged"' EXIT
+    chmod 755 "$staged"   # mktemp makes it 0700; the container runs as uid 1000, not as the VM user it maps to
     git -C "$here" archive HEAD | tar -x -C "$staged"   # run from wiring/, git archive takes only that directory
     in_vm "rm -rf ~/wiring"
     limactl copy -r "$staged" "$vm:wiring"
+    in_vm "chmod -R a+rX ~/wiring"   # readable by the container user, whatever modes the copy kept
     check_sha=$(shasum -a 256 "$staged/wiring_check.py" | cut -d' ' -f1)
     echo "image: $(selected_tag)"
     echo "image id: $tag"

@@ -505,3 +505,50 @@ def test_wiring_refuses_an_image_commit_this_checkout_does_not_have(tmp_path: Pa
     repo = _wiring_checkout(tmp_path)
     result = _run_wiring(env, repo, "0" * 40)
     assert result.returncode == 1 and "is not in this checkout" in result.stderr and not _check_ran(env)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="wiring copies a git commit")
+def test_wiring_leaves_the_check_readable_by_a_container_user_other_than_the_owner(tmp_path: Path) -> None:
+    """Review of #36: mktemp -d is 0700, and the image runs as uid 1000, not the VM user rootless Docker maps."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    result = _run_wiring(env, _wiring_checkout(tmp_path))
+    assert result.returncode == 0, result.stderr
+    copied = Path(env["STUB_GUEST_HOME"]) / "wiring"
+    for path in [copied, *copied.rglob("*")]:
+        need = 0o005 if path.is_dir() else 0o004  # others: read, and traverse for directories
+        assert path.stat().st_mode & need == need, f"{path.relative_to(copied)} is {oct(path.stat().st_mode)}"
+
+
+def _selection(env: dict[str, str]) -> tuple[str, str]:
+    home = Path(env["STUB_GUEST_HOME"])
+    tag = home / ".calibration-tag"
+    return _selected(env), tag.read_text(encoding="utf-8").strip() if tag.exists() else ""
+
+
+def test_a_read_only_selection_file_does_not_split_the_selection(tmp_path: Path) -> None:
+    """Review of #36: the ID file used to be rewritten first, then a read-only tag file failed the write."""
+    env = _load_env(tmp_path, loads_as=IMAGE_ID, selected=OTHER_ID)
+    (Path(env["STUB_GUEST_HOME"]) / ".calibration-tag").chmod(0o444)
+    result = _run(env, "load-image", str(_saved_image(tmp_path)))
+    assert result.returncode == 0, result.stderr
+    assert _selection(env) == (IMAGE_ID, TAG) and _tag_points_at(env) == IMAGE_ID
+
+
+def test_a_failure_recording_the_selection_rolls_the_load_back(tmp_path: Path) -> None:
+    """Review of #36: a failure after the checks, while recording the selection, must restore it and the tag."""
+    env = {**_load_env(tmp_path, loads_as=IMAGE_ID, selected=OTHER_ID), "STUB_MV_FAIL": str(tmp_path / "mv-fail")}
+    Path(env["STUB_MV_FAIL"]).touch()
+    guest_mv = Path(env["STUB_GUEST_PATH"].split(os.pathsep)[0]) / "mv"
+    guest_mv.write_text(  # the rename of the ID file fails once, after the tag file was already replaced
+        '#!/bin/bash\nif [ -e "$STUB_MV_FAIL" ] && [ "${@: -1}" = .calibration-image ]; then\n'
+        '  rm -f "$STUB_MV_FAIL"; exit 1\nfi\nexec /bin/mv "$@"\n',
+        encoding="utf-8",
+    )
+    guest_mv.chmod(0o755)
+    result = _run(env, "load-image", str(_saved_image(tmp_path)))
+    assert result.returncode == 1 and "could not record" in result.stderr
+    assert (
+        "the previous selection is restored" in result.stderr and f"the selected image is {OTHER_ID}" in result.stderr
+    )
+    assert _selection(env) == (OTHER_ID, TAG) and _tag_points_at(env) == OTHER_ID
+    assert _removed(env) == [IMAGE_ID]
