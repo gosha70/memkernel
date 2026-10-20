@@ -52,7 +52,8 @@ kept as `memkernel-calibration-image-ba4dc322d182.tar.gz`, with archive sha256
 - **No personal credentials:** `vm.sh check` showed no shared folders, no
   `/Users/…` path, no credential files, no SSH agent, no environment variables
   that look like secrets, and only Lima's own login key in `authorized_keys`.
-  The VM could reach services listening on the Mac.
+  This is not full isolation: the VM could reach services listening on the
+  Mac (open item 3).
 - **Workspace:** the dedicated Console workspace `memkernel-calibration`
   (`wrkspc_0…`). Its monthly spend limit of $30.00 was verified in the Console
   before the first session, with $0.00 spent at that point. `preflight` matched
@@ -134,7 +135,10 @@ tokens.
 reports 0 tokens. Yet each `compact_boundary` event records a real model call:
 `pre_tokens` is between 35,999 and 37,220, and each call takes 8.6–16.4 s. The
 12 `pre_tokens` sum to 438,613, which accounts for most of the missing input.
-The missing output is the compaction summaries, which no stream field counts.
+The remaining 21,821 input tokens (about 5% of the gap) are unexplained, so the
+compaction-token PR is not expected to close the whole gap. The missing output
+is most likely the compaction summaries, which no stream field counts; that is
+not measured.
 
 **Consequences:**
 - The measured run's budget must use the Console's figures, or the receipts
@@ -203,8 +207,8 @@ the new image before it is ticked.
 
 ## Open items
 
-1. **The memkernel server contacts Hugging Face at startup (decision
-   pending).**
+1. **The memkernel server contacts Hugging Face at startup (option A
+   chosen).**
    - **What happens:** in the wiring check, each of the 3 server starts sent
      HEAD and GET requests to huggingface.co for
      `sentence-transformers/all-MiniLM-L6-v2` at `resolve/main`, although the
@@ -225,6 +229,20 @@ the new image before it is ticked.
      changes over time inside a preregistered run.
 2. **Compaction calls in the receipts:** the separate PR described above,
    which must land before the measured run.
-3. **Freeze:** tasks, arm configurations and the preregistration are frozen
+3. **The VM can reach the Mac.** Through `host.lima.internal`, the agent's
+   Bash tool could reach any service listening on the Mac, which the
+   disposable-machine requirement is meant to rule out. Which services were
+   listening during this run was not recorded. For the recalibration, either
+   block the VM from reaching the host and have `vm.sh check` prove it, or
+   record it in the preregistration as a known exception, listing the
+   services that were listening.
+4. **wiki-studio's dependencies are not pinned.** The image installs exactly
+   `wiki-studio==0.4.1`, the version in `poetry.lock`, and the runner refuses
+   any other. But it installs into its own venv without hashes, so
+   wiki-studio's own dependencies resolve to whatever is newest at build
+   time, and `environment.txt` records only the `# wiki-studio 0.4.1` line,
+   not that venv's packages. For the new image, install it with hashes from a
+   lock and record that venv's `pip freeze` in `environment.txt`.
+5. **Freeze:** tasks, arm configurations and the preregistration are frozen
    after the new calibration and 18a pass on its image (task 18's last step,
    then task 19).
