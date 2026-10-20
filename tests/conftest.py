@@ -43,6 +43,9 @@ def no_real_agent(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.
 
     A fake ``claude`` goes first on PATH (the runner passes PATH through to its sessions). It records the call and
     exits non-zero, and the test fails afterwards. Tests that need an agent use the stub agent or their own PATH.
+
+    It catches only ``claude`` looked up on PATH, which is how the runner's agent command resolves. It does not
+    catch a call by absolute path, through ``npx``, or under a PATH of the test's own that has no stub.
     """
     guard = tmp_path_factory.mktemp("no-real-agent")
     calls = guard / "calls"

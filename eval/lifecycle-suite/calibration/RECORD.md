@@ -219,7 +219,10 @@ the new image before it is ticked.
        model could change between calibration and the measured run.
    - **Option A, fix it (chosen 2026-10-20 UTC):**
      1. set `HF_HUB_OFFLINE=1` in the server environment the runner gives the
-        memkernel arm, and pin the model revision in the image's cache;
+        memkernel arm, and pin the model revision in the image's cache.
+        **Done in #38:** the runner also refuses a calibration or measured run
+        without the shared cache, the build fails on any other revision, and
+        preflight prints the revision;
      2. build a new image;
      3. recalibrate, about $3.53 again (FR-015: a runtime change is documented
         and followed by a new calibration before the freeze);
@@ -236,7 +239,7 @@ the new image before it is ticked.
    block the VM from reaching the host and have `vm.sh check` prove it, or
    record it in the preregistration as a known exception, listing the
    services that were listening.
-4. **wiki-studio is installed without a hash check.** The image installs
+4. **wiki-studio is installed without a hash check (done in #38).** The image installs
    exactly `wiki-studio==0.4.1`, the version in `poetry.lock`, and the runner
    refuses any other. wiki-studio 0.4.1 has no dependencies of its own (pip
    resolves it alone, and the lock lists none). But it goes into its own venv
