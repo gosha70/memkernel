@@ -236,13 +236,14 @@ the new image before it is ticked.
    block the VM from reaching the host and have `vm.sh check` prove it, or
    record it in the preregistration as a known exception, listing the
    services that were listening.
-4. **wiki-studio's dependencies are not pinned.** The image installs exactly
-   `wiki-studio==0.4.1`, the version in `poetry.lock`, and the runner refuses
-   any other. But it installs into its own venv without hashes, so
-   wiki-studio's own dependencies resolve to whatever is newest at build
-   time, and `environment.txt` records only the `# wiki-studio 0.4.1` line,
-   not that venv's packages. For the new image, install it with hashes from a
-   lock and record that venv's `pip freeze` in `environment.txt`.
+4. **wiki-studio is installed without a hash check.** The image installs
+   exactly `wiki-studio==0.4.1`, the version in `poetry.lock`, and the runner
+   refuses any other. wiki-studio 0.4.1 has no dependencies of its own (pip
+   resolves it alone, and the lock lists none). But it goes into its own venv
+   without `--require-hashes`, and `environment.txt` records only the
+   `# wiki-studio 0.4.1` line, not that venv's packages. For the new image,
+   install it with the locked hashes and record that venv's `pip freeze` in
+   `environment.txt`.
 5. **Freeze:** tasks, arm configurations and the preregistration are frozen
    after the new calibration and 18a pass on its image (task 18's last step,
    then task 19).

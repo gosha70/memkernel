@@ -169,3 +169,48 @@ def test_wiki_studio_instruction_never_runs_a_nested_model() -> None:
     text = runner.load_arm("wiki_studio").instruction.decode()
     assert "wiki-studio find" in text and 'wiki-studio propose --from "$D" --promote' in text
     assert "Run wiki-studio ingest or wiki-studio query: they start another model." in text  # listed under Never
+
+
+@pytest.mark.parametrize("shared_cache", [True, False])
+def test_the_memkernel_server_runs_offline_whenever_it_has_the_shared_cache(tmp_path: Path, shared_cache: bool) -> None:
+    """The image's cache holds the pinned embedding model; with it, the server and hooks never contact the Hub."""
+    arm = runner.load_arm("memkernel")
+    chain = tmp_path / "chain"
+    chain.mkdir()
+    dirs = runner.prepare_session(_task(tmp_path), arm, 0, chain, runner.ChainState())
+    cfg = runner.RunConfig(
+        run_root=tmp_path,
+        run_id="r",
+        phase="calibration",
+        model="m",
+        code_sha="c",
+        preregistration_sha256=None,
+        agent_cmd=("none",),
+        memkernel_cmd="memkernel",
+        memkernel_python="python",
+        tasks_root=tmp_path,
+        oracles_root=tmp_path,
+        shared_cache=tmp_path / "cache" if shared_cache else None,
+    )
+    server = runner._memkernel_env(dirs, "chain", cfg)
+    session = runner._session_env(arm, dirs, "chain", cfg)  # what the hooks see
+    for env in (server, session):
+        assert (env.get("HF_HUB_OFFLINE") == "1") == shared_cache
+        assert (env.get("HF_HOME") == str(tmp_path / "cache" / "huggingface")) == shared_cache
+
+
+@pytest.mark.parametrize("phase", ["calibration", "measured"])
+def test_a_paid_run_without_the_shared_cache_is_refused_before_it_starts(
+    tmp_path: Path, phase: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review of the image pins: offline mode needs the shared cache, so a paid phase may not start without it."""
+    preregistration = tmp_path / "prereg.md"
+    preregistration.write_text("frozen\n", encoding="utf-8")
+    argv = ["run", "--task", "lc-retain-rounding", "--arm", "memkernel", "--run-root", str(tmp_path / "runs")]
+    argv += ["--run-id", "r", "--phase", phase, "--model", "m", "--code-sha", "c", "--preregistration"]
+    argv += [str(preregistration), "--memkernel-cmd", "memkernel", "--memkernel-python", "python"]
+    argv += ["--agent-cmd", "/usr/bin/false"]  # even if the refusal regressed, no real agent may start
+    with pytest.raises(SystemExit) as refused:
+        runner.main(argv)
+    assert refused.value.code == 2 and "needs --shared-cache" in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists()

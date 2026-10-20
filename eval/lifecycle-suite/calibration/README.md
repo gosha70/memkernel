@@ -43,10 +43,14 @@ container starts and is never built into the image.
 Entry point modes (`run.sh`):
 - **`demo`:** the credential-free stub demonstration. No key, spends nothing.
 - **`preflight`:** spends nothing. It prints the code SHA, the tool versions and
-  the sha256s of `run.sh` and of the resolved environment. It writes a probe
-  file to `/runs`, then lists models with the key, which is free, and checks the
-  response's `anthropic-workspace-id` header against the workspace ID. It
-  refuses on a mismatch, a rejected key or an unwritable `/runs`.
+  the sha256s of `run.sh` and of the resolved environment. It checks that the
+  image's cache holds the pinned embedding model revision and prints it: the
+  memkernel server runs offline (`HF_HUB_OFFLINE=1`), so the model can come
+  only from that cache. It writes a probe file to `/runs`, then lists models
+  with the key, which is free, and checks the response's
+  `anthropic-workspace-id` header against the workspace ID. It refuses on a
+  missing or different cached revision (before the key is used), a mismatch, a
+  rejected key or an unwritable `/runs`.
 - **`calibrate`:** runs `preflight` again, then the runner (`--phase calibration`,
   all seven arms, `wiki_studio` on `lc-wiki` only), then `scan_secrets.py`.
   - The scan also runs when the runner fails, over whatever output exists. The
