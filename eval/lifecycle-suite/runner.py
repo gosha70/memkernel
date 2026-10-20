@@ -271,6 +271,9 @@ def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str
     }
     if cfg.shared_cache is not None:
         env["HF_HOME"] = str(cfg.shared_cache / "huggingface")
+        # The cache is the model's only source: never contact the Hub, so the embedding model cannot change
+        # between calibration and the measured run (the image pins the cached revision).
+        env["HF_HUB_OFFLINE"] = "1"
     return env
 
 
@@ -712,6 +715,11 @@ def check_cli_pin(arm: Arm) -> None:
 
 
 def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, observe: Any = None) -> Path:
+    """Run every chain of ``task_ids`` × ``arm_names`` × ``runs`` and write the receipts under the run root.
+
+    The CLI refuses a calibration or measured phase without ``--shared-cache``; callers outside the CLI must pass
+    a shared cache for those phases themselves, or the memkernel server goes online for its embedding model.
+    """
     if _inside_checkout(cfg.run_root):
         raise SystemExit(f"refusing to run inside a git checkout: {cfg.run_root}")
     out = cfg.run_root / cfg.run_id
@@ -863,6 +871,8 @@ def main(argv: list[str]) -> int:
         return demo()
     if args.phase == MEASURED_PHASE and args.preregistration is None:
         parser.error("a measured run needs --preregistration")
+    if args.shared_cache is None:  # without it the memkernel server would go online for its model (HF_HUB_OFFLINE)
+        parser.error(f"a {args.phase} run needs --shared-cache (the image's pinned model cache)")
     cfg = RunConfig(
         run_root=args.run_root.resolve(),
         run_id=args.run_id,

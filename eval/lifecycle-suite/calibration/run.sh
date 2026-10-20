@@ -12,8 +12,9 @@ set -euo pipefail
 suite=${CALIBRATION_SUITE_DIR:-/opt/memkernel/eval/lifecycle-suite}
 runs=${CALIBRATION_RUNS_DIR:-/runs}
 environment=${CALIBRATION_ENVIRONMENT:-/opt/environment.txt}
+hf_home=${CALIBRATION_HF_HOME:-/opt/cache/huggingface}
 calibration="$suite/calibration"
-overrides=$(env | grep -E '^CALIBRATION_(SUITE_DIR|RUNS_DIR|ENVIRONMENT)=' || true)
+overrides=$(env | grep -E '^CALIBRATION_(SUITE_DIR|RUNS_DIR|ENVIRONMENT|HF_HOME)=' || true)
 model=${CALIBRATION_MODEL:-claude-sonnet-5-5}
 run_id=${CALIBRATION_RUN_ID:-calibration-$(date -u +%Y%m%dT%H%M%SZ)}
 
@@ -27,6 +28,18 @@ preflight() {
   echo "claude: $(claude --version)"
   echo "wiki-studio: $(wiki-studio --version)"
   echo "environment: $environment sha256 $(sha256sum "$environment" | cut -d' ' -f1)"
+  # The server runs offline (HF_HUB_OFFLINE), so the image's cache must hold the pinned revision; check it
+  # before the key is used.
+  local model_dir cached
+  model_dir="$hf_home/hub/models--sentence-transformers--${EMBEDDING_MODEL:?image built without EMBEDDING_MODEL}"
+  cached=$(cat "$model_dir/refs/main" 2>/dev/null || true)
+  if [ "$cached" != "${EMBEDDING_MODEL_REVISION:?image built without EMBEDDING_MODEL_REVISION}" ] \
+    || [ ! -d "$model_dir/snapshots/$cached" ]; then
+    echo "preflight: the image's cache holds embedding model revision '${cached:-none}', not the pinned" \
+      "$EMBEDDING_MODEL_REVISION; refusing" >&2
+    exit 1
+  fi
+  echo "embedding model: sentence-transformers/$EMBEDDING_MODEL revision $cached (pinned; the server runs offline)"
   probe="$runs/.write-probe-$$"
   if ! (: > "$probe") 2>/dev/null; then
     echo "preflight: $runs is not writable by uid $(id -u); on Linux run: sudo chown $(id -u):$(id -g) <host runs dir>" >&2

@@ -26,6 +26,7 @@ pytestmark = [
 
 RUN_SH = SUITE_DIR / "calibration" / "run.sh"
 WORKSPACE = "wrkspc_test"
+MODEL, REVISION = "all-MiniLM-L6-v2", "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
 
 def _executable(path: Path, body: str) -> None:
@@ -33,17 +34,24 @@ def _executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
-def _setup(tmp_path: Path, *, workspace: str = WORKSPACE) -> dict[str, str]:
+def _setup(tmp_path: Path, *, workspace: str = WORKSPACE, cached: str | None = REVISION) -> dict[str, str]:
     bin_dir, suite, runs = tmp_path / "bin", tmp_path / "suite", tmp_path / "runs"
     for directory in (bin_dir, suite / "calibration", runs):
         directory.mkdir(parents=True)
     _executable(bin_dir / "claude", "#!/bin/sh\necho '2.1.288 (Claude Code)'\n")
     _executable(bin_dir / "wiki-studio", "#!/bin/sh\necho 0.4.1\n")
     _executable(bin_dir / "sha256sum", '#!/bin/sh\necho "0000  $1"\n')
-    _executable(
+    _executable(  # logs to its own file, so a test can tell whether the key was used
         bin_dir / "curl",
-        f"#!/bin/sh\nprintf 'HTTP/2 200\\r\\nanthropic-workspace-id: {workspace}\\r\\n\\r\\n'\n",
+        f'#!/bin/sh\necho curl >> "$STUB_CURL_LOG"\n'
+        f"printf 'HTTP/2 200\\r\\nanthropic-workspace-id: {workspace}\\r\\n\\r\\n'\n",
     )
+    hf_home = tmp_path / "hf"
+    model_dir = hf_home / "hub" / f"models--sentence-transformers--{MODEL}"
+    if cached is not None:  # the image's cache, as the Dockerfile leaves it
+        (model_dir / "refs").mkdir(parents=True)
+        (model_dir / "refs" / "main").write_text(cached, encoding="utf-8")
+        (model_dir / "snapshots" / cached).mkdir(parents=True)
     (suite / "calibration" / "tasks.txt").write_text("# comment\nlc-retain-rounding\n", encoding="utf-8")
     (suite / "runner.py").write_text(
         "import os, sys\n"
@@ -69,11 +77,15 @@ def _setup(tmp_path: Path, *, workspace: str = WORKSPACE) -> dict[str, str]:
         "CALIBRATION_SUITE_DIR": str(suite),
         "CALIBRATION_RUNS_DIR": str(runs),
         "CALIBRATION_ENVIRONMENT": str(environment),
+        "CALIBRATION_HF_HOME": str(hf_home),
         "CALIBRATION_RUN_ID": "probe",
+        "EMBEDDING_MODEL": MODEL,
+        "EMBEDDING_MODEL_REVISION": REVISION,
         "CODE_SHA": "test",
         "ANTHROPIC_API_KEY": "sk-ant-test-not-a-real-key",
         "CALIBRATION_WORKSPACE_ID": WORKSPACE,
         "STUB_LOG": str(tmp_path / "log.txt"),
+        "STUB_CURL_LOG": str(tmp_path / "curl.txt"),
         "STUB_RUNNER_EXIT": "0",
     }
 
@@ -166,3 +178,22 @@ def test_an_unwritable_runs_directory_never_reaches_the_runner(tmp_path: Path) -
     finally:
         runs.chmod(0o755)
     assert status != 0 and calls == []
+
+
+def test_preflight_prints_the_pinned_embedding_model_revision(tmp_path: Path) -> None:
+    env = _setup(tmp_path)
+    completed = _run(env)
+    assert completed.returncode == 0, completed.stderr
+    assert f"embedding model: sentence-transformers/{MODEL} revision {REVISION} (pinned" in completed.stdout
+
+
+@pytest.mark.parametrize("cached", [None, "0" * 40])
+def test_a_cache_without_the_pinned_revision_is_refused_before_the_key_is_used(
+    tmp_path: Path, cached: str | None
+) -> None:
+    """Review of #37: the server runs offline, so a missing or different cached model must show up in preflight,
+    before the key is used, not as a server that cannot start."""
+    env = _setup(tmp_path, cached=cached)
+    completed = _run(env)
+    assert completed.returncode != 0 and "not the pinned" in completed.stderr
+    assert not Path(env["STUB_CURL_LOG"]).exists() and not Path(env["STUB_LOG"]).exists()
