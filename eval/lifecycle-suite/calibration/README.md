@@ -111,6 +111,9 @@ $V calibrate     # the paid run: type 'calibrate', then the key and workspace ID
                  # It runs in the foreground; keep the Mac awake (for example: caffeinate -i $V calibrate)
 $V fetch         # copies the VM's runs to ./calibration-runs and verifies every file (sha256);
                  # expect "copied and verified N file(s)"
+$V save-image    # copies the calibrated image to ~/memkernel-calibration-image-<id>.tar.gz, verified;
+                 # the only other copy is inside this VM; the archive is then removed from the VM's disk
+$V wiring        # the credential-free wiki-bridge wiring check (below), on that same image
 $V destroy       # deletes the VM; refuses while it holds runs that were not fetched and verified
 ```
 
@@ -131,6 +134,45 @@ results, and the report needs them (FR-015, FR-018). The order is always:
 `$V destroy` enforces this. It refuses while the VM's runs differ from the
 last verified fetch. `$V destroy --discard` overrides it and throws those runs
 away, so use it only when you are sure nothing in them is needed.
+
+### Wiki-bridge wiring check (task 18a)
+
+Calibration showed that the memkernel arm ran, but it never called
+`wiki_export` or `wiki_import`. So it does not show that the export and import
+mechanism works. `$V wiring` checks that mechanism directly. It uses no key, no
+model and no agent, and its fixture (`eval/lifecycle-suite/wiring/fixture/`) is
+synthetic, unrelated to any measured task.
+
+The check is mounted **read-only into the calibrated image** with an overridden
+entrypoint, so the image is unchanged. It runs that image's own runner and
+memkernel against the real MCP server over stdio:
+1. **Source namespace.** It counts 0 records, `retain`s a synthetic decision,
+   runs `wiki_export`, then counts 1 record.
+2. **Transfer.** The runner's own `prepare_session` moves the wiki under the
+   memkernel arm's frozen rule. Only `knowledge/wiki/` may cross: a
+   `NOTES.md` left in the source workspace must not. Every fixture file must
+   still be there, and those outside the wiki must stay byte-identical. Files
+   under `knowledge/wiki/` are not judged: the arm's rule carries that directory
+   over whole, by design.
+3. **Destination namespace.** It counts 0 records (with memkernel's library,
+   not by searching) and checks that `recall` finds nothing. Then it runs
+   `wiki_import`, counts exactly the imported pages, and checks that `get`
+   returns the synthetic sentence verbatim.
+
+`$V wiring` refuses to run while `eval/lifecycle-suite/wiring/` has uncommitted
+changes, and copies that directory from the commit itself (`git archive`), so
+the commit it prints is exactly the check that ran. It also refuses when
+anything else under `eval/lifecycle-suite/` (runner, arms, tasks) differs
+between the image's commit and that commit, because the check calls the image's
+runner directly; only `wiring/` and `calibration/` may differ. It prints the image ID, the
+image's code SHA, the check's commit and `wiring_check.py`'s sha256, then one
+JSON object with every step. It passes
+only when every step does. If it fails and the fix needs a change to the
+runtime, a task or an arm, document the fix and calibrate again before the
+freeze.
+
+A later VM can get the same image back with `$V create` and then
+`$V load-image ~/memkernel-calibration-image-<id>.tar.gz`, which checks the image ID.
 
 ## 4. Run it with Docker directly (Linux host or cloud VM)
 
@@ -158,7 +200,8 @@ arm's `mktemp -d` drafts, in memory, where they vanish with the container.
 1. Revoke the key, then archive the workspace, which archives every key in it.
    Note the date for the report (FR-018).
 2. Fetch and verify the runs (`vm.sh fetch`, which must report "copied and
-   verified"), check the local copy, and only then delete the VM
+   verified"), check the local copy, save the image (`vm.sh save-image`), and
+   only then delete the VM
    (`vm.sh destroy`, or delete the cloud VM after copying `calibration-runs/`
    off it). If fetching fails, keep the VM until it succeeds.
 3. Review `calibration-runs/<run id>/` yourself, including the secret-scan
