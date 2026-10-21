@@ -232,7 +232,16 @@ the new image before it is ticked.
      changes over time inside a preregistered run.
 2. **Compaction calls in the receipts:** the separate PR described above,
    which must land before the measured run.
-3. **The VM can reach the Mac.** Through `host.lima.internal`, the agent's
+3. **The VM can reach the Mac (addressed for the recalibration by the host
+   block in `vm.sh`).** The block rejects every private, link-local and CGNAT
+   destination by address, with no port. `preflight` and `calibrate` reapply it
+   and require TCP probes on four ports to the gateway, the Mac's addresses and
+   two LAN addresses to fail, each one counted (as user `nobody`, by a rule
+   that sees only the probes) on its way to the reject rule, and then the same
+   from a throwaway container of the selected image, where the agent runs;
+   the block also rejects connections to the VM's own non-loopback addresses; `vm.sh check`
+   reports the same probes. That shows the rule is loaded and effective, not
+   that every port was tried. Through `host.lima.internal`, the agent's
    Bash tool could reach any service listening on the Mac, which the
    disposable-machine requirement is meant to rule out. Which services were
    listening during this run was not recorded. For the recalibration, either

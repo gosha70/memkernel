@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -51,6 +52,8 @@ case "$1" in
     exit 0 ;;
   delete)
     touch "$STUB_DELETED"; exit 0 ;;
+  create|start)
+    exit 0 ;;
 esac
 echo "stub limactl: unexpected $*" >&2; exit 99
 """
@@ -87,6 +90,7 @@ def _env(tmp_path: Path, *, sudo: str = "run") -> dict[str, str]:
         '  save) echo "save $2" >> "$STUB_DOCKER_LOG"; echo "image bytes of $2";;\n'
         '  run) echo "run $*" >> "$STUB_DOCKER_LOG"; '
         'if [[ "$*" == *CODE_SHA* ]]; then echo "${STUB_CODE_SHA:-unknown}"; else echo "stub run"; fi;;\n'
+        "  version) echo 'docker 29.9.1';;\n"
         "  *) exit 98;;\n"
         "esac\n",
         encoding="utf-8",
@@ -552,3 +556,200 @@ def test_a_failure_recording_the_selection_rolls_the_load_back(tmp_path: Path) -
     )
     assert _selection(env) == (OTHER_ID, TAG) and _tag_points_at(env) == OTHER_ID
     assert _removed(env) == [IMAGE_ID]
+
+
+VM_ADDRESS = "192.168.5.15"
+
+
+def _host_block(
+    env: dict[str, str],
+    *,
+    enabled: bool = True,
+    probe: str = "blocked",
+    counted_ports: str = "22 80 443 8080",
+    container: str = "blocked",
+) -> Path:
+    """Stub the guest's side of the host block; returns the guest's fake /etc.
+
+    ``probe`` is what each TCP probe sees ("blocked": No route to host, "open": it connects). A blocked probe to a
+    port in ``counted_ports`` raises the reject rule's counter by 2, as the real rule does (a SYN and its retry);
+    to any other port it fails without reaching the rule, as with an emptied or weakened table.
+
+    ``container`` is what a probe from a container sees: "blocked" (refused, and the VM user's or the own-address
+    counter rises; 10.0.2.2 has no route, by rootless Docker), "uncounted" (refused, no counter moves) or "open".
+    """
+    guest_bin = Path(env["STUB_GUEST_PATH"].split(os.pathsep)[0])
+    etc = Path(env["STUB_GUEST_HOME"]) / "etc"
+    (etc / "systemd" / "system").mkdir(parents=True)
+    counter = Path(env["STUB_GUEST_HOME"]) / "reject-counter"
+    user_counter = Path(env["STUB_GUEST_HOME"]) / "user-counter"
+    local_counter = Path(env["STUB_GUEST_HOME"]) / "local-counter"
+    for path in (counter, user_counter, local_counter):
+        path.write_text("0", encoding="utf-8")
+    real_docker = guest_bin / "docker.real"
+    (guest_bin / "docker").rename(real_docker)
+    bump = {"blocked": True, "uncounted": False, "open": False}[container]
+    scripts = {
+        # sudo runs the command with /etc mapped into the fake guest, so no test writes the real /etc
+        "sudo": (
+            '#!/bin/bash\n[ "$1" = -u ] && shift 2\nargs=()\n'
+            f'for a in "$@"; do args+=("${{a//\\/etc\\//{etc}/}}"); done\nexec "${{args[@]}}"\n'
+        ),
+        "systemctl": f'#!/bin/sh\necho "systemctl $*" >> "$STUB_DOCKER_LOG"\nexit {0 if enabled else 1}\n',
+        "nft": (
+            '#!/bin/sh\necho "nft $*" >> "$STUB_DOCKER_LOG"\n'
+            '[ "$1" = list ] && echo "meta skuid 65534 ip daddr { 10.0.0.0/8 } counter '
+            f'packets $(cat {counter}) bytes 0"\n'
+            '[ "$1" = list ] && echo "meta skuid $(id -u) ip daddr { 10.0.0.0/8 } counter '
+            f'packets $(cat {user_counter}) bytes 0"\n'
+            '[ "$1" = list ] && echo "ip daddr != 127.0.0.0/8 fib daddr type local counter '
+            f'packets $(cat {local_counter}) bytes 0 reject"\n'
+            "exit 0\n"
+        ),
+        "ip": (
+            '#!/bin/sh\ncase "$*" in *route*) echo "default via 192.168.5.2 dev eth0 proto dhcp";; *) '
+            f"echo '2: eth0    inet {VM_ADDRESS}/24 brd 192.168.5.255 scope global eth0'; "
+            "echo '3: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0';; esac\n"
+        ),
+        # a container's /dev/tcp probe, answered like rootless Docker's network helper; anything else is docker
+        "docker": (
+            '#!/bin/bash\ncase "$*" in\n  *"/dev/tcp/"*)\n'
+            '    all="$*"; target=${all##*/dev/tcp/}; address=${target%%/*}\n'
+            + (
+                "    exit 0;;\n"
+                if container == "open"
+                else '    if [ "$address" = 10.0.2.2 ]; then echo "bash: connect: No route to host"; exit 0; fi\n'
+                # as on the real VM: docker0's address is the container's own gateway, refused inside its namespace
+                '    if [ "$address" = 172.17.0.1 ]; then echo "bash: connect: Connection refused"; exit 0; fi\n'
+                + (
+                    f'    if [ "$address" = {VM_ADDRESS} ]; then c={local_counter}; else c={user_counter}; fi\n'
+                    "    echo $(($(cat $c) + 1)) > $c\n"
+                    if bump
+                    else ""
+                )
+                + '    echo "bash: connect: Connection refused"; exit 0;;\n'
+            )
+            + f'esac\nexec {real_docker} "$@"\n'
+        ),
+        "timeout": (
+            "#!/bin/sh\n"
+            + (
+                "port=${4##*/}; port=${port%% *}\n"
+                f'case " {counted_ports} " in *" $port "*) echo $(($(cat {counter}) + 2)) > {counter};; esac\n'
+                'echo "bash: connect: No route to host" >&2; exit 1\n'
+                if probe == "blocked"
+                else "exit 0\n"
+            )
+        ),
+    }
+    for name, body in scripts.items():
+        (guest_bin / name).write_text(body, encoding="utf-8")
+        (guest_bin / name).chmod(0o755)
+    return etc
+
+
+def test_a_paid_command_reapplies_the_host_block_and_proves_it_before_the_key(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    etc = _host_block(env)
+    (etc / "mk-isolation.nft").write_text("table inet mk_isolation {}\n", encoding="utf-8")  # emptied by hand
+    result = _run(env, "preflight")  # goes on to ask for the key, which a test has no terminal for
+    assert "host block is not in place" not in result.stderr
+    assert "20 of 20 probe(s) blocked by its reject rule" in result.stdout
+    rules = (etc / "mk-isolation.nft").read_text(encoding="utf-8")  # this script's own copy, reapplied
+    assert "reject with icmp type admin-prohibited" in rules and "ip daddr 192.168.5.2 udp dport { 53, 67 }" in rules
+    assert f"nft -f {etc}/mk-isolation.nft" in Path(env["STUB_DOCKER_LOG"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("block", "reason"),
+    [
+        ({"enabled": False}, "unit is not enabled"),
+        ({"counted_ports": ""}, "did not block every probe through its own rule"),  # empty or weakened table
+        # review: 20 probes, 20 counted in total, but only ports 22 and 80 reached the rule
+        ({"counted_ports": "22 80"}, "did not block every probe through its own rule"),
+        ({"probe": "open"}, "did not block every probe through its own rule"),
+    ],
+)
+@pytest.mark.parametrize("mode", ["preflight", "calibrate"])
+def test_a_paid_command_is_refused_before_the_key_unless_the_host_block_holds(
+    tmp_path: Path, mode: str, block: dict[str, Any], reason: str
+) -> None:
+    """FR-015 isolation, review of the host block: an existing table is not enough; it must reject the probes."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    _host_block(env, **block)
+    result = _run(env, mode)
+    assert result.returncode == 1 and "host block is not in place" in result.stderr and reason in result.stderr
+    assert "API key" not in result.stdout + result.stderr and "Type 'calibrate'" not in result.stdout
+    assert "run " not in Path(env["STUB_DOCKER_LOG"]).read_text(encoding="utf-8")  # no container started
+
+
+def _check_env(tmp_path: Path, *, forwarding: bool) -> dict[str, str]:
+    """vm.sh check with the host block holding and the guest's egress stubbed; the port-forwarding probe server
+    runs for real on this machine (the stub guest is local), so ``forwarding`` decides whether it starts."""
+    env = {**_load_env(tmp_path, selected=IMAGE_ID), "HOME": str(tmp_path / "mac-home")}
+    _host_block(env)
+    ssh = Path(env["STUB_GUEST_HOME"]) / ".ssh"
+    ssh.mkdir()
+    (ssh / "authorized_keys").write_text("ssh-ed25519 AAAA lima\n", encoding="utf-8")
+    guest_bin = Path(env["STUB_GUEST_PATH"].split(os.pathsep)[0])
+    stubs = {
+        "getent": "#!/bin/sh\necho '160.79.104.10   api.anthropic.com'\n",
+        "curl": "#!/bin/sh\necho 'HTTP 401'\n",
+        "setsid": '#!/bin/sh\n[ "$1" = -f ] && shift\n"$@" &\nexit 0\n' if forwarding else "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in stubs.items():
+        (guest_bin / name).write_text(body, encoding="utf-8")
+        (guest_bin / name).chmod(0o755)
+    return env
+
+
+def test_check_reports_the_host_block_and_working_port_forwarding(tmp_path: Path) -> None:
+    result = _run(_check_env(tmp_path, forwarding=True), "check")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "probe(s) blocked by its reject rule" in result.stdout and "HTTP 401" in result.stdout
+    assert "copy: ok" in result.stdout and "port forwarding: ok" in result.stdout
+    assert "container -> 172.17.0.1:22 blocked (the container's own gateway; no VM rule involved)" in result.stdout
+
+
+def test_check_fails_when_port_forwarding_is_broken(tmp_path: Path) -> None:
+    """The host block must not cost Lima's own channels; check proves both sides."""
+    result = _run(_check_env(tmp_path, forwarding=False), "check")
+    assert result.returncode == 1 and "port forwarding: FAILED" in result.stdout
+    assert "do not run preflight or calibrate" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("container", "shown"),
+    [("open", "NOT BLOCKED (connected, or no answer within 5 s)"), ("uncounted", "not by the rule")],
+)
+@pytest.mark.parametrize("mode", ["preflight", "calibrate"])
+def test_a_paid_command_is_refused_when_a_container_gets_past_the_host_block(
+    tmp_path: Path, mode: str, container: str, shown: str
+) -> None:
+    """Review of the host block: the agent runs in the container, so the container must be probed too."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    _host_block(env, container=container)
+    result = _run(env, mode)
+    assert result.returncode == 1 and "a container of the selected image got past it" in result.stderr
+    assert shown in result.stderr and "API key" not in result.stdout + result.stderr
+
+
+def test_container_probes_cover_the_mac_the_vm_itself_and_the_helpers_loopback(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    _host_block(env)
+    result = _run(env, "preflight")
+    assert "host block is not in place" not in result.stderr
+    assert f"from a container of {IMAGE_ID}:" in result.stdout and "probe(s) blocked" in result.stdout
+    runs = [line for line in Path(env["STUB_DOCKER_LOG"]).read_text(encoding="utf-8").splitlines() if "nft" in line]
+    assert runs  # counters were read around the probes
+
+
+def test_create_installs_the_host_block_before_any_image_exists(tmp_path: Path) -> None:
+    """Review: create verifies the block from the VM; a container probe needs an image, which comes later."""
+    env = _load_env(tmp_path)  # no image selected
+    etc = _host_block(env)
+    result = _run(env, "create")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "with the host block in place" in result.stdout and "probe(s) blocked by its reject rule" in result.stdout
+    assert "from a container" not in result.stdout + result.stderr
+    assert (etc / "mk-isolation.nft").is_file() and (etc / "systemd" / "system" / "mk-isolation.service").is_file()
