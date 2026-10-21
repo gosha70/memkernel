@@ -526,6 +526,7 @@ def run_session(
         "hooks": hooks,
         "tool_calls": tool_counts(summary),
         "tokens": summary.tokens,
+        "compaction_tokens_estimate": summary.compaction_tokens_estimate,
         "wall_time_ms": int((time.monotonic() - t0) * 1000),
         "stages": {"exposure_at": exposure_at, "evaluation_at": evaluation_at, "compactions": summary.compactions},
         "diagnostics": session_diagnostics(summary, dirs.workspace, earlier_reads, hooks),

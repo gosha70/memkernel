@@ -132,7 +132,7 @@ def test_summary_and_diagnostics_are_counts_with_denominators(tmp_path: Path) ->
 
 def _receipt(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": "r",
         "phase": "measured",
         "chain_id": "t.memkernel.r0",
@@ -157,6 +157,7 @@ def _receipt(**overrides: Any) -> dict[str, Any]:
         "hooks": [],
         "tool_calls": {},
         "tokens": {"input": 1, "cache_write": 0, "cache_read": 0, "output": 1},
+        "compaction_tokens_estimate": 0,
         "wall_time_ms": 1,
         "stages": {"exposure_at": None, "evaluation_at": None, "compactions": []},
         "diagnostics": {},
@@ -176,6 +177,12 @@ def test_receipt_schema_accepts_a_valid_receipt_and_rejects_drift() -> None:
         "not in" in e for e in records.validate_receipt(_receipt(invalid_reason="timeout"))
     )  # timeouts are never invalid
     assert any("unexpected key" in e for e in records.validate_receipt(_receipt(content="leaked text")))
+    # only schema version 2: a receipt from before compaction_tokens_estimate (the superseded calibration) is refused
+    assert any("not in [2]" in e for e in records.validate_receipt(_receipt(schema_version=1)))
+    assert any(
+        "missing compaction_tokens_estimate" in e
+        for e in records.validate_receipt({k: v for k, v in _receipt().items() if k != "compaction_tokens_estimate"})
+    )
 
 
 def _trial(arm: str, task: str, run: int, **overrides: Any) -> dict[str, Any]:
@@ -376,8 +383,10 @@ def test_closing_stdout_before_exiting_still_times_out(tmp_path: Path) -> None:
     assert time.monotonic() - started < 3
 
 
-def _stub_run(root: Path, monkeypatch: pytest.MonkeyPatch, phase: str, arms: list[str]) -> list[dict[str, Any]]:
-    """One demo-retain chain per arm through the real runner with the stub agent, in ``phase``."""
+def _stub_run(
+    root: Path, monkeypatch: pytest.MonkeyPatch, phase: str, arms: list[str], tasks: tuple[str, ...] = ("demo-retain",)
+) -> list[dict[str, Any]]:
+    """One chain per task and arm (demo-retain by default) through the real runner with the stub agent."""
     import sys as _sys
 
     root.mkdir()
@@ -397,7 +406,7 @@ def _stub_run(root: Path, monkeypatch: pytest.MonkeyPatch, phase: str, arms: lis
         hook_command_override=(_sys.executable, "-c", "import sys; sys.stdin.read()"),
     )
     monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
-    path = runner.run(cfg, ["demo-retain"], arms, runs=1)
+    path = runner.run(cfg, list(tasks), arms, runs=1)
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
@@ -805,3 +814,63 @@ def test_the_detector_agrees_with_bash_on_what_runs(tmp_path: Path) -> None:
         subprocess.run(["bash", "-c", case], cwd=tmp_path, env=env, capture_output=True, timeout=20, check=False)
         executed = log.read_text(encoding="utf-8").split() if log.exists() else []
         assert diagnostics._wiki_studio_verbs(case) == executed, case
+
+
+def test_the_compaction_estimate_sums_pre_tokens_and_stays_out_of_the_token_classes() -> None:
+    """FR-018 (amended 2026-10-20): the /compact step reports 0 tokens; compact_boundary carries its input."""
+    lines = [
+        {
+            "ts": "t1",
+            "event": {"type": "system", "subtype": "compact_boundary", "compact_metadata": {"pre_tokens": 36150}},
+        },
+        {"ts": "t2", "event": {"type": "result", "result": "", "usage": {"input_tokens": 0, "output_tokens": 0}}},
+        {
+            "ts": "t3",
+            "event": {"type": "system", "subtype": "compact_boundary", "compact_metadata": {"pre_tokens": 100}},
+        },
+        {"ts": "t4", "event": {"type": "system", "subtype": "compact_boundary"}},  # no metadata: counts as 0
+        {"ts": "t5", "event": {"type": "result", "result": "ok", "usage": {"input_tokens": 7, "output_tokens": 3}}},
+    ]
+    summary = records.summarise(lines)
+    assert summary.compaction_tokens_estimate == 36250 and summary.compactions == ["t1", "t3", "t4"]
+    assert summary.tokens == {"input": 7, "cache_write": 0, "cache_read": 0, "output": 3}
+
+
+def test_receipts_carry_the_compaction_estimate_from_the_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stub = load("stub_agent")
+    receipts = _stub_run(tmp_path / "runs", monkeypatch, "calibration", ["memkernel"], ("demo-retain", "demo-compact"))
+    assert all(records.validate_receipt(r) == [] and r["schema_version"] == 2 for r in receipts)
+    by_task = {r["task_id"]: r for r in receipts if r["stage"] == "evaluation"}
+    compact = by_task["demo-compact"]
+    assert len(compact["stages"]["compactions"]) == 1
+    assert compact["compaction_tokens_estimate"] == stub.COMPACT_PRE_TOKENS
+    assert all(r["compaction_tokens_estimate"] == 0 for r in receipts if r["task_id"] == "demo-retain")
+
+
+def test_calibration_report_sets_the_compaction_estimate_beside_the_receipts_never_into_them() -> None:
+    def session(arm: str, index: int, group: str, estimate: int, compactions: int) -> dict[str, Any]:
+        return _trial(
+            arm,
+            "t9",
+            index,
+            phase="calibration",
+            group=group,
+            outcome=None,
+            checker_passed=None,
+            tokens={"input": 10, "cache_write": 100, "cache_read": 1000, "output": 5},
+            compaction_tokens_estimate=estimate,
+            stages={"exposure_at": None, "evaluation_at": None, "compactions": ["c"] * compactions},
+        )
+
+    receipts = [
+        session("memkernel", 0, "lc-compact", 36000, 1),
+        session("memkernel", 1, "lc-retain", 0, 0),
+        session("bare", 0, "lc-compact", 0, 0),  # an lc-compact session without its compaction
+    ]
+    text = report.render(receipts, PARAMS)
+    assert "Tokens: input 30, cache write 300, cache read 3000, output 15" in text  # the estimate is not in them
+    assert "summaries' output is not recorded): 36000" in text
+    assert "`lc-compact` sessions with exactly one compaction: 1 of 2" in text
+    assert "| memkernel | 2220 | 36000 | 38220 |" in text and "| bare | 1110 | 0 | 1110 |" in text

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("receipt.schema.json")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate (FR-018, amended 2026-10-20); only 2 is accepted
 MEMKERNEL_TOOL_PREFIX = "mcp__memkernel__"
 CONNECTED_STATUSES = frozenset({"connected", "ready"})
 
@@ -55,6 +55,9 @@ class StreamSummary:
     compactions: list[str] = field(default_factory=list)
     result_texts: list[str] = field(default_factory=list)
     tokens: dict[str, int] = field(default_factory=lambda: {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0})
+    # compact_boundary.pre_tokens summed: an estimate of the compaction calls' input only, which the /compact
+    # step's own result reports as 0; never added into ``tokens``
+    compaction_tokens_estimate: int = 0
 
     @property
     def response(self) -> str:
@@ -84,6 +87,7 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
                 summary.mcp_status[str(server.get("name"))] = str(server.get("status"))
         elif kind == "system" and event.get("subtype") == "compact_boundary":
             summary.compactions.append(ts)
+            summary.compaction_tokens_estimate += int((event.get("compact_metadata") or {}).get("pre_tokens", 0) or 0)
         elif kind == "assistant":
             for part in event.get("message", {}).get("content", []) or []:
                 if isinstance(part, dict) and part.get("type") == "tool_use":

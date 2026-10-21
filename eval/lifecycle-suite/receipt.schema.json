@@ -8,10 +8,10 @@
     "namespace_sha256", "arm", "task_id", "group", "run_index", "started_at", "ended_at",
     "model", "code_sha", "arm_config_sha256", "preregistration_sha256", "valid",
     "invalid_reason", "outcome", "checker_passed", "hooks", "tool_calls", "tokens",
-    "wall_time_ms", "stages", "diagnostics", "hashes"
+    "compaction_tokens_estimate", "wall_time_ms", "stages", "diagnostics", "hashes"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "enum": [1]},
+    "schema_version": {"type": "integer", "enum": [2]},
     "run_id": {"type": "string"},
     "phase": {"type": "string", "enum": ["calibration", "measured", "demo"]},
     "chain_id": {"type": "string"},
@@ -51,6 +51,7 @@
       }
     },
     "tool_calls": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "compaction_tokens_estimate": {"type": "integer", "$comment": "sum of compact_boundary.pre_tokens: an estimate of the compaction calls' input only; never part of tokens"},
     "tokens": {
       "type": "object",
       "additionalProperties": false,

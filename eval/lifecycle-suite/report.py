@@ -263,6 +263,9 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
         "",
     ]
     totals = {k: sum(r["tokens"][k] for r in calibration) for k in ("input", "cache_write", "cache_read", "output")}
+    estimate = sum(r["compaction_tokens_estimate"] for r in calibration)
+    compact_sessions = [r for r in calibration if r["group"] == "lc-compact"]
+    one_compaction = sum(1 for r in compact_sessions if len(r["stages"]["compactions"]) == 1)
     reasons: dict[str, int] = defaultdict(int)
     for r in calibration:
         if not r["valid"]:
@@ -273,11 +276,15 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
         f"- Sessions: {len(calibration)}",
         f"- Tokens: input {totals['input']}, cache write {totals['cache_write']}, "
         f"cache read {totals['cache_read']}, output {totals['output']}",
+        f"- Compaction calls, estimated input (sum of compact_boundary.pre_tokens; not in the tokens above; the "
+        f"summaries' output is not recorded): {estimate}",
+        f"- `lc-compact` sessions with exactly one compaction: {one_compaction} of {len(compact_sessions)}",
         f"- Invalid sessions: {', '.join(f'{k}: {v}' for k, v in sorted(reasons.items())) or 'none'}",
         f"- Live compaction proven: {params.get('live_compaction_proven', 'not recorded')}",
         "- Calibration sessions are not graded; no pass/fail exists for them.",
         "",
         *_usage_ranges(calibration),
+        *_budget_by_arm(calibration),
     ]
     return "\n".join(out)
 
@@ -302,6 +309,26 @@ def _usage_ranges(sessions: list[dict[str, Any]]) -> list[str]:
             values = sorted(r["tokens"][cls] for r in rows)
             cells.append(f"{values[0]} / {_count(median(values))} / {values[-1]}")
         lines.append(f"| {arm} | {len(rows)} | " + " | ".join(cells) + " |")
+    return [*lines, ""]
+
+
+def _budget_by_arm(sessions: list[dict[str, Any]]) -> list[str]:
+    """Input-side tokens per arm: the receipts, the compaction estimate, and the two side by side, never merged.
+
+    Billed figures come only from the Console, which the calibration record sets beside these.
+    """
+    if not sessions:
+        return []
+    lines = [
+        "| Arm | Receipts: input + cache write + cache read | Compaction estimate (input only) "
+        "| Receipts plus estimate |",
+        "|---|---|---|---|",
+    ]
+    for arm in sorted({r["arm"] for r in sessions}):
+        rows = [r for r in sessions if r["arm"] == arm]
+        received = sum(r["tokens"]["input"] + r["tokens"]["cache_write"] + r["tokens"]["cache_read"] for r in rows)
+        estimate = sum(r["compaction_tokens_estimate"] for r in rows)
+        lines.append(f"| {arm} | {received} | {estimate} | {received + estimate} |")
     return [*lines, ""]
 
 
