@@ -65,6 +65,14 @@ def _env(tmp_path: Path, *, sudo: str = "run") -> dict[str, str]:
         directory.mkdir(parents=True)
     (host_bin / "limactl").write_text(STUB_LIMACTL, encoding="utf-8")
     (host_bin / "limactl").chmod(0o755)
+    # the Mac's addresses as macOS ifconfig prints them, so no test depends on the machine it runs on
+    (host_bin / "ifconfig").write_text(
+        "#!/bin/sh\nprintf 'lo0: flags=8049\\n\\tinet 127.0.0.1 netmask 0xff000000\\n"
+        "en0: flags=8863\\n\\tinet 192.168.1.49 netmask 0xffffff00 broadcast 192.168.1.255\\n"
+        "bridge100: flags=8a63\\n\\tinet 192.168.64.1 netmask 0xffffff00 broadcast 192.168.64.255\\n'\n",
+        encoding="utf-8",
+    )
+    (host_bin / "ifconfig").chmod(0o755)
     # sudo in the guest: "run" executes the command, "noop" pretends to (a chmod that changes nothing)
     sudo_body = 'exec "$@"\n' if sudo == "run" else "exit 0\n"
     (guest_bin / "sudo").write_text("#!/bin/sh\n" + sudo_body, encoding="utf-8")
