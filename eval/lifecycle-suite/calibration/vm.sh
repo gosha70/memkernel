@@ -37,6 +37,111 @@ fetched_manifest=.calibration-fetched   # under the VM user's home: the manifest
 manifest_cmd="set -euo pipefail; cd ~/$guest_runs && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum"
 readable_cmd="sudo chmod -R a+rX ~/$guest_runs"   # rootless Docker writes the runs as a subordinate uid
 
+# The host block (FR-015 isolation). Lima's user-mode network reaches the Mac through its gateway, and NAT reaches
+# the Mac's own addresses and the rest of the LAN. The VM may send only DNS and DHCP to the gateway; every other
+# private, link-local or CGNAT destination is rejected, for the VM and for the containers in it (rootless Docker's
+# traffic leaves through the VM). Connections to the VM's own non-loopback addresses are rejected too, so a
+# container cannot reach the VM's services (its sshd) through the network helper; loopback stays open in the VM. Inbound connections, which is how Lima's ssh, copy and port forwarding work, are
+# untouched: their replies are established traffic.
+host_gateway=192.168.5.2
+probe_uid=65534   # nobody: the probes run as this user, so only they move the probe counter
+isolation_table="inet mk_isolation"
+private_ranges="10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16"
+isolation_rules() {  # $1 = the VM user's uid: rootless Docker's network helper, so the containers' traffic, runs as it
+  # Established and related traffic first: a reject answers with an ICMP error that the VM sends to its own address,
+  # which the own-address rule would otherwise reject in turn, leaving the rejected connection to hang.
+  cat << EOF
+table $isolation_table
+delete table $isolation_table
+table $isolation_table {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    ct state established,related accept
+    ip daddr != 127.0.0.0/8 fib daddr type local counter reject with icmp type admin-prohibited
+    ip6 daddr != ::1 fib daddr type local counter reject with icmpv6 type admin-prohibited
+    oifname "lo" accept
+    ip daddr $host_gateway udp dport { 53, 67 } accept
+    ip daddr $host_gateway tcp dport 53 accept
+    meta skuid $probe_uid ip daddr { $private_ranges } counter
+    meta skuid $1 ip daddr { $private_ranges } counter
+    ip daddr { $private_ranges } counter reject with icmp type admin-prohibited
+    ip6 daddr { fc00::/7, fe80::/10 } counter reject with icmpv6 type admin-prohibited
+  }
+}
+EOF
+}
+# Probed by connecting to TCP ports on Lima's gateway, the Mac's own addresses and two LAN addresses, as user
+# $probe_uid. A counting-only rule just before the reject matches that user's packets to the same addresses, so
+# nothing else in the VM moves its counter, and every packet it counts goes on to the reject. A probe counts as
+# blocked only if it fails with "No route to host" and that counter rose during the probe: then this rule rejected
+# it. The rule matches by destination address alone, so it covers every port and protocol; the probes show it is
+# loaded and effective, not each port.
+probe_ports="22 80 443 8080"
+probe_sh='set -uo pipefail
+rejected() { sudo nft list table '"$isolation_table"' 2> /dev/null | grep "skuid '"$probe_uid"' " | grep -o "packets [0-9]*" | cut -d" " -f2; }
+for address in $ADDRESSES; do
+  for port in $PORTS; do
+    before=$(rejected); before=${before:-0}
+    out=$(sudo -u "#'"$probe_uid"'" timeout 5 bash -c "echo > /dev/tcp/$address/$port" 2>&1 | head -1)
+    after=$(rejected); after=${after:-0}
+    counted=$((after - before))
+    case "$out" in
+      *"No route to host"*) [ "$counted" -gt 0 ] && result=blocked || result="NOT BLOCKED (failed, but not by the rule)" ;;
+      *) result="NOT BLOCKED (${out:-connected, or no answer within 5 s})" ;;
+    esac
+    echo "$address:$port $result"
+  done
+done'
+# The agent runs in the container, so the same is probed from there: a throwaway container of the selected image,
+# with the real run's flags. Its traffic leaves through rootless Docker's network helper, which runs as the VM user,
+# and the helper turns the VM's rejection into "Connection refused". A probe to the Mac or the LAN counts as blocked
+# only if it fails while the VM user's counting rule rose; one to the VM's own addresses only if it fails while the
+# own-address reject rule rose. Addresses on Docker bridges (docker*, br-*) are probed too, but only for failing:
+# inside rootless Docker the container's own namespace uses the same addresses (172.17.0.1 is its gateway there), so
+# such a probe never leaves it and no VM counter can rise; whatever answers there must still refuse. 10.0.2.2 (the VM's loopback as the helper would map it) must fail too: rootless Docker's
+# --disable-host-loopback stops it, not this block.
+container_probe_sh='set -uo pipefail
+count() { sudo nft list table '"$isolation_table"' 2> /dev/null | grep -F "$1" | grep -o "packets [0-9]*" | head -1 | cut -d" " -f2; }
+probe() {  # $1 address, $2 port, $3 the counter rule to read (empty: none applies)
+  local before after out
+  before=0; [ -n "$3" ] && before=$(count "$3")
+  out=$(docker run '"$docker_flags"' --entrypoint bash "$IMAGE" -c "timeout 5 bash -c \"echo > /dev/tcp/$1/$2\" 2>&1 | head -1" 2>&1)
+  after=0; [ -n "$3" ] && after=$(count "$3")
+  case "$out" in
+    *"Connection refused"*|*"No route to host"*)
+      if [ -z "$3" ] || [ $((${after:-0} - ${before:-0})) -gt 0 ]; then
+        echo "container -> $1:$2 blocked${4:-}"
+      else
+        echo "container -> $1:$2 NOT BLOCKED (failed, but not by the rule)"
+      fi ;;
+    *) echo "container -> $1:$2 NOT BLOCKED (${out:-connected, or no answer within 5 s})" ;;
+  esac
+}
+for target in $MAC_TARGETS; do probe "${target%:*}" "${target#*:}" "skuid $VM_UID "; done
+for address in $(ip -4 -o addr show scope global | awk "\$2 !~ /^(docker|br-)/ {print \$4}" | cut -d/ -f1); do
+  probe "$address" 22 "fib daddr type local"
+done
+for address in $(ip -4 -o addr show scope global | awk "\$2 ~ /^(docker|br-)/ {print \$4}" | cut -d/ -f1); do
+  probe "$address" 22 "" " (the container'"'"'s own gateway; no VM rule involved)"
+done
+probe 10.0.2.2 22 "" " (by rootless Docker'"'"'s --disable-host-loopback)"'
+# Loaded at every boot before the network, like Ubuntu's own nftables.service (DefaultDependencies=no avoids an
+# ordering cycle with sysinit.target that would drop the network job).
+isolation_unit="[Unit]
+Description=Block the calibration VM from reaching the Mac and private networks
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/mk-isolation.nft
+
+[Install]
+WantedBy=sysinit.target"
+
 vm_state() {  # prints present or absent; exits non-zero when Lima cannot say
   local names
   names=$(limactl list -q 2>/dev/null) || return 1
@@ -50,6 +155,71 @@ in_vm() {  # run a bash script in the VM, from the VM user's home, with nothing 
 
 in_vm_stdin() {  # like in_vm, but the VM command reads this script's stdin
   limactl shell --workdir / "$vm" -- bash -lc "cd ~ && $1"
+}
+
+install_host_block() {
+  local gateway
+  gateway=$(in_vm "ip -4 route show default | awk '{print \$3; exit}'")
+  if [ "$gateway" != "$host_gateway" ]; then
+    echo "vm.sh: the VM's gateway is '$gateway', not Lima's $host_gateway; the host block would not fit" >&2
+    exit 1
+  fi
+  isolation_rules "$(in_vm "id -u")" | in_vm_stdin "sudo tee /etc/mk-isolation.nft > /dev/null"
+  printf '%s\n' "$isolation_unit" | in_vm_stdin "sudo tee /etc/systemd/system/mk-isolation.service > /dev/null"
+  in_vm "set -euo pipefail; sudo systemctl daemon-reload; sudo systemctl enable --now mk-isolation.service 2> /dev/null"
+  require_host_block vm-only   # no image exists yet; preflight and calibrate probe from a container too
+}
+
+verify_host_block() {  # probes as described at probe_sh; sets probe_report, returns 0 only if all held
+  local addresses probes blocked
+  addresses="$host_gateway $(ifconfig 2> /dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2}') 192.168.1.1 10.0.0.1"
+  probe_report=$(in_vm "ADDRESSES='$addresses' PORTS='$probe_ports'; $probe_sh") || return 1
+  probes=$(printf '%s\n' "$probe_report" | grep -c -e ' blocked$' -e ' NOT BLOCKED') || true
+  blocked=$(printf '%s\n' "$probe_report" | grep -c ' blocked$') || true
+  probe_report="$probe_report
+host block: $blocked of $probes probe(s) blocked by its reject rule"
+  [ "$probes" -gt 0 ] && [ "$blocked" -eq "$probes" ]
+}
+
+verify_container_block() {  # as described at container_probe_sh; sets container_report, returns 0 only if all held
+  local image mac targets probes blocked
+  image=$(selected_image)
+  mac=$(ifconfig 2> /dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2}')
+  targets="$host_gateway:22 $host_gateway:80"
+  for address in $mac 192.168.1.1 10.0.0.1; do targets="$targets $address:80"; done
+  container_report=$(in_vm "IMAGE='$image' MAC_TARGETS='$targets' VM_UID=\$(id -u); $container_probe_sh") || return 1
+  probes=$(printf '%s\n' "$container_report" | grep -c '^container -> ') || true
+  blocked=$(printf '%s\n' "$container_report" | grep -c '^container -> .* blocked') || true
+  container_report="$container_report
+host block, from a container of $image: $blocked of $probes probe(s) blocked"
+  [ "$probes" -gt 0 ] && [ "$blocked" -eq "$probes" ]
+}
+
+require_host_block() {  # before the key is asked for: no paid run in a VM that can reach the Mac; $1 = vm-only at create
+  local refuse="vm.sh: the VM's host block is not in place (FR-015 isolation)"
+  if ! in_vm "systemctl is-enabled --quiet mk-isolation.service"; then
+    echo "$refuse: its unit is not enabled; delete the VM and run vm.sh create" >&2
+    exit 1
+  fi
+  # Reapply this script's own copy, so that an edited, flushed or deleted table is replaced, then prove it holds.
+  if ! isolation_rules "$(in_vm "id -u")" \
+    | in_vm_stdin "sudo tee /etc/mk-isolation.nft > /dev/null && sudo nft -f /etc/mk-isolation.nft"; then
+    echo "$refuse: reapplying it failed" >&2
+    exit 1
+  fi
+  if ! verify_host_block; then
+    printf '%s\n' "$probe_report" >&2
+    echo "$refuse: it did not block every probe through its own rule; do not run preflight or calibrate here" >&2
+    exit 1
+  fi
+  printf '%s\n' "$probe_report" | tail -1
+  [ "${1:-}" = vm-only ] && return 0
+  if ! verify_container_block; then  # the agent runs in the container: the evidence must come from there too
+    printf '%s\n' "$container_report" >&2
+    echo "$refuse: a container of the selected image got past it; do not run preflight or calibrate here" >&2
+    exit 1
+  fi
+  printf '%s\n' "$container_report" | tail -1
 }
 
 # The selected image is kept by its immutable ID in ~/.calibration-image (tag in ~/.calibration-tag, for
@@ -122,7 +292,8 @@ case "${1:-}" in
     # Rootless Docker maps the container's uid 1000 to a subordinate uid, so the runs directory must be
     # writable by it. The VM is disposable; the directory is world-writable only inside it.
     in_vm "mkdir -p ~/$guest_runs && chmod 1777 ~/$guest_runs && docker version --format 'docker {{.Server.Version}}'"
-    echo "VM $vm is ready. Next: vm.sh check, then vm.sh build"
+    install_host_block
+    echo "VM $vm is ready, with the host block in place. Next: vm.sh check, then vm.sh build"
     ;;
   check)
     echo "== shared folders from the Mac (expect none):"
@@ -139,6 +310,47 @@ case "${1:-}" in
     in_vm "echo \${SSH_AUTH_SOCK:-none}"
     echo "== environment variables in the VM whose names look like secrets (expect none):"
     in_vm "env | cut -d= -f1 | grep -iE 'key|token|secret|password|credential' || echo none"
+    failures=0
+    echo "== the host block: TCP probes to the Mac and LAN addresses (expect: blocked, all counted by its rule):"
+    verify_host_block || failures=$((failures + 1))
+    printf '%s\n' "$probe_report"
+    echo "   (the rule matches by destination address, with no port: these probes show it loaded and effective)"
+    echo "== the host block, from a container of the selected image with the run's flags (expect: blocked):"
+    if in_vm "test -s ~/.calibration-image"; then
+      verify_container_block || failures=$((failures + 1))
+      printf '%s\n' "$container_report"
+    else
+      echo "no image selected yet: run vm.sh check again after vm.sh build"
+    fi
+    echo "== DNS and the Anthropic API, seen from the VM (expect: an address, then HTTP 401):"
+    egress=$(in_vm "getent hosts api.anthropic.com | head -1
+      curl -s -o /dev/null -w 'HTTP %{http_code}\n' --connect-timeout 10 https://api.anthropic.com/v1/models || true")
+    printf '%s\n' "$egress"
+    case "$egress" in *"HTTP 401"*) ;; *) failures=$((failures + 1)) ;; esac
+    echo "== Lima's channels: copy both ways and port forwarding (expect: ok):"
+    probe_file=$(mktemp)
+    echo "vm.sh check $$" > "$probe_file"
+    if limactl copy "$probe_file" "$vm:.vm-check-probe" && limactl copy "$vm:.vm-check-probe" "$probe_file.back" \
+      && cmp -s "$probe_file" "$probe_file.back"; then echo "copy: ok"; else echo "copy: FAILED"; failures=$((failures + 1)); fi
+    rm -f "$probe_file" "$probe_file.back"
+    # A port the Mac's OS reports free and a one-off answer, so nothing else listening can pass for the VM.
+    port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    token="vm.sh check $$ $RANDOM"
+    in_vm "rm -f ~/.vm-check-probe; mkdir -p ~/.vm-check-www && echo '$token' > ~/.vm-check-www/index.html
+      cd ~/.vm-check-www && setsid -f python3 -m http.server $port < /dev/null > /dev/null 2>&1"
+    forwarded=""
+    for _ in $(seq 1 15); do
+      forwarded=$(curl -s --connect-timeout 2 "http://127.0.0.1:$port/index.html" || true)
+      [ "$forwarded" = "$token" ] && break
+      sleep 1
+    done
+    in_vm "pkill -f 'http[.]server $port' || true; rm -rf ~/.vm-check-www"   # [.]: not this shell's own line
+    if [ "$forwarded" = "$token" ]; then echo "port forwarding: ok"; else echo "port forwarding: FAILED"; failures=$((failures + 1)); fi
+    if [ "$failures" -gt 0 ]; then
+      echo "vm.sh check: $failures isolation check(s) failed; do not run preflight or calibrate in this VM" >&2
+      exit 1
+    fi
+    echo "vm.sh check: every host-block probe failed as its line requires, and Lima's channels work"
     ;;
   build)
     sha=${2:-$(git rev-parse HEAD)}
@@ -288,9 +500,11 @@ case "${1:-}" in
     in_vm "docker run $docker_flags '$tag' demo"
     ;;
   preflight)
+    require_host_block
     read_secrets | run_container preflight
     ;;
   calibrate)
+    require_host_block
     echo "This is the paid run, capped by the workspace's spend limit. It takes a while; keep the Mac awake."
     read -r -p "Type 'calibrate' to start: " answer </dev/tty
     [ "$answer" = calibrate ] || { echo "vm.sh: not started" >&2; exit 1; }

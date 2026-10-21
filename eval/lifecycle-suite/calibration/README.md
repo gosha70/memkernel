@@ -94,9 +94,41 @@ repository at the exact commit. The key is typed at a hidden prompt and passed
 to the VM on stdin. It is never written to a file or shown on a command line,
 and your Mac's environment is never forwarded into the VM.
 
-The VM can still open network connections to services listening on your
-Mac (through `host.lima.internal`). Stop local services that hold sensitive
-data while the run is going, or use a cloud VM (section 4).
+Lima's network would let the VM reach services listening on your Mac (through
+`host.lima.internal`, or the Mac's own addresses) and the rest of your LAN.
+`vm.sh create` therefore installs a **host block**: a firewall table in the VM,
+loaded at every boot, that lets the VM send only DNS and DHCP to Lima's gateway
+and rejects every private, link-local and CGNAT destination. It covers the
+containers too, because rootless Docker's traffic leaves through the VM. It also
+rejects connections to the VM's own addresses other than loopback, so a
+container can't reach the VM's own services, such as its `sshd`. The
+internet stays reachable, which the run needs for the Anthropic API.
+Connections from the Mac into the VM, which `limactl shell`, `copy` and port
+forwarding use, are unaffected.
+
+The block accepts established traffic first, which its own reject replies need.
+So it holds only for connections opened after it was loaded. `vm.sh create`
+installs it as a unit that loads at every boot, before the network and before
+Docker, so no container ever starts without it. Don't add it to a VM that is
+already running work. If `vm.sh check` ever reports the block missing, delete
+the VM and create a new one: reapplying the rules stops new connections, but
+any connection opened while the block was missing would stay open.
+
+Before asking for the key, `vm.sh preflight` and `vm.sh calibrate` reapply the
+block from `vm.sh`'s own copy (undoing any change to it) and probe TCP ports 22,
+80, 443 and 8080 on Lima's gateway, the Mac's addresses and two LAN addresses.
+The probes run as the unprivileged `nobody` user, and a counting rule just
+before the reject sees only that user's packets. Every probe must fail with "No
+route to host" while that counter rises, which shows the reject rule stopped
+that probe, or they refuse. Because the agent runs in the container, they then
+repeat the probes from a throwaway container of the selected image, run with
+the real run's flags. Each probe must fail while the matching counter rises:
+the VM user's counter for the Mac and LAN addresses (rootless Docker's network
+helper runs as that user), the own-address rule's counter for the VM's own
+addresses. They also try `10.0.2.2`, the VM's loopback as the helper would map
+it, which rootless Docker's `--disable-host-loopback` blocks. `vm.sh check`
+runs the container probes once an image is built. The rule matches by address alone, so the probes
+show that it is loaded and effective; they do not try every port.
 
 Steps, from a checkout of this repository on your Mac:
 
@@ -105,7 +137,9 @@ brew install lima                                   # once
 V=eval/lifecycle-suite/calibration/vm.sh
 
 $V create        # a few minutes: downloads Ubuntu, installs Docker in the VM
-$V check         # expect: no shared folders, no /Users path, no credentials, no SSH agent
+$V check         # expect: no shared folders, no /Users path, no credentials, no SSH agent;
+                 # every host-block probe "blocked" and counted by its rule, the API "HTTP 401",
+                 # copy and port forwarding "ok"; it ends "every host-block probe failed as its line requires" or exits 1
 $V build 35b2ff0 # clones the repo at that commit inside the VM, builds the image (about 10 min);
                  # prints the image tag and ID; record them
 $V demo          # expect: "demo: 32 receipts, 32 sessions observed, 0 failure(s)"
