@@ -230,8 +230,11 @@ the new image before it is ticked.
    - Option B, keeping the runtime and stating the dependency in the
      preregistration, was not chosen: it would leave an outside dependency that
      changes over time inside a preregistered run.
-2. **Compaction calls in the receipts:** the separate PR described above,
-   which must land before the measured run.
+2. **Compaction calls in the receipts (done by task 18b):** receipts now carry
+   `compaction_tokens_estimate`, the sum of `compact_boundary.pre_tokens`, an
+   estimate of the compaction calls' input only, kept out of the token
+   classes. On this run's streams it sums to 438,613, as above; the 21,821
+   remaining input tokens stay unexplained.
 3. **The VM can reach the Mac (addressed for the recalibration by the host
    block in `vm.sh`).** The block rejects every private, link-local and CGNAT
    destination by address, with no port. `preflight` and `calibrate` reapply it

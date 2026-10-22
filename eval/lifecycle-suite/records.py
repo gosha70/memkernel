@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("receipt.schema.json")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate (FR-018, amended 2026-10-20); only 2 is accepted
 MEMKERNEL_TOOL_PREFIX = "mcp__memkernel__"
 CONNECTED_STATUSES = frozenset({"connected", "ready"})
 
@@ -55,6 +55,11 @@ class StreamSummary:
     compactions: list[str] = field(default_factory=list)
     result_texts: list[str] = field(default_factory=list)
     tokens: dict[str, int] = field(default_factory=lambda: {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0})
+    # compact_boundary.pre_tokens summed: an estimate of the compaction calls' input only, which the /compact
+    # step's own result reports as 0; never added into ``tokens``
+    compaction_tokens_estimate: int = 0
+    # compactions whose pre_tokens was missing or not a non-negative integer: their input is not in the estimate
+    compaction_estimates_missing: int = 0
 
     @property
     def response(self) -> str:
@@ -71,6 +76,14 @@ def _content_text(content: Any) -> str:
     return json.dumps(content, sort_keys=True)
 
 
+def _pre_tokens(event: dict[str, Any]) -> int | None:
+    """compact_boundary.pre_tokens, or None when it is missing or not a non-negative integer: such a compaction is
+    counted in compaction_estimates_missing and flagged by the report, so it can never pass as a silent 0."""
+    metadata = event.get("compact_metadata")
+    value = metadata.get("pre_tokens") if isinstance(metadata, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
 def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) -> StreamSummary:
     """Fold wrapped stream lines into a summary; call repeatedly for the steps of one session."""
     summary = into or StreamSummary()
@@ -84,6 +97,11 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
                 summary.mcp_status[str(server.get("name"))] = str(server.get("status"))
         elif kind == "system" and event.get("subtype") == "compact_boundary":
             summary.compactions.append(ts)
+            pre_tokens = _pre_tokens(event)
+            if pre_tokens is None:
+                summary.compaction_estimates_missing += 1
+            else:
+                summary.compaction_tokens_estimate += pre_tokens
         elif kind == "assistant":
             for part in event.get("message", {}).get("content", []) or []:
                 if isinstance(part, dict) and part.get("type") == "tool_use":
@@ -170,6 +188,8 @@ def _validate(value: Any, schema: dict[str, Any], path: str, errors: list[str]) 
         return
     if "enum" in schema and value not in schema["enum"]:
         errors.append(f"{path}: {value!r} not in {schema['enum']}")
+    if "minimum" in schema and isinstance(value, int | float) and value < schema["minimum"]:
+        errors.append(f"{path}: {value!r} is below the minimum {schema['minimum']}")
     if isinstance(value, dict):
         props = schema.get("properties", {})
         for key in schema.get("required", []):

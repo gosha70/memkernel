@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+COMPACT_PRE_TOKENS = 1000  # the stub compaction call's input, reported only in compact_boundary
+
 
 def _flag(argv: list[str], name: str) -> str | None:
     return argv[argv.index(name) + 1] if name in argv else None
@@ -59,9 +61,10 @@ def main(argv: list[str]) -> int:
     usage = {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 5}
     if prompt == "/compact":
         _run_hooks(settings, "PreCompact")
-        _emit({"type": "system", "subtype": "compact_boundary"})
+        # as the real CLI: the boundary carries the compaction call's input, the step's result reports 0 tokens
+        _emit({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"pre_tokens": COMPACT_PRE_TOKENS}})
         _run_hooks(settings, "PostCompact")
-        _emit({"type": "result", "subtype": "success", "result": "", "usage": usage})
+        _emit({"type": "result", "subtype": "success", "result": "", "usage": dict.fromkeys(usage, 0)})
         return 0
     cwd = Path.cwd()
     _emit(
