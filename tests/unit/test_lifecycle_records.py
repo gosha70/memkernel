@@ -158,6 +158,7 @@ def _receipt(**overrides: Any) -> dict[str, Any]:
         "tool_calls": {},
         "tokens": {"input": 1, "cache_write": 0, "cache_read": 0, "output": 1},
         "compaction_tokens_estimate": 0,
+        "compaction_estimates_missing": 0,
         "wall_time_ms": 1,
         "stages": {"exposure_at": None, "evaluation_at": None, "compactions": []},
         "diagnostics": {},
@@ -179,6 +180,8 @@ def test_receipt_schema_accepts_a_valid_receipt_and_rejects_drift() -> None:
     assert any("unexpected key" in e for e in records.validate_receipt(_receipt(content="leaked text")))
     # only schema version 2: a receipt from before compaction_tokens_estimate (the superseded calibration) is refused
     assert any("not in [2]" in e for e in records.validate_receipt(_receipt(schema_version=1)))
+    assert any("below the minimum 0" in e for e in records.validate_receipt(_receipt(compaction_tokens_estimate=-1)))
+    assert any("below the minimum 0" in e for e in records.validate_receipt(_receipt(compaction_estimates_missing=-1)))
     assert any(
         "missing compaction_tokens_estimate" in e
         for e in records.validate_receipt({k: v for k, v in _receipt().items() if k != "compaction_tokens_estimate"})
@@ -833,6 +836,7 @@ def test_the_compaction_estimate_sums_pre_tokens_and_stays_out_of_the_token_clas
     ]
     summary = records.summarise(lines)
     assert summary.compaction_tokens_estimate == 36250 and summary.compactions == ["t1", "t3", "t4"]
+    assert summary.compaction_estimates_missing == 1  # the boundary without metadata
     assert summary.tokens == {"input": 7, "cache_write": 0, "cache_read": 0, "output": 3}
 
 
@@ -847,6 +851,7 @@ def test_receipts_carry_the_compaction_estimate_from_the_stream(
     assert len(compact["stages"]["compactions"]) == 1
     assert compact["compaction_tokens_estimate"] == stub.COMPACT_PRE_TOKENS
     assert all(r["compaction_tokens_estimate"] == 0 for r in receipts if r["task_id"] == "demo-retain")
+    assert all(r["compaction_estimates_missing"] == 0 for r in receipts)
 
 
 def test_calibration_report_sets_the_compaction_estimate_beside_the_receipts_never_into_them() -> None:
@@ -874,3 +879,65 @@ def test_calibration_report_sets_the_compaction_estimate_beside_the_receipts_nev
     assert "summaries' output is not recorded): 36000" in text
     assert "`lc-compact` sessions with exactly one compaction: 1 of 2" in text
     assert "| memkernel | 2220 | 36000 | 38220 |" in text and "| bare | 1110 | 0 | 1110 |" in text
+
+
+@pytest.mark.parametrize("pre_tokens", ["36150", -5, True, 1.5, None])
+def test_a_malformed_pre_tokens_counts_as_missing_instead_of_failing_the_summary(pre_tokens: object) -> None:
+    event = {"type": "system", "subtype": "compact_boundary", "compact_metadata": {"pre_tokens": pre_tokens}}
+    summary = records.summarise([{"ts": "t1", "event": event}])
+    assert summary.compactions == ["t1"] and summary.compaction_tokens_estimate == 0
+    assert summary.compaction_estimates_missing == 1
+
+
+def _session(
+    phase: str, chain: str, group: str, estimate: int, compactions: int, missing: int = 0, run: str = "r"
+) -> dict[str, Any]:
+    return _trial(
+        "memkernel",
+        chain,
+        0,
+        run_id=run,
+        phase=phase,
+        group=group,
+        outcome=None if phase == "calibration" else "passed",
+        checker_passed=None if phase == "calibration" else True,
+        compaction_tokens_estimate=estimate,
+        compaction_estimates_missing=missing,
+        stages={"exposure_at": None, "evaluation_at": None, "compactions": ["c"] * compactions},
+    )
+
+
+@pytest.mark.parametrize("phase", ["calibration", "measured"])
+def test_a_compaction_without_an_estimate_is_flagged_even_beside_a_valid_one(phase: str) -> None:
+    """Review of #41: one compaction with pre_tokens and one without must not pass as a complete estimate."""
+    receipts = [
+        _session(phase, "t1", "lc-compact", 36000, 1),
+        _session(phase, "t2", "lc-compact", 36000, 2, missing=1),  # one valid, one missing, in one session
+    ]
+    text = report.render(receipts, PARAMS)
+    assert "WARNING: 1 compaction(s) in 1 session(s) recorded no estimate" in text
+    warning = text.split("WARNING")[1].splitlines()[0]
+    assert "r t2.memkernel.r0 position 0 (1)" in warning and "t1.memkernel.r0" not in warning
+    assert "WARNING" not in report.render([_session(phase, "t1", "lc-compact", 36000, 1)], PARAMS)
+
+
+@pytest.mark.parametrize("phase", ["calibration", "measured"])
+def test_the_report_does_not_depend_on_the_order_of_the_receipts(phase: str) -> None:
+    receipts = [
+        _session(phase, "t2", "lc-compact", 0, 1, missing=1, run="r2"),
+        _session(phase, "t1", "lc-compact", 0, 1, missing=1, run="r1"),
+        _session(phase, "t1", "lc-compact", 0, 1, missing=1, run="r2"),
+    ]
+    text = report.render(receipts, PARAMS)
+    assert text == report.render(list(reversed(receipts)), PARAMS)
+    warning = text.split("WARNING")[1].splitlines()[0]
+    assert warning.index("r1 t1.memkernel.r0") < warning.index("r2 t1.memkernel.r0") < warning.index("r2 t2")
+
+
+def test_the_measured_report_sets_the_compaction_estimate_beside_the_receipts_too() -> None:
+    """FR-018: the measured run's lc-compact sessions undercount the same way as calibration's."""
+    receipts = [_session("measured", "t1", "lc-compact", 36000, 1), _session("measured", "t2", "lc-retain", 0, 0)]
+    text = report.render(receipts, PARAMS)
+    measured = text.split("## Token usage (measured)")[1].split("## Label")[0]
+    assert "summaries' output is not recorded): 36000" in measured
+    assert "| memkernel | 2 | 36000 | 36002 |" in measured  # receipts, the estimate, the two together

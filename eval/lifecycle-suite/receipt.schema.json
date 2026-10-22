@@ -1,5 +1,5 @@
 {
-  "$comment": "memkernel lifecycle suite receipt, one per session (specs/memkernel-0-5 FR-018). Validated by records.validate_receipt (stdlib subset of JSON Schema: type, required, enum, properties, items, additionalProperties).",
+  "$comment": "memkernel lifecycle suite receipt, one per session (specs/memkernel-0-5 FR-018). Validated by records.validate_receipt (stdlib subset of JSON Schema: type, required, enum, minimum, properties, items, additionalProperties).",
   "title": "LifecycleReceipt",
   "type": "object",
   "additionalProperties": false,
@@ -8,7 +8,7 @@
     "namespace_sha256", "arm", "task_id", "group", "run_index", "started_at", "ended_at",
     "model", "code_sha", "arm_config_sha256", "preregistration_sha256", "valid",
     "invalid_reason", "outcome", "checker_passed", "hooks", "tool_calls", "tokens",
-    "compaction_tokens_estimate", "wall_time_ms", "stages", "diagnostics", "hashes"
+    "compaction_tokens_estimate", "compaction_estimates_missing", "wall_time_ms", "stages", "diagnostics", "hashes"
   ],
   "properties": {
     "schema_version": {"type": "integer", "enum": [2]},
@@ -51,7 +51,8 @@
       }
     },
     "tool_calls": {"type": "object", "additionalProperties": {"type": "integer"}},
-    "compaction_tokens_estimate": {"type": "integer", "$comment": "sum of compact_boundary.pre_tokens: an estimate of the compaction calls' input only; never part of tokens"},
+    "compaction_estimates_missing": {"type": "integer", "minimum": 0, "$comment": "compactions whose pre_tokens was missing or malformed: not in compaction_tokens_estimate"},
+    "compaction_tokens_estimate": {"type": "integer", "minimum": 0, "$comment": "sum of compact_boundary.pre_tokens: an estimate of the compaction calls' input only; never part of tokens"},
     "tokens": {
       "type": "object",
       "additionalProperties": false,
