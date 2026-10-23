@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("receipt.schema.json")
-# The model refused the session's key: every call fails, so the agent never acts (FR-015a, a harness failure).
+# The API refused the run's key: a failure of the environment at any step, never of the arm (FR-015a (c)).
 AUTHENTICATION_STATUSES = (401, 403)
 AUTHENTICATION_ERROR = "authentication_failed"
 SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate and compaction_estimates_missing (FR-018); only 2 is accepted

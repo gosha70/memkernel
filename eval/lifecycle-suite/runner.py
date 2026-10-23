@@ -483,8 +483,8 @@ def run_session(
             if result.spawn_failed or (index == 0 and not summary.init_seen):
                 invalid = "session_not_started"
                 break
-            if summary.authentication_failed:  # the API refused the key: the agent could not act (FR-015a)
-                invalid = "session_not_started"
+            if summary.authentication_failed:  # the API refused the run's key, at any step (FR-015a (c))
+                invalid = "authentication_failed"
                 break
             if index == 0 and arm.mcp and summary.mcp_status.get("memkernel") not in CONNECTED_STATUSES:
                 invalid = "mcp_not_connected"

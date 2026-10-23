@@ -33,7 +33,7 @@
     "invalid_reason": {
       "type": ["string", "null"],
       "enum": ["session_not_started", "mcp_not_connected", "fixture_restore_failed", "checker_crashed",
-               "no_compaction_before_evaluation", null]
+               "no_compaction_before_evaluation", "authentication_failed", null]
     },
     "outcome": {"type": ["string", "null"], "enum": ["passed", "failed", "timeout", "no_answer", null]},
     "checker_passed": {"type": ["boolean", "null"]},
