@@ -207,6 +207,21 @@ def test_an_empty_runs_directory_may_be_destroyed_and_discard_overrides(tmp_path
     assert result.returncode == 0 and _deleted(env)
 
 
+def test_a_vm_whose_create_stopped_before_the_runs_directory_may_be_destroyed(tmp_path: Path) -> None:
+    """2026-10-22: create failed during Docker's install, so there was no runs directory, and destroy refused."""
+    env = _env(tmp_path)
+    shutil.rmtree(Path(env["STUB_GUEST_HOME"]) / "runs")
+    result = _run(env, "destroy")
+    assert result.returncode == 0 and _deleted(env), result.stderr
+
+
+def test_an_unreachable_vm_without_a_known_runs_directory_is_kept(tmp_path: Path) -> None:
+    env = {**_env(tmp_path), "STUB_SHELL_EXIT": "255"}
+    shutil.rmtree(Path(env["STUB_GUEST_HOME"]) / "runs")
+    result = _run(env, "destroy")
+    assert result.returncode == 1 and not _deleted(env) and "the VM is kept" in result.stderr
+
+
 TAG = "memkernel-calibration:12a3ff3b60e3"
 IMAGE_ID = "sha256:" + "ba4dc322" * 8  # the image the archive carries
 OTHER_ID = "sha256:" + "f97e82e2" * 8  # another build of the same commit: same tag, different ID
