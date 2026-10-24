@@ -941,3 +941,112 @@ def test_the_measured_report_sets_the_compaction_estimate_beside_the_receipts_to
     measured = text.split("## Token usage (measured)")[1].split("## Label")[0]
     assert "summaries' output is not recorded): 36000" in measured
     assert "| memkernel | 2 | 36000 | 36002 |" in measured  # receipts, the estimate, the two together
+
+
+@pytest.mark.parametrize(
+    ("event", "failed"),
+    [
+        ({"type": "assistant", "error": "authentication_failed", "message": {"content": []}}, True),
+        ({"type": "result", "is_error": True, "api_error_status": 401, "result": "Invalid API key"}, True),
+        ({"type": "result", "is_error": True, "api_error_status": 403, "result": "Forbidden"}, True),
+        ({"type": "result", "is_error": True, "api_error_status": 529, "result": "Overloaded"}, False),
+        ({"type": "result", "is_error": True, "api_error_status": 429, "result": "Rate limited"}, False),
+        ({"type": "result", "is_error": False, "result": "done", "usage": {}}, False),
+    ],
+)
+def test_an_authentication_failure_is_recognised_from_the_stream(event: dict[str, Any], failed: bool) -> None:
+    """Task 18c: the recalibration's discarded attempt failed with "Invalid API key" (401, authentication_failed)."""
+    assert records.summarise([{"ts": "t", "event": event}]).authentication_failed is failed
+
+
+def test_a_session_whose_key_is_refused_is_invalid_not_a_failure_of_the_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-015a (c): the API refused the run's key; the receipt must not count as a valid trial of the arm."""
+    import sys as _sys
+
+    agent = tmp_path / "refused_agent.py"
+    agent.write_text(
+        "import json\n"
+        "for event in (\n"
+        "    {'type': 'system', 'subtype': 'init', 'session_id': 's', 'mcp_servers': []},\n"
+        "    {'type': 'assistant', 'error': 'authentication_failed',\n"
+        "     'message': {'content': [{'type': 'text', 'text': 'Invalid API key'}]}},\n"
+        "    {'type': 'result', 'subtype': 'success', 'is_error': True, 'api_error_status': 401,\n"
+        "     'terminal_reason': 'api_error', 'result': 'Invalid API key', 'usage': {}},\n"
+        "):\n"
+        "    print(json.dumps(event), flush=True)\n",
+        encoding="utf-8",
+    )
+    root = tmp_path / "runs"
+    root.mkdir()
+    cfg = runner.RunConfig(
+        run_root=root,
+        run_id="measured",
+        phase="measured",
+        model="stub",
+        code_sha="c",
+        preregistration_sha256="p",
+        agent_cmd=(_sys.executable, str(agent)),
+        memkernel_cmd="stub",
+        memkernel_python=_sys.executable,
+        tasks_root=runner.SUITE_DIR / "fixtures" / "demo-tasks",
+        oracles_root=runner.SUITE_DIR / "fixtures" / "demo-oracles",
+        timeout_s=60.0,
+    )
+    monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
+    receipts = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(receipts) == 1  # the chain stops at the invalid session
+    receipt = receipts[0]
+    assert receipt["valid"] is False and receipt["invalid_reason"] == "authentication_failed"
+    assert receipt["outcome"] is None and records.validate_receipt(receipt) == []
+
+
+def test_a_key_refused_after_the_agent_has_acted_still_makes_the_session_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-015a (c), amended 2026-10-23: a revoked key is a failure of the environment at any step, not of the arm."""
+    import sys as _sys
+
+    calls = tmp_path / "calls"
+    agent = tmp_path / "revoked_agent.py"
+    agent.write_text(
+        "import json, pathlib\n"
+        f"calls = pathlib.Path({str(calls)!r})\n"
+        "n = int(calls.read_text()) if calls.exists() else 0\n"
+        "calls.write_text(str(n + 1))\n"
+        "events = [{'type': 'system', 'subtype': 'init', 'session_id': 's', 'mcp_servers': []}]\n"
+        "if n == 0:  # the first session works\n"
+        "    events.append({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'ok',\n"
+        "                   'usage': {'input_tokens': 5, 'output_tokens': 1}})\n"
+        "else:  # then the key is revoked\n"
+        "    events.append({'type': 'result', 'subtype': 'success', 'is_error': True, 'api_error_status': 401,\n"
+        "                   'result': 'Invalid API key', 'usage': {}})\n"
+        "for event in events:\n"
+        "    print(json.dumps(event), flush=True)\n",
+        encoding="utf-8",
+    )
+    root = tmp_path / "runs"
+    root.mkdir()
+    cfg = runner.RunConfig(
+        run_root=root,
+        run_id="measured",
+        phase="measured",
+        model="stub",
+        code_sha="c",
+        preregistration_sha256="p",
+        agent_cmd=(_sys.executable, str(agent)),
+        memkernel_cmd="stub",
+        memkernel_python=_sys.executable,
+        tasks_root=runner.SUITE_DIR / "fixtures" / "demo-tasks",
+        oracles_root=runner.SUITE_DIR / "fixtures" / "demo-oracles",
+        timeout_s=60.0,
+    )
+    monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
+    first, second = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
+    assert first["valid"] is True and first["position"] == 0
+    assert second["valid"] is False and second["invalid_reason"] == "authentication_failed"
+    trial = report.assemble([first, second])[0]
+    assert trial.valid is False and trial.invalid_reason == "authentication_failed"  # the pair is removed

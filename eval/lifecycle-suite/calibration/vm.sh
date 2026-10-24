@@ -551,11 +551,18 @@ case "${1:-}" in
         echo "vm.sh: $1; the VM is kept. Run: vm.sh fetch (then destroy). To throw the runs away: vm.sh destroy --discard" >&2
         exit 1
       }
-      in_vm "$readable_cmd" || refuse "could not make the VM's runs readable (is the VM running? limactl start $vm)"
-      current=$(in_vm "$manifest_cmd") || refuse "could not list the VM's runs"
-      fetched=$(in_vm "cat ~/$fetched_manifest 2>/dev/null || true") || refuse "could not read the last verified fetch"
-      if [ -n "$current" ] && [ "$current" != "$fetched" ]; then
-        refuse "the VM holds runs that were not fetched and verified since they last changed"
+      # A VM whose create stopped before the runs directory existed has nothing to lose; any other answer, or none
+      # (an unreachable VM), keeps the guard below.
+      runs_dir=$(in_vm "if [ -e ~/$guest_runs ]; then echo present; else echo absent; fi") \
+        || refuse "could not reach the VM to look for runs (is the VM running? limactl start $vm)"
+      if [ "$runs_dir" != absent ]; then
+        [ "$runs_dir" = present ] || refuse "could not tell whether the VM holds runs"
+        in_vm "$readable_cmd" || refuse "could not make the VM's runs readable (is the VM running? limactl start $vm)"
+        current=$(in_vm "$manifest_cmd") || refuse "could not list the VM's runs"
+        fetched=$(in_vm "cat ~/$fetched_manifest 2>/dev/null || true") || refuse "could not read the last verified fetch"
+        if [ -n "$current" ] && [ "$current" != "$fetched" ]; then
+          refuse "the VM holds runs that were not fetched and verified since they last changed"
+        fi
       fi
     fi
     limactl delete --force "$vm"

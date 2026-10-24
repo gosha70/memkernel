@@ -66,16 +66,27 @@ script's tests only.
 
 ## 1. Before you start: the workspace and the key (Claude Console)
 
-1. **Workspace.** Under Settings → Workspaces, create a new workspace just for
-   this run, for example `memkernel-calibration`. Don't use the Default
-   Workspace, which can't carry limits, or the Claude Code workspace. Note its
-   `wrkspc_…` ID.
+All of this happens in the **Claude Console**, Anthropic's API website at
+https://platform.claude.com. It is not in the Claude Desktop app or claude.ai.
+
+1. **Workspace.** In the Console, open **Settings** (in the left navigation),
+   then **Workspaces**, and create a new workspace just for this run, for example `memkernel-calibration`. Don't use the
+   Default workspace, which can't carry limits, or the Claude Code workspace.
+   Its ID is shown in the workspace list and in the workspace's panel: `wrkspc_`
+   followed by letters and digits.
 2. **Spend limit.** Open the workspace, click **Spend limits**, set the monthly
-   limit to **$30**, then check that the Console shows it. This limit, not the
-   key, is the cap. If another paid run used a workspace this month, create a
-   new one.
-3. **Key.** Create a new API key in that workspace only. Keep it out of files
-   and shell history: `vm.sh` asks for it at a hidden prompt.
+   limit to **$30**, then reopen it and check that the Console shows $30.00.
+   This limit, not the key, is the cap. If another paid run used a workspace
+   this month, create a new one.
+3. **Key.** Create a new key in that workspace: Settings → Workspaces, click
+   the workspace, then the **API keys** link in its panel. It starts with
+   `sk-ant-` and is shown only once. Keep it out of files and shell history:
+   `vm.sh` asks for it at a hidden prompt.
+
+`preflight` checks that the key belongs to the workspace ID you type, but it
+cannot tell a dedicated workspace from Default: a Default key with Default's ID
+passes. Before `calibrate`, check that the `workspace:` line shows the ID of the
+workspace you created, not Default's.
 
 ## 2. What to record (FR-018)
 
@@ -140,22 +151,24 @@ $V create        # a few minutes: downloads Ubuntu, installs Docker in the VM
 $V check         # expect: no shared folders, no /Users path, no credentials, no SSH agent;
                  # every host-block probe "blocked" and counted by its rule, the API "HTTP 401",
                  # copy and port forwarding "ok"; it ends "every host-block probe failed as its line requires" or exits 1
-$V build 35b2ff0 # clones the repo at that commit inside the VM, builds the image (about 10 min);
+$V build <sha>   # the main commit to calibrate; clones the repo at it inside the VM, builds the image (about 10 min);
                  # prints the image tag and ID; record them
 $V demo          # expect: "demo: 32 receipts, 32 sessions observed, 0 failure(s)"
 $V preflight     # asks for the key (hidden) and the workspace ID; spends nothing;
-                 # expect "workspace: wrkspc_... (matches CALIBRATION_WORKSPACE_ID)"
+                 # expect "workspace: wrkspc_... (matches CALIBRATION_WORKSPACE_ID)" with your new
+                 # workspace's ID, not Default's
 $V calibrate     # the paid run: type 'calibrate', then the key and workspace ID again.
                  # It runs in the foreground; keep the Mac awake (for example: caffeinate -i $V calibrate)
-$V fetch         # copies the VM's runs to ./calibration-runs and verifies every file (sha256);
-                 # expect "copied and verified N file(s)"
+$V fetch ~/memkernel-calibration-runs   # copies the VM's runs there and verifies every file (sha256);
+                 # expect "copied and verified N file(s)". Keep the copy outside this checkout:
+                 # the default, ./calibration-runs, is inside it and not ignored by git
 $V save-image    # copies the calibrated image to ~/memkernel-calibration-image-<id>.tar.gz, verified;
                  # the only other copy is inside this VM; the archive is then removed from the VM's disk
 $V wiring        # the credential-free wiki-bridge wiring check (below), on that same image
 $V destroy       # deletes the VM; refuses while it holds runs that were not fetched and verified
 ```
 
-Build from the commit you calibrate (`35b2ff0`, or a later `main` if it moved).
+Build from the `main` commit you calibrate (`git rev-parse HEAD` after `git pull`).
 The image holds its own copy of `run.sh`, and `build.sh` builds only a clean
 commit, so the receipts' `code_sha` identifies the image's code.
 
@@ -218,7 +231,7 @@ On a Linux machine or cloud VM that holds no personal credentials and that you
 delete afterwards:
 
 ```bash
-git clone https://github.com/gosha70/memkernel.git && cd memkernel && git checkout 35b2ff0
+git clone https://github.com/gosha70/memkernel.git && cd memkernel   # stay on the main commit to calibrate
 eval/lifecycle-suite/calibration/build.sh            # tags memkernel-calibration:<sha12>
 docker image inspect --format '{{.Id}}' memkernel-calibration:<sha12>   # record it
 mkdir -p calibration-runs && sudo chown 1000:1000 calibration-runs      # the container runs as uid 1000

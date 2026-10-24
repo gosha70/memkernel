@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("receipt.schema.json")
-SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate (FR-018, amended 2026-10-20); only 2 is accepted
+# The API refused the run's key: a failure of the environment at any step, never of the arm (FR-015a (c)).
+AUTHENTICATION_STATUSES = (401, 403)
+AUTHENTICATION_ERROR = "authentication_failed"
+SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate and compaction_estimates_missing (FR-018); only 2 is accepted
 MEMKERNEL_TOOL_PREFIX = "mcp__memkernel__"
 CONNECTED_STATUSES = frozenset({"connected", "ready"})
 
@@ -60,6 +63,8 @@ class StreamSummary:
     compaction_tokens_estimate: int = 0
     # compactions whose pre_tokens was missing or not a non-negative integer: their input is not in the estimate
     compaction_estimates_missing: int = 0
+    # the API refused the key (a result's api_error_status, or an assistant message's error): see AUTHENTICATION_*
+    authentication_failed: bool = False
 
     @property
     def response(self) -> str:
@@ -103,6 +108,8 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
             else:
                 summary.compaction_tokens_estimate += pre_tokens
         elif kind == "assistant":
+            if event.get("error") == AUTHENTICATION_ERROR:
+                summary.authentication_failed = True
             for part in event.get("message", {}).get("content", []) or []:
                 if isinstance(part, dict) and part.get("type") == "tool_use":
                     summary.tool_uses.append(
@@ -118,6 +125,8 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
                 if isinstance(part, dict) and part.get("type") == "tool_result":
                     summary.tool_results[str(part.get("tool_use_id"))] = _content_text(part.get("content"))
         elif kind == "result":
+            if event.get("api_error_status") in AUTHENTICATION_STATUSES:
+                summary.authentication_failed = True
             summary.result_texts.append(str(event.get("result") or ""))
             usage = event.get("usage") or {}
             summary.tokens["input"] += int(usage.get("input_tokens", 0) or 0)
