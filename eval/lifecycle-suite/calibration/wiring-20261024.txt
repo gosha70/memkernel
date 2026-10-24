@@ -1,0 +1,96 @@
+# Output of `vm.sh wiring` (task 18a) on the calibrated image, run before
+# calibration-20261024T033046Z. Copied from the operator's terminal: the
+# provenance lines and the JSON result verbatim; only the server's INFO log
+# lines and progress bars are left out.
+image: memkernel-calibration:1c7c731cf8eb
+image id: sha256:264590dbbd64444052b390031f77523e6858afa43968424e8e6e0ee4e30fa552
+image code: 1c7c731cf8eb377541ad1f6157387d430da1bcbc
+check: commit 1c7c731cf8eb377541ad1f6157387d430da1bcbc (clean, copied with git archive) wiring_check.py sha256 84ee944463ec52fe19aa65a644cc4136b0043ef2b71b966653d7aae699f4a3f0
+runner: eval/lifecycle-suite/ outside wiring/ and calibration/ is identical at 1c7c731cf8eb377541ad1f6157387d430da1bcbc and 1c7c731cf8eb377541ad1f6157387d430da1bcbc
+{
+  "check": "wiki-bridge wiring (task 18a)",
+  "check_sha256": "84ee944463ec52fe19aa65a644cc4136b0043ef2b71b966653d7aae699f4a3f0",
+  "fixture_sha256": {
+    "task.json": "f8b01fce549e4f19872960cb4cf6eae85d8a58de9a8bdaee25f9d42e0739f2bb",
+    "tree/README.md": "e35ccef0459ee463b63d6449df867fcfca74252336e4bee03d5d5cdef29b126c",
+    "tree/knowledge/wiki/index.md": "1d965f04dc7fb1dbafffb4efb1c643fce53460d5df698cf2efd1b625ab414768"
+  },
+  "suite": "/opt/memkernel/eval/lifecycle-suite",
+  "code_sha": "1c7c731cf8eb377541ad1f6157387d430da1bcbc",
+  "steps": [
+    {
+      "step": "source store starts empty",
+      "passed": true
+    },
+    {
+      "step": "retain returned a ref_id",
+      "passed": true,
+      "ref_id": "033bb56a-41fe-4052-adea-36d9d36e572b"
+    },
+    {
+      "step": "wiki_export wrote exactly one page",
+      "passed": true,
+      "written": [
+        "decisions/wiring-check-fact-the-synthetic-billing-service-rounds-invoi.md"
+      ],
+      "gate_error": null
+    },
+    {
+      "step": "source store holds exactly 1 record",
+      "passed": true
+    },
+    {
+      "step": "every fixture file is in the destination",
+      "passed": true,
+      "missing": []
+    },
+    {
+      "step": "fixture files outside knowledge/wiki/ are byte-identical",
+      "passed": true,
+      "changed": []
+    },
+    {
+      "step": "only knowledge/wiki/ crossed over",
+      "passed": true,
+      "crossed": [
+        "knowledge/wiki/decisions/wiring-check-fact-the-synthetic-billing-service-rounds-invoi.md",
+        "knowledge/wiki/log.md"
+      ]
+    },
+    {
+      "step": "the exported page crossed over",
+      "passed": true
+    },
+    {
+      "step": "destination is a second namespace",
+      "passed": true
+    },
+    {
+      "step": "destination store starts with 0 records",
+      "passed": true
+    },
+    {
+      "step": "recall finds nothing before import",
+      "passed": true,
+      "hits": 0
+    },
+    {
+      "step": "wiki_import imported the exported page",
+      "passed": true,
+      "imported": [
+        "decisions/wiring-check-fact-the-synthetic-billing-service-rounds-invoi.md"
+      ]
+    },
+    {
+      "step": "destination store holds exactly the imported pages",
+      "passed": true
+    },
+    {
+      "step": "get returns the synthetic sentence verbatim",
+      "passed": true,
+      "ref_id": "82f50740-f545-416b-85df-77ad3027c177",
+      "source": "decisions/wiring-check-fact-the-synthetic-billing-service-rounds-invoi.md"
+    }
+  ],
+  "passed": true
+}

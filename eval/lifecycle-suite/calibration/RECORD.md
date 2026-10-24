@@ -11,6 +11,8 @@ Face network access (option A in [Open items](#open-items), decided
 2026-10-20 UTC), which changes the runtime, so a new calibration on a new image
 follows before the freeze. Task 18a stays unticked until it is re-run on that
 image; its pass below applies to image `sha256:ba4dc322…` only.
+The calibration that replaces it is `calibration-20261024T033046Z`, recorded
+in `RECORD-2026-10-24.md`.
 
 **Token figures.** The receipts miss the `/compact` steps (see below). Spend
 and any budget for the measured run are based on the Console's totals and the
