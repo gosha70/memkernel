@@ -531,6 +531,7 @@ def run_session(
         "tokens": summary.tokens,
         "compaction_tokens_estimate": summary.compaction_tokens_estimate,
         "compaction_estimates_missing": summary.compaction_estimates_missing,
+        "api_errors": dict(sorted(summary.api_errors.items())),
         "wall_time_ms": int((time.monotonic() - t0) * 1000),
         "stages": {"exposure_at": exposure_at, "evaluation_at": evaluation_at, "compactions": summary.compactions},
         "diagnostics": session_diagnostics(summary, dirs.workspace, earlier_reads, hooks),

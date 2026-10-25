@@ -225,6 +225,39 @@ freeze.
 A later VM can get the same image back with `$V create` and then
 `$V load-image ~/memkernel-calibration-image-<id>.tar.gz`, which checks the image ID.
 
+### The measured run (task 20)
+
+The same VM and the same image run the measured run, after the code freeze, the
+preregistration commit and `PREREG_COMMIT` are on `main` and announced on #17
+(task 19). Build the image at the code-freeze commit, then:
+
+```bash
+git switch main && git pull          # HEAD must hold eval/lifecycle-suite/PREREG_COMMIT
+caffeinate -i $V measure https://github.com/gosha70/memkernel/issues/17#issuecomment-<id>
+```
+
+The URL is the #17 comment that announced the preregistration: open the comment
+on GitHub, click its timestamp, and copy the address bar.
+
+`$V measure` refuses unless the commit `PREREG_COMMIT` names adds only
+`eval/lifecycle-suite/preregistration.md` to the image's commit, and unless
+that comment, read through GitHub's public API, is on #17 and names that commit
+and the file's sha256. It prints the commit, the sha256 and when the comment was
+posted and last edited (with a warning if it was edited), and records the URL
+and both times in the run as `announcement.txt` (SC-5). It copies that file into the VM and mounts it
+read-only. After you type `measure`, it asks for the key and the workspace ID,
+as for calibration, and then for the workspace's spend limit in dollars: read it
+in the Claude Console (https://platform.claude.com, Settings → Workspaces → the
+measured run's workspace → Spend limits) and type the number, for example `150`.
+
+Before any paid session, `run.sh measure` computes the cost estimate with
+`estimate.py` from the committed calibration receipts at the preregistered
+prices, runs and allowance, and refuses when the limit you typed is not the
+preregistered one, or when the estimate plus 30 percent exceeds it (FR-016).
+The tasks, arms, runs per arm per task and model all come from the
+preregistration's parameter block; nothing else is typed. Fetch, save and
+destroy as for calibration.
+
 ## 4. Run it with Docker directly (Linux host or cloud VM)
 
 On a Linux machine or cloud VM that holds no personal credentials and that you

@@ -21,7 +21,11 @@ SCHEMA_PATH = Path(__file__).with_name("receipt.schema.json")
 # The API refused the run's key: a failure of the environment at any step, never of the arm (FR-015a (c)).
 AUTHENTICATION_STATUSES = (401, 403)
 AUTHENTICATION_ERROR = "authentication_failed"
-SCHEMA_VERSION = 2  # 2: compaction_tokens_estimate and compaction_estimates_missing (FR-018); only 2 is accepted
+SCHEMA_VERSION = 3  # 3: api_errors (FR-018, amended 2026-10-24); only 3 is accepted, see validate_receipt
+# Committed calibration receipts predate api_errors: the report reads them in its calibration section only.
+CALIBRATION_ONLY_SCHEMA_VERSION = 2
+API_FAILURE_SUBTYPE = "success"  # the result subtype the CLI gives a turn the API failed
+NO_ERROR_KEY = "none"  # api_errors key of an error event that carries neither a status nor an error value
 MEMKERNEL_TOOL_PREFIX = "mcp__memkernel__"
 CONNECTED_STATUSES = frozenset({"connected", "ready"})
 
@@ -65,6 +69,10 @@ class StreamSummary:
     compaction_estimates_missing: int = 0
     # the API refused the key (a result's api_error_status, or an assistant message's error): see AUTHENTICATION_*
     authentication_failed: bool = False
+    # API error events by key (FR-018): a result's api_error_status, else an assistant message's error,
+    # else NO_ERROR_KEY.
+    # Events, not calls: one refused call appears as an assistant message and as a result, under two keys.
+    api_errors: dict[str, int] = field(default_factory=dict)
 
     @property
     def response(self) -> str:
@@ -89,6 +97,11 @@ def _pre_tokens(event: dict[str, Any]) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
+def _count_error(summary: StreamSummary, key: Any) -> None:
+    name = str(key) if key not in (None, "") else NO_ERROR_KEY
+    summary.api_errors[name] = summary.api_errors.get(name, 0) + 1
+
+
 def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) -> StreamSummary:
     """Fold wrapped stream lines into a summary; call repeatedly for the steps of one session."""
     summary = into or StreamSummary()
@@ -110,6 +123,8 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
         elif kind == "assistant":
             if event.get("error") == AUTHENTICATION_ERROR:
                 summary.authentication_failed = True
+            if "error" in event:
+                _count_error(summary, event["error"])
             for part in event.get("message", {}).get("content", []) or []:
                 if isinstance(part, dict) and part.get("type") == "tool_use":
                     summary.tool_uses.append(
@@ -127,6 +142,13 @@ def summarise(lines: list[dict[str, Any]], into: StreamSummary | None = None) ->
         elif kind == "result":
             if event.get("api_error_status") in AUTHENTICATION_STATUSES:
                 summary.authentication_failed = True
+            # An API failure ends the turn as a "success" result flagged is_error; error_max_turns and
+            # error_during_execution are the agent's own failures, scored like any other (FR-015a).
+            api_failure = (
+                event.get("is_error") is True and event.get("subtype", API_FAILURE_SUBTYPE) == API_FAILURE_SUBTYPE
+            )
+            if event.get("api_error_status") is not None or api_failure:
+                _count_error(summary, event.get("api_error_status"))
             summary.result_texts.append(str(event.get("result") or ""))
             usage = event.get("usage") or {}
             summary.tokens["input"] += int(usage.get("input_tokens", 0) or 0)
@@ -222,6 +244,28 @@ def validate_receipt(receipt: dict[str, Any], schema: dict[str, Any] | None = No
     errors: list[str] = []
     _validate(receipt, schema or load_schema(), "receipt", errors)
     return errors
+
+
+def calibration_only_schema() -> dict[str, Any]:
+    """The current schema as it stood at CALIBRATION_ONLY_SCHEMA_VERSION: without api_errors, for calibration only."""
+    schema = load_schema()
+    schema["required"] = [key for key in schema["required"] if key != "api_errors"]
+    schema["properties"] = {key: value for key, value in schema["properties"].items() if key != "api_errors"}
+    schema["properties"]["schema_version"] = {"type": "integer", "enum": [CALIBRATION_ONLY_SCHEMA_VERSION]}
+    schema["properties"]["phase"] = {"type": "string", "enum": ["calibration"]}
+    return schema
+
+
+def validate_report_receipt(receipt: dict[str, Any]) -> list[str]:
+    """What the report accepts (FR-018): the current version, or the older one with ``phase: calibration`` only."""
+    if receipt.get("schema_version") == CALIBRATION_ONLY_SCHEMA_VERSION:
+        if receipt.get("phase") != "calibration":
+            return [
+                f"receipt: schema_version {CALIBRATION_ONLY_SCHEMA_VERSION} is accepted for calibration only, "
+                f"not phase {receipt.get('phase')!r}"
+            ]
+        return validate_receipt(receipt, calibration_only_schema())
+    return validate_receipt(receipt)
 
 
 def read_receipts(path: Path) -> list[dict[str, Any]]:

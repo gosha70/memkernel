@@ -10,6 +10,10 @@
 #   vm.sh demo              the credential-free demonstration, in the VM
 #   vm.sh preflight         ask for the key and workspace ID (hidden), check them; spends nothing
 #   vm.sh calibrate         ask again, then the paid calibration run
+#   vm.sh measure URL       the paid measured run: copies the preregistration that PREREG_COMMIT (at this
+#                           checkout's HEAD) names, refused unless that commit adds only it to the image's
+#                           commit and URL is the #17 comment that names that commit and the file's sha256
+#                           (read from GitHub's public API); asks for the key, workspace ID and spend limit
 #   vm.sh fetch [DEST]      copy the VM's runs directory to DEST on your Mac (default ./calibration-runs)
 #                           and verify the copy file by file (sha256); run it after every run, failed ones too
 #   vm.sh save-image [FILE] copy the built image out of the VM as a verified .tar.gz on your Mac
@@ -28,6 +32,8 @@ set -euo pipefail
 
 vm=${CALIBRATION_VM:-mk-calibration}
 repo_url=https://github.com/gosha70/memkernel.git
+announcement_pattern='^https://github\.com/gosha70/memkernel/issues/17#issuecomment-([0-9]+)$'   # SC-5
+comments_api=https://api.github.com/repos/gosha70/memkernel/issues/comments
 guest_repo=memkernel        # under the VM user's home
 guest_runs=runs             # under the VM user's home, mounted at /runs in the container
 docker_flags="--rm --tmpfs /tmp:rw,size=1g"
@@ -269,15 +275,26 @@ read_secrets() {  # prints the key and the workspace ID on two lines, for the VM
   printf '%s\n%s\n' "$key" "$workspace"
 }
 
-run_container() {  # $1 = run.sh mode; secrets arrive on stdin as two lines
+read_limit() {  # the workspace's spend limit as the Console shows it, for the measured run's cost check
+  local limit
+  read -r -p "Workspace spend limit in USD, as the Claude Console shows it (for example 150): " limit </dev/tty
+  [[ "$limit" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "vm.sh: the spend limit must be a number of dollars" >&2; exit 1; }
+  printf '%s\n' "$limit"
+}
+
+run_container() {  # $1 = run.sh mode, $2 = extra docker flags; on stdin: key, workspace ID, then for measure the
+                   # spend limit and the #17 announcement (URL and posting time)
   local tag
   tag=$(selected_image)
   limactl shell --workdir / "$vm" -- bash -lc "
     set -euo pipefail
     IFS= read -r ANTHROPIC_API_KEY || { echo 'vm.sh: no key arrived on stdin' >&2; exit 1; }
     IFS= read -r CALIBRATION_WORKSPACE_ID || { echo 'vm.sh: no workspace ID arrived on stdin' >&2; exit 1; }
-    export ANTHROPIC_API_KEY CALIBRATION_WORKSPACE_ID
-    docker run $docker_flags -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID \
+    IFS= read -r MEASURED_SPEND_LIMIT || MEASURED_SPEND_LIMIT=
+    IFS= read -r MEASURED_ANNOUNCEMENT || MEASURED_ANNOUNCEMENT=
+    export ANTHROPIC_API_KEY CALIBRATION_WORKSPACE_ID MEASURED_SPEND_LIMIT MEASURED_ANNOUNCEMENT
+    docker run $docker_flags -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e MEASURED_SPEND_LIMIT \
+      -e MEASURED_ANNOUNCEMENT ${2:-} \
       -v \"\$HOME/$guest_runs:/runs\" '$tag' $1"
 }
 
@@ -510,6 +527,85 @@ case "${1:-}" in
     [ "$answer" = calibrate ] || { echo "vm.sh: not started" >&2; exit 1; }
     read_secrets | run_container calibrate
     ;;
+  measure)
+    # The run must be the preregistered one (FR-016, FR-017): the preregistration comes from the commit PREREG_COMMIT
+    # names, and that commit must add only it to the image's commit, the code freeze.
+    announcement=${2:-}
+    if [[ ! "$announcement" =~ $announcement_pattern ]]; then
+      echo "vm.sh: usage: vm.sh measure URL, where URL is the #17 comment announcing the preregistration" \
+        "(https://github.com/gosha70/memkernel/issues/17#issuecomment-...)" >&2
+      exit 1
+    fi
+    comment_id=${BASH_REMATCH[1]}
+    tag=$(selected_image)
+    suite=$(cd "$(dirname "$0")/.." && pwd)
+    prefix=$(git -C "$suite" rev-parse --show-prefix) || { echo "vm.sh: $suite is not in a git checkout" >&2; exit 1; }
+    marker="${prefix}PREREG_COMMIT" prereg_path="${prefix}preregistration.md"
+    prereg_commit=$(git -C "$suite" show "HEAD:$marker" 2>/dev/null | tr -d '[:space:]') || prereg_commit=
+    if [ -z "$prereg_commit" ]; then
+      echo "vm.sh: no $marker at this checkout's HEAD; the measured run needs the preregistration commit" >&2
+      exit 1
+    fi
+    code=$(in_vm "docker run --rm --entrypoint sh '$tag' -c 'echo \$CODE_SHA'")
+    for commit in "$code" "$prereg_commit"; do
+      if ! git -C "$suite" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        echo "vm.sh: commit '$commit' is not in this checkout (git fetch?)" >&2
+        exit 1
+      fi
+    done
+    if ! git -C "$suite" merge-base --is-ancestor "$code" "$prereg_commit"; then
+      echo "vm.sh: the preregistration commit $prereg_commit does not descend from the image's commit $code" >&2
+      exit 1
+    fi
+    changed=$(git -C "$suite" diff --name-only "$code" "$prereg_commit")
+    if [ "$changed" != "$prereg_path" ]; then
+      echo "vm.sh: the preregistration commit must differ from the image's commit $code by $prereg_path only:" >&2
+      printf '%s\n' "${changed:-(nothing)}" >&2
+      exit 1
+    fi
+    staged=$(mktemp -d)
+    trap 'rm -rf "$staged"' EXIT
+    chmod 755 "$staged"   # readable by the container user (uid 1000), as for wiring
+    git -C "$suite" show "$prereg_commit:$prereg_path" > "$staged/preregistration.md"
+    echo "image: $(selected_tag)"
+    echo "image id: $tag"
+    echo "image code: $code"
+    digest=$(shasum -a 256 "$staged/preregistration.md" | cut -d' ' -f1)
+    echo "preregistration: commit $prereg_commit, sha256 $digest"
+    # SC-5: the announcement on #17 names the commit and the sha256 before the first measured session. GitHub's
+    # public API shows the comment as posted; its timestamp goes into the run, to compare with the first started_at.
+    comment=$(curl -fsS --connect-timeout 10 "$comments_api/$comment_id") || {
+      echo "vm.sh: could not read $announcement from GitHub's API; not started" >&2
+      exit 1
+    }
+    posted=$(printf '%s' "$comment" | python3 -c '
+import json, sys
+c = json.load(sys.stdin)
+body = c.get("body") or ""
+on_17 = str(c.get("issue_url", "")).endswith("/issues/17")
+named = on_17 and sys.argv[1] in body and sys.argv[2] in body
+created = c.get("created_at") or ""
+print(created + " " + (c.get("updated_at") or created) if named and created else "")
+' "$prereg_commit" "$digest") || posted=
+    if [ -z "$posted" ]; then
+      echo "vm.sh: $announcement is not a #17 comment naming commit $prereg_commit and sha256 $digest; not started" >&2
+      exit 1
+    fi
+    created=${posted% *} updated=${posted#* }
+    echo "announcement: $announcement, posted $created, last edited $updated"
+    if [ "$updated" != "$created" ]; then  # an edit could have added the commit or the sha256 after posting
+      echo "WARNING: the #17 comment was edited after it was posted ($created, edited $updated); the run records both" >&2
+    fi
+    require_host_block
+    in_vm "rm -rf ~/prereg"
+    limactl copy -r "$staged" "$vm:prereg"
+    in_vm "chmod -R a+rX ~/prereg"
+    echo "This is the paid measured run, capped by the workspace's spend limit. It takes hours; keep the Mac awake."
+    read -r -p "Type 'measure' to start: " answer </dev/tty
+    [ "$answer" = measure ] || { echo "vm.sh: not started" >&2; exit 1; }
+    { read_secrets; read_limit; printf '%s %s\n' "$announcement" "$posted"; } \
+      | run_container measure "-v \$HOME/prereg:/prereg:ro"
+    ;;
   fetch)
     dest=${2:-calibration-runs}
     mkdir -p "$dest"
@@ -569,7 +665,7 @@ case "${1:-}" in
     echo "VM $vm deleted"
     ;;
   *)
-    sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,27p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

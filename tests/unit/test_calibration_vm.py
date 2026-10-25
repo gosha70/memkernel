@@ -10,6 +10,8 @@ needed. The guard must fail closed: any doubt about the runs keeps the VM.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -776,3 +778,123 @@ def test_create_installs_the_host_block_before_any_image_exists(tmp_path: Path) 
     assert "with the host block in place" in result.stdout and "probe(s) blocked by its reject rule" in result.stdout
     assert "from a container" not in result.stdout + result.stderr
     assert (etc / "mk-isolation.nft").is_file() and (etc / "systemd" / "system" / "mk-isolation.service").is_file()
+
+
+def _prereg_checkout(tmp_path: Path, *, extra: str | None = None) -> tuple[Path, str, str]:
+    """The freeze (the image's commit), then a commit adding preregistration.md (plus ``extra``), then PREREG_COMMIT."""
+    repo = _wiring_checkout(tmp_path)
+    freeze = _head(repo)
+    (repo / "preregistration.md").write_text("# Preregistration\n\n```json\n{}\n```\n", encoding="utf-8")
+    if extra:
+        (repo / extra).write_text("not allowed with the preregistration\n", encoding="utf-8")
+    _commit(repo)
+    prereg = _head(repo)
+    (repo / "PREREG_COMMIT").write_text(prereg + "\n", encoding="utf-8")
+    _commit(repo)
+    return repo, freeze, prereg
+
+
+ANNOUNCEMENT_URL = "https://github.com/gosha70/memkernel/issues/17#issuecomment-4242"
+
+
+def _announce(
+    env: dict[str, str], repo: Path, prereg: str, *, issue: int = 17, names: bool = True, edited: str | None = None
+) -> None:
+    """GitHub's public API, stubbed on the Mac's PATH: the comment as vm.sh measure reads it."""
+    digest = hashlib.sha256((repo / "preregistration.md").read_bytes()).hexdigest()
+    body = f"Preregistration commit {prereg}, sha256 {digest}" if names else "Preregistration coming soon"
+    comment = {
+        "issue_url": f"https://api.github.com/repos/gosha70/memkernel/issues/{issue}",
+        "created_at": "2026-11-01T09:00:00Z",
+        "updated_at": edited or "2026-11-01T09:00:00Z",
+        "body": body,
+    }
+    host_bin = Path(env["PATH"].split(os.pathsep)[0])
+    (host_bin / "curl").write_text(
+        f"#!/bin/sh\necho \"$*\" >> {env['STUB_LOG']}.curl\ncat <<'JSON'\n{json.dumps(comment)}\nJSON\n",
+        encoding="utf-8",
+    )
+    (host_bin / "curl").chmod(0o755)
+
+
+def _run_measure(
+    env: dict[str, str], repo: Path, image_commit: str, url: str = ANNOUNCEMENT_URL
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(repo / "calibration" / "vm.sh"), "measure", url],
+        env={**env, "HOME": str(repo.parent), "STUB_CODE_SHA": image_commit},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="measure reads the preregistration from a git commit")
+def test_measure_copies_the_preregistration_that_prereg_commit_names(tmp_path: Path) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    _host_block(env)
+    repo, freeze, prereg = _prereg_checkout(tmp_path)
+    _announce(env, repo, prereg)
+    result = _run_measure(env, repo, freeze)  # goes on to ask for typing 'measure', which a test cannot do
+    assert (
+        f"announcement: {ANNOUNCEMENT_URL}, posted 2026-11-01T09:00:00Z, last edited 2026-11-01T09:00:00Z"
+        in result.stdout
+    )
+    assert "was edited" not in result.stderr
+    assert "api.github.com/repos/gosha70/memkernel/issues/comments/4242" in Path(env["STUB_LOG"] + ".curl").read_text(
+        encoding="utf-8"
+    )
+    assert f"image code: {freeze}" in result.stdout and f"preregistration: commit {prereg}, sha256 " in result.stdout
+    copied = Path(env["STUB_GUEST_HOME"]) / "prereg" / "preregistration.md"
+    assert copied.read_text(encoding="utf-8") == (repo / "preregistration.md").read_text(encoding="utf-8")
+    assert "20 of 20 probe(s) blocked" in result.stdout  # the host block is proven before any prompt
+    assert "API key" not in result.stdout + result.stderr  # not started: 'measure' was never typed
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="measure reads the preregistration from a git commit")
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("no-marker", "no PREREG_COMMIT at this checkout's HEAD"),
+        ("extra-file", "must differ from the image's commit"),
+        ("not-descendant", "does not descend from the image's commit"),
+        ("unknown-image", "is not in this checkout"),
+        ("no-url", "usage: vm.sh measure URL"),
+        ("other-issue-url", "usage: vm.sh measure URL"),
+        ("comment-on-another-issue", "is not a #17 comment naming commit"),
+        ("comment-without-the-sha", "is not a #17 comment naming commit"),
+    ],
+)
+def test_measure_refuses_anything_but_the_preregistered_run(tmp_path: Path, case: str, message: str) -> None:
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    repo, freeze, prereg = _prereg_checkout(tmp_path, extra="notes.md" if case == "extra-file" else None)
+    _announce(
+        env,
+        repo,
+        prereg,
+        issue=18 if case == "comment-on-another-issue" else 17,
+        names=case != "comment-without-the-sha",
+    )
+    url = {"no-url": "", "other-issue-url": ANNOUNCEMENT_URL.replace("/17#", "/18#")}.get(case, ANNOUNCEMENT_URL)
+    image_commit = {"not-descendant": _head(repo), "unknown-image": "0" * 40}.get(case, freeze)
+    if case == "no-marker":
+        (repo / "PREREG_COMMIT").unlink()
+        _commit(repo)
+    result = _run_measure(env, repo, image_commit, url)
+    assert result.returncode == 1 and message in result.stderr
+    assert not (Path(env["STUB_GUEST_HOME"]) / "prereg").exists()
+    log = Path(env["STUB_DOCKER_LOG"])
+    assert "/prereg:ro" not in (log.read_text(encoding="utf-8") if log.exists() else "")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="measure reads the preregistration from a git commit")
+def test_measure_warns_when_the_announcement_was_edited_after_posting(tmp_path: Path) -> None:
+    """Review of 18d: an edit could have added the commit or the sha256 later; both times are shown and recorded."""
+    env = _load_env(tmp_path, selected=IMAGE_ID)
+    _host_block(env)
+    repo, freeze, prereg = _prereg_checkout(tmp_path)
+    _announce(env, repo, prereg, edited="2026-11-02T08:00:00Z")
+    result = _run_measure(env, repo, freeze)
+    assert "posted 2026-11-01T09:00:00Z, last edited 2026-11-02T08:00:00Z" in result.stdout
+    assert "WARNING: the #17 comment was edited after it was posted" in result.stderr

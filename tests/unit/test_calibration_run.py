@@ -9,6 +9,7 @@ bypassed: the stub ``curl`` answers like the Models API with a workspace header.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -197,3 +198,121 @@ def test_a_cache_without_the_pinned_revision_is_refused_before_the_key_is_used(
     completed = _run(env)
     assert completed.returncode != 0 and "not the pinned" in completed.stderr
     assert not Path(env["STUB_CURL_LOG"]).exists() and not Path(env["STUB_LOG"]).exists()
+
+
+# The measured run (task 18d): the preregistration fixes the run, and preflight's cost check guards the spend limit.
+
+CALIBRATION_RECEIPTS = "eval/lifecycle-suite/calibration/receipts-20261024T033046Z.jsonl"
+ANNOUNCEMENT = "https://github.com/gosha70/memkernel/issues/17#issuecomment-1 2026-11-01T09:00:00Z 2026-11-01T09:00:00Z"
+
+
+def _measure_setup(tmp_path: Path, *, preregistered_limit: float = 150, runs: int = 5) -> dict[str, str]:
+    env = _setup(tmp_path)
+    repo = tmp_path / "repo"
+    suite = repo / "eval" / "lifecycle-suite"  # as in the image: the repository's layout under /opt/memkernel
+    shutil.copytree(env["CALIBRATION_SUITE_DIR"], suite)
+    for name in ("estimate.py", "records.py"):
+        shutil.copy(SUITE_DIR / name, suite / name)
+    for config in (SUITE_DIR / "arms").glob("*/config.frozen.json"):
+        (suite / "arms" / config.parent.name).mkdir(parents=True)
+        shutil.copy(config, suite / "arms" / config.parent.name / config.name)
+    shutil.copy(SUITE_DIR.parent.parent / CALIBRATION_RECEIPTS, repo / CALIBRATION_RECEIPTS)
+    (suite / "runner.py").write_text(  # logs its arguments, so the test sees what the preregistration fixed
+        "import os, sys\n"
+        "open(os.environ['STUB_LOG'], 'a').write('runner ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+        "root, run_id = sys.argv[sys.argv.index('--run-root') + 1], sys.argv[sys.argv.index('--run-id') + 1]\n"
+        "os.makedirs(os.path.join(root, run_id))\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    tasks = sorted(p.name for p in (SUITE_DIR / "tasks").iterdir() if p.is_dir())
+    parameters = {
+        "model": "claude-sonnet-5-5",
+        "tasks": tasks,
+        "arms": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio"],
+        "runs_per_arm_per_task": runs,
+        "prices_usd_per_mtok": {"input": 2.0, "cache_write": 2.5, "cache_read": 0.1, "output": 10.0},
+        "prices_as_of": "2026-10-15",
+        "invalid_allowance": 0.2,
+        "calibration_receipts": CALIBRATION_RECEIPTS,
+        "spend_limit_usd": preregistered_limit,
+    }
+    preregistration = tmp_path / "preregistration.md"
+    preregistration.write_text(f"# Preregistration\n\n```json\n{json.dumps(parameters)}\n```\n", encoding="utf-8")
+    env.update(
+        CALIBRATION_SUITE_DIR=str(suite),
+        CALIBRATION_RUN_ID="measured-probe",
+        MEASURED_PREREGISTRATION=str(preregistration),
+        MEASURED_SPEND_LIMIT=str(preregistered_limit),
+        MEASURED_ANNOUNCEMENT=ANNOUNCEMENT,
+    )
+    return env
+
+
+def _measure(env: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    completed = subprocess.run(
+        ["bash", str(RUN_SH), "measure"], env=env, capture_output=True, text=True, timeout=60, check=False
+    )
+    log = Path(env["STUB_LOG"])
+    return completed, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def test_the_measured_run_is_the_one_the_preregistration_fixes(tmp_path: Path) -> None:
+    env = _measure_setup(tmp_path)
+    completed, calls = _measure(env)
+    assert completed.returncode == 0, completed.stderr
+    assert "estimate: $80.74" in completed.stdout and "plus 30%, $104.96, is within the spend limit $150.00" in (
+        completed.stdout
+    )
+    assert "model: claude-sonnet-5-5" in completed.stdout and "preregistration: " in completed.stdout
+    runner = next(call for call in calls if call.startswith("runner "))
+    assert f"--phase measured --preregistration {env['MEASURED_PREREGISTRATION']}" in runner
+    assert "--runs 5 --model claude-sonnet-5-5" in runner and runner.count("--task ") == 20
+    assert runner.count("--arm ") == 7 and _scanned(calls)
+    assert "measured output: " in completed.stdout
+    recorded = Path(env["CALIBRATION_RUNS_DIR"]) / "measured-probe" / "announcement.txt"
+    assert recorded.read_text(encoding="utf-8") == ANNOUNCEMENT + "\n"  # SC-5: where and when it was announced
+
+
+@pytest.mark.parametrize(
+    ("preregistered", "entered", "message"),
+    [
+        (150, "100", "is not the preregistered $150.00"),  # the Console shows another limit than preregistered
+        (100, "100", "the estimate plus 30%, $104.96, exceeds the spend limit $100.00"),
+    ],
+)
+def test_the_cost_check_refuses_before_any_paid_session(
+    tmp_path: Path, preregistered: float, entered: str, message: str
+) -> None:
+    env = _measure_setup(tmp_path, preregistered_limit=preregistered)
+    env["MEASURED_SPEND_LIMIT"] = entered
+    completed, calls = _measure(env)
+    assert completed.returncode != 0 and message in completed.stderr
+    assert not any(call.startswith("runner") for call in calls)
+
+
+def test_no_preregistration_no_measured_run(tmp_path: Path) -> None:
+    env = _measure_setup(tmp_path)
+    env["MEASURED_PREREGISTRATION"] = str(tmp_path / "missing.md")
+    completed, calls = _measure(env)
+    assert completed.returncode != 0 and "no preregistration" in completed.stderr
+    assert calls == [] and not Path(env["STUB_CURL_LOG"]).exists()  # the key was never used
+
+
+def test_no_announcement_no_measured_run(tmp_path: Path) -> None:
+    env = _measure_setup(tmp_path)
+    del env["MEASURED_ANNOUNCEMENT"]
+    completed, calls = _measure(env)
+    assert completed.returncode != 0 and "MEASURED_ANNOUNCEMENT" in completed.stderr
+    assert calls == [] and not Path(env["STUB_CURL_LOG"]).exists()  # the key was never used
+
+
+def test_a_nan_allowance_never_reaches_the_runner(tmp_path: Path) -> None:
+    """Review of 18d: NaN made the spend check pass and the stub runner start."""
+    env = _measure_setup(tmp_path)
+    preregistration = Path(env["MEASURED_PREREGISTRATION"])
+    text = preregistration.read_text(encoding="utf-8").replace('"invalid_allowance": 0.2', '"invalid_allowance": NaN')
+    preregistration.write_text(text, encoding="utf-8")
+    completed, calls = _measure(env)
+    assert completed.returncode != 0 and "invalid_allowance" in completed.stderr
+    assert not any(call.startswith("runner") for call in calls) and "$nan" not in completed.stdout
