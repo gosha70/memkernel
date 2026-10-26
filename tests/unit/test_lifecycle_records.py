@@ -1311,7 +1311,8 @@ def test_the_bootstrap_draws_only_through_random_so_every_python_gives_the_same_
 
 
 ANALYSIS = {key: POOLED[key] for key in report.PREREGISTERED}
-REPORT_ONLY = {k: v for k, v in POOLED.items() if k not in report.PREREGISTERED}  # title, SHAs, tag
+REPORT_ONLY = {**{k: v for k, v in POOLED.items() if k not in report.PREREGISTERED}, "code_sha": "c"}  # as _receipt
+PREREGISTERED_TASKS = [f"t{t:02d}" for t in range(20)] + ["t1"]
 
 
 def _preregistration(tmp_path: Path, **changes: Any) -> Path:
@@ -1319,7 +1320,7 @@ def _preregistration(tmp_path: Path, **changes: Any) -> Path:
     block = {
         **ANALYSIS,
         **changes,
-        "tasks": [],
+        "tasks": PREREGISTERED_TASKS,
         "runs_per_arm_per_task": 1,
         "prices_usd_per_mtok": {"input": 2, "cache_write": 2.5, "cache_read": 0.1, "output": 10},
         "prices_as_of": "x",
@@ -1506,3 +1507,90 @@ def test_a_rejecting_test_whose_direction_and_mean_disagree_is_not_a_loss() -> N
     assert "| claude_md | 20 | 100 | 16 | 4 | 0 | 0.0118 | 0.0236 | -4.0 |" in endpoint
     assert "| loss |" not in endpoint and "| gain |" not in endpoint
     assert endpoint.count("| no detectable difference (the test's direction and the mean's sign disagree) |") == 2
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"model": "another-model"}, "model another-model"),
+        ({"code_sha": "other"}, "code_sha other"),
+        ({"task_id": "unregistered"}, "task unregistered"),
+        ({"run_index": 1}, "run_index 1"),  # the block preregisters one run per arm per task
+    ],
+)
+def test_the_report_refuses_receipts_outside_the_preregistered_experiment(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], change: dict[str, Any], message: str
+) -> None:
+    """Review of #50: receipts naming the right preregistration but another model, code, task or run were counted
+    as the preregistered experiment and could produce a gain headline."""
+    prereg = _preregistration(tmp_path)
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = [
+        _trial("memkernel", "t1", 0, preregistration_sha256=digest),
+        _trial("claude_md", "t1", 0, preregistration_sha256=digest),
+    ]
+    status, _, _ = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 0
+    receipts[0] = {**receipts[0], **change}
+    status, out, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "outside the preregistered experiment" in err and message in err and out == ""
+
+
+def test_scored_sessions_with_api_errors_are_counted_by_arm_not_only_events() -> None:
+    """Review of #50 (FR-015a): one session with two 529s and two sessions with one each differ in sessions."""
+    one = [_timed("memkernel", "t1", 0, {"529": 2}), _timed("memkernel", "t2", 1), _timed("claude_md", "t1", 2)]
+    two = [
+        _timed("memkernel", "t1", 0, {"529": 1}),
+        _timed("memkernel", "t2", 1, {"529": 1}),
+        _timed("claude_md", "t1", 2),
+    ]
+    assert "| memkernel | 529: 2 | 1 |" in report.render(one, PARAMS)
+    assert "| memkernel | 529: 2 | 2 |" in report.render(two, PARAMS)
+    # a truncated session is listed with the tail, not counted as a scored session with errors
+    tail = [_timed("claude_md", "t1", 0), _timed("memkernel", "t1", 1, {"529": 1})]
+    assert "| memkernel | 529: 1 | 0 |" in report.render(tail, PARAMS)
+
+
+def test_sessions_of_excluded_trials_are_not_counted_as_scored_error_sessions() -> None:
+    """Review of #50: the count must follow the trial, not the session."""
+    invalid = [  # a 529 alongside the refusal that invalidated the trial
+        _timed(
+            "memkernel",
+            "t1",
+            0,
+            {"529": 1, "401": 1},
+            valid=False,
+            invalid_reason="authentication_failed",
+            outcome=None,
+            checker_passed=None,
+        ),
+        _timed("claude_md", "t1", 1),
+    ]
+    assert "| memkernel | 401: 1, 529: 1 | 0 |" in report.render(invalid, PARAMS)
+
+    def chained(position: int, minute: int, errors: dict[str, int]) -> dict[str, Any]:
+        return _trial(
+            "memkernel",
+            "t1",
+            0,
+            chain_length=2,
+            position=position,
+            stage="exposure" if position == 0 else "evaluation",
+            started_at=f"2026-11-01T10:{minute:02d}:00.000Z",
+            api_errors=errors,
+        )
+
+    # an early error session whose trial a later truncated session excludes
+    cut_later = [chained(0, 0, {"529": 1}), _timed("claude_md", "t1", 1), chained(1, 2, {"529": 1})]
+    text = report.render(cut_later, PARAMS)
+    assert "| memkernel | 529: 2 | 0 |" in text and "**Truncated:** 1 session(s)" in text
+
+
+def test_the_report_refuses_an_arm_the_preregistration_omits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prereg = _preregistration(tmp_path, arms=["bare", "placebo", "protocol", "claude_md", "memkernel"])
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = [_trial("fs_grep", "t1", 0, preregistration_sha256=digest)]
+    status, _, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "arm fs_grep" in err

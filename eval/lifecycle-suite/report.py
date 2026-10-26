@@ -407,12 +407,17 @@ def _primary_endpoint(trials: list[Trial], params: dict[str, Any]) -> tuple[list
     return lines, inferential
 
 
-def _api_error_lines(sessions: list[dict[str, Any]], tail: list[dict[str, Any]]) -> list[str]:
+def _api_error_lines(sessions: list[dict[str, Any]], tail: list[dict[str, Any]], trials: list[Trial]) -> list[str]:
     """API error events per arm (events, not calls) and any truncated tail, listed (FR-015a, FR-018)."""
     per_arm: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # FR-015a: sessions, not events, whose trial stayed scored: not invalid, not excluded by truncation
+    scored = {(t.run_id, t.task_id, t.arm, t.run_index) for t in trials if t.scored}
+    scored_with_errors: dict[str, int] = defaultdict(int)
     for r in sessions:
         for key, count in r.get("api_errors", {}).items():
             per_arm[r["arm"]][key] += count
+        if carries_api_error(r) and (r["run_id"], r["task_id"], r["arm"], r["run_index"]) in scored:
+            scored_with_errors[r["arm"]] += 1
     lines = [
         "## API errors (measured)",
         "",
@@ -421,9 +426,13 @@ def _api_error_lines(sessions: list[dict[str, Any]], tail: list[dict[str, Any]])
         "",
     ]
     if per_arm:
-        lines += ["| Arm | Error events (key: count) |", "|---|---|"]
+        lines += [
+            "| Arm | Error events (key: count) | Scored sessions with a non-authentication API error |",
+            "|---|---|---|",
+        ]
         for arm in sorted(per_arm):
-            lines.append(f"| {arm} | {', '.join(f'{k}: {v}' for k, v in sorted(per_arm[arm].items()))} |")
+            events = ", ".join(f"{k}: {v}" for k, v in sorted(per_arm[arm].items()))
+            lines.append(f"| {arm} | {events} | {scored_with_errors[arm]} |")
     else:
         lines.append("- None.")
     if tail:
@@ -513,7 +522,7 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
             "",
             *_budget_by_arm(measured),
         ]
-        out += _api_error_lines(measured, tail)
+        out += _api_error_lines(measured, tail, trials)
     min_tasks = int(params["min_tasks_inferential"])
     out += [
         "## Label",
@@ -658,7 +667,29 @@ def preregistered_params(
     differ = [key for key in PREREGISTERED if key in params and params[key] != block[key]]
     if differ:
         raise ValueError(f"--params disagrees with the preregistration on: {', '.join(differ)}")
+    _check_bindings(measured, block, str(params["code_sha"]))
     return {**params, **{key: block[key] for key in PREREGISTERED}}
+
+
+def _check_bindings(measured: list[dict[str, Any]], block: dict[str, Any], code_sha: str) -> None:
+    """Every measured receipt belongs to the preregistered experiment: its model, the code-freeze SHA, a
+    preregistered task and arm, and a run index within the preregistered runs (FR-016, FR-017)."""
+    tasks, arms, runs = set(block["tasks"]), set(block["arms"]), int(block["runs_per_arm_per_task"])
+    problems: dict[str, set[str]] = defaultdict(set)
+    for r in measured:
+        if r["model"] != block["model"]:
+            problems["model"].add(str(r["model"]))
+        if r["code_sha"] != code_sha:
+            problems["code_sha"].add(str(r["code_sha"]))
+        if r["task_id"] not in tasks:
+            problems["task"].add(str(r["task_id"]))
+        if r["arm"] not in arms:
+            problems["arm"].add(str(r["arm"]))
+        if not 0 <= r["run_index"] < runs:
+            problems["run_index"].add(str(r["run_index"]))
+    if problems:
+        found = "; ".join(f"{kind} {', '.join(sorted(values))}" for kind, values in sorted(problems.items()))
+        raise ValueError(f"measured receipts outside the preregistered experiment: {found}")
 
 
 def main(argv: list[str]) -> int:
