@@ -132,7 +132,7 @@ def test_summary_and_diagnostics_are_counts_with_denominators(tmp_path: Path) ->
 
 def _receipt(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_id": "r",
         "phase": "measured",
         "chain_id": "t.memkernel.r0",
@@ -159,6 +159,7 @@ def _receipt(**overrides: Any) -> dict[str, Any]:
         "tokens": {"input": 1, "cache_write": 0, "cache_read": 0, "output": 1},
         "compaction_tokens_estimate": 0,
         "compaction_estimates_missing": 0,
+        "api_errors": {},
         "wall_time_ms": 1,
         "stages": {"exposure_at": None, "evaluation_at": None, "compactions": []},
         "diagnostics": {},
@@ -178,8 +179,14 @@ def test_receipt_schema_accepts_a_valid_receipt_and_rejects_drift() -> None:
         "not in" in e for e in records.validate_receipt(_receipt(invalid_reason="timeout"))
     )  # timeouts are never invalid
     assert any("unexpected key" in e for e in records.validate_receipt(_receipt(content="leaked text")))
-    # only schema version 2: a receipt from before compaction_tokens_estimate (the superseded calibration) is refused
-    assert any("not in [2]" in e for e in records.validate_receipt(_receipt(schema_version=1)))
+    # only schema version 3: older receipts are refused here (the report reads version 2 for calibration only)
+    assert any("not in [3]" in e for e in records.validate_receipt(_receipt(schema_version=2)))
+    assert any("not in [3]" in e for e in records.validate_receipt(_receipt(schema_version=1)))
+    assert any(
+        "missing api_errors" in e
+        for e in records.validate_receipt({k: v for k, v in _receipt().items() if k != "api_errors"})
+    )
+    assert any("below the minimum 0" in e for e in records.validate_receipt(_receipt(api_errors={"529": -1})))
     assert any("below the minimum 0" in e for e in records.validate_receipt(_receipt(compaction_tokens_estimate=-1)))
     assert any("below the minimum 0" in e for e in records.validate_receipt(_receipt(compaction_estimates_missing=-1)))
     assert any(
@@ -202,6 +209,11 @@ PARAMS = {
     "primary_comparators": ["claude_md", "fs_grep"],
     "secondary_comparators": ["bare"],
     "min_pairs_inferential": 30,
+    "min_tasks_inferential": 2,
+    "alpha": 0.05,
+    "no_gain_band_points": 10,
+    "bootstrap_resamples": 2000,
+    "bootstrap_seed": 17,
     "min_valid_pairs_lc_compact": 3,
     "min_valid_pairs_wiki_studio": 2,
     "live_compaction_proven": "yes",
@@ -845,7 +857,7 @@ def test_receipts_carry_the_compaction_estimate_from_the_stream(
 ) -> None:
     stub = load("stub_agent")
     receipts = _stub_run(tmp_path / "runs", monkeypatch, "calibration", ["memkernel"], ("demo-retain", "demo-compact"))
-    assert all(records.validate_receipt(r) == [] and r["schema_version"] == 2 for r in receipts)
+    assert all(records.validate_receipt(r) == [] and r["schema_version"] == 3 for r in receipts)
     by_task = {r["task_id"]: r for r in receipts if r["stage"] == "evaluation"}
     compact = by_task["demo-compact"]
     assert len(compact["stages"]["compactions"]) == 1
@@ -1001,6 +1013,8 @@ def test_a_session_whose_key_is_refused_is_invalid_not_a_failure_of_the_arm(
     receipt = receipts[0]
     assert receipt["valid"] is False and receipt["invalid_reason"] == "authentication_failed"
     assert receipt["outcome"] is None and records.validate_receipt(receipt) == []
+    # one refused call, two error events: the assistant message and the result (FR-018: events, not calls)
+    assert receipt["api_errors"] == {"401": 1, "authentication_failed": 1}
 
 
 def test_a_key_refused_after_the_agent_has_acted_still_makes_the_session_invalid(
@@ -1050,3 +1064,533 @@ def test_a_key_refused_after_the_agent_has_acted_still_makes_the_session_invalid
     assert second["valid"] is False and second["invalid_reason"] == "authentication_failed"
     trial = report.assemble([first, second])[0]
     assert trial.valid is False and trial.invalid_reason == "authentication_failed"  # the pair is removed
+
+
+def _v2_calibration_receipt(**overrides: Any) -> dict[str, Any]:
+    receipt = {k: v for k, v in _receipt(schema_version=2, phase="calibration").items() if k != "api_errors"}
+    receipt.update(overrides)
+    return receipt
+
+
+def test_the_report_accepts_version_2_receipts_for_calibration_only() -> None:
+    """FR-018 (amended 2026-10-24): the committed calibration receipts predate api_errors and stay as they are."""
+    assert records.validate_report_receipt(_v2_calibration_receipt()) == []
+    assert records.validate_report_receipt(_receipt()) == []
+    refused = records.validate_report_receipt(_v2_calibration_receipt(phase="measured"))
+    assert refused and "calibration only" in refused[0]
+    # a version-2 receipt that carries the newer field is not what version 2 was
+    assert any(
+        "unexpected key api_errors" in e
+        for e in records.validate_report_receipt(_v2_calibration_receipt(api_errors={}))
+    )
+
+
+def test_the_committed_calibration_receipts_are_accepted_by_the_report() -> None:
+    path = records.SCHEMA_PATH.parent / "calibration" / "receipts-20261024T033046Z.jsonl"
+    receipts = records.read_receipts(path)
+    assert len(receipts) == 50
+    assert all(records.validate_report_receipt(r) == [] for r in receipts)
+
+
+@pytest.mark.parametrize(
+    ("events", "expected"),
+    [
+        ([], {}),
+        ([{"type": "result", "is_error": False, "result": "done", "usage": {}}], {}),
+        (  # the discarded 2026-10-22 attempt: each refused call is an assistant message and a result
+            [
+                {"type": "assistant", "error": "authentication_failed", "message": {"content": []}},
+                {"type": "result", "is_error": True, "api_error_status": 401, "result": "Invalid API key"},
+            ],
+            {"authentication_failed": 1, "401": 1},
+        ),
+        ([{"type": "result", "is_error": True, "api_error_status": 529, "result": "Overloaded"}] * 2, {"529": 2}),
+        ([{"type": "result", "is_error": True, "result": "?"}], {"none": 1}),  # an error with no status
+        # the agent's own failures, not the API's: scored, never counted, so never a truncating tail (review of 18d)
+        ([{"type": "result", "subtype": "error_max_turns", "is_error": True, "result": ""}], {}),
+        ([{"type": "result", "subtype": "error_during_execution", "is_error": True, "result": ""}], {}),
+        (
+            [{"type": "result", "subtype": "success", "is_error": True, "result": "API Error: Connection error"}],
+            {"none": 1},
+        ),
+        ([{"type": "assistant", "error": None, "message": {"content": []}}], {"none": 1}),
+        ([{"type": "assistant", "message": {"content": []}}], {}),
+    ],
+)
+def test_api_errors_count_error_events_by_key(events: list[dict[str, Any]], expected: dict[str, int]) -> None:
+    summary = records.summarise([{"ts": "t", "event": e} for e in events])
+    assert summary.api_errors == expected
+
+
+# The analysis plan (FR-016, amended 2026-10-24), truncation (FR-015a) and API errors (FR-018) in the report.
+
+POOLED = {**PARAMS, "min_pairs_inferential": 20, "min_tasks_inferential": 16}
+
+
+def _pooled(outcomes: dict[str, list[str]], tasks: int = 20, runs: int = 1) -> list[dict[str, Any]]:
+    """One receipt per (arm, task, run); ``outcomes[arm][task index]`` is that arm's outcome on every run."""
+    receipts = []
+    for arm, per_task in outcomes.items():
+        for t in range(tasks):
+            for run in range(runs):
+                outcome = per_task[t]
+                receipts.append(_trial(arm, f"t{t:02d}", run, outcome=outcome, checker_passed=outcome == "passed"))
+    return receipts
+
+
+def _endpoint(text: str) -> str:
+    return text.split("## Primary endpoint (all tasks pooled)", 1)[1].split("\n## ", 1)[0]
+
+
+def test_sign_test_and_holm_match_hand_computed_values() -> None:
+    assert report.sign_test(9, 1) == pytest.approx(22 / 1024)  # 9 to 1 of 10 non-tied tasks: decisive
+    assert report.sign_test(8, 2) == pytest.approx(112 / 1024)  # 8 to 2: not
+    assert report.sign_test(5, 0) == pytest.approx(0.0625)  # the best a five-task group can do
+    assert report.sign_test(15, 5) == pytest.approx(0.04138946533203125)
+    assert report.sign_test(0, 0) == 1.0
+    assert report.holm({"a": 0.01, "b": 0.04}) == pytest.approx({"a": 0.02, "b": 0.04})
+    assert report.holm({"a": 0.03, "b": 0.02}) == pytest.approx({"b": 0.04, "a": 0.04})  # monotone
+
+
+def test_the_bootstrap_is_seeded_and_weights_tasks_equally() -> None:
+    effects = [100.0, 0.0, 0.0, -100.0, 50.0]
+    first = report.bootstrap_interval(effects, 2000, 17)
+    assert first == report.bootstrap_interval(effects, 2000, 17)
+    assert first[0] <= sum(effects) / len(effects) <= first[1]
+    assert report.bootstrap_interval([0.0] * 5, 2000, 17) == (0.0, 0.0)
+    # a task with many runs counts once: three runs of t00 against one of t01 give a mean of the two task effects
+    trials = report.assemble(
+        [_trial("memkernel", "t00", r) for r in range(3)]
+        + [_trial("claude_md", "t00", r, outcome="failed", checker_passed=False) for r in range(3)]
+        + [_trial("memkernel", "t01", 0, outcome="failed", checker_passed=False), _trial("claude_md", "t01", 0)]
+    )
+    effects_by_task, pairs = report.task_effects(trials, "claude_md")
+    assert effects_by_task == {"t00": 1.0, "t01": -1.0} and pairs == 4
+
+
+def test_a_gain_against_both_comparators_is_the_only_headline_gain() -> None:
+    passed, failed = ["passed"] * 20, ["failed"] * 20
+    text = report.render(_pooled({"memkernel": passed, "claude_md": failed, "fs_grep": failed}), POOLED)
+    endpoint = _endpoint(text)
+    assert "| claude_md | 20 | 20 | 20 | 0 | 0 | 0.0000 | 0.0000 | +100.0 |" in endpoint
+    assert endpoint.count("| gain |") == 2 and "**Headline:** gain against every primary comparator" in endpoint
+    assert "Inferential: every primary comparison has at least 20 valid pairs covering at least 16 tasks" in text
+
+    one_side = report.render(_pooled({"memkernel": passed, "claude_md": failed, "fs_grep": passed}), POOLED)
+    assert "| gain |" in _endpoint(one_side) and "**Headline:** no gain claimed" in one_side
+
+    loss = report.render(_pooled({"memkernel": failed, "claude_md": passed, "fs_grep": passed}), POOLED)
+    assert _endpoint(loss).count("| loss |") == 2
+
+
+def test_equivalence_needs_the_whole_interval_inside_the_band() -> None:
+    passed = ["passed"] * 20
+    tied = report.render(_pooled({"memkernel": passed, "claude_md": passed, "fs_grep": passed}), POOLED)
+    endpoint = _endpoint(tied)
+    assert "| claude_md | 20 | 20 | 0 | 0 | 20 | 1.0000 | 1.0000 | +0.0 | +0.0 to +0.0 | equivalent |" in endpoint
+
+    # 3 tasks each way: not significant, a mean of 0, but an interval wider than +/-10 points
+    mixed = ["passed"] * 3 + ["failed"] * 3 + ["passed"] * 14
+    flipped = ["failed"] * 3 + ["passed"] * 3 + ["passed"] * 14
+    text = report.render(_pooled({"memkernel": mixed, "claude_md": flipped, "fs_grep": flipped}), POOLED)
+    assert "| claude_md | 20 | 20 | 3 | 3 | 14 |" in _endpoint(text)  # ties are left out of the test, and counted
+    assert _endpoint(text).count("| no detectable difference |") == 2
+
+
+def test_below_the_minimum_no_label_is_applied() -> None:
+    passed, failed = ["passed"] * 20, ["failed"] * 20
+    text = report.render(_pooled({"memkernel": passed, "claude_md": failed, "fs_grep": failed}), PARAMS)  # 30 pairs
+    assert _endpoint(text).count("| not applied (descriptive) |") == 2
+    assert "**Headline:** no claim (descriptive" in text and "Descriptive: at least one primary comparison" in text
+    few_tasks = {**POOLED, "min_pairs_inferential": 1, "min_tasks_inferential": 21}
+    assert "not applied (descriptive)" in report.render(
+        _pooled({"memkernel": passed, "claude_md": failed, "fs_grep": failed}), few_tasks
+    )
+
+
+def _timed(arm: str, task: str, minute: int, errors: dict[str, int] | None = None, **kw: Any) -> dict[str, Any]:
+    return _trial(arm, task, 0, started_at=f"2026-11-01T10:{minute:02d}:00.000Z", api_errors=errors or {}, **kw)
+
+
+def test_a_strict_tail_of_api_errors_truncates_the_run() -> None:
+    receipts = [
+        _timed("claude_md", "t1", 0),  # ran before the tail: its pair is removed all the same
+        _timed("fs_grep", "t1", 1),
+        _timed("memkernel", "t2", 2),
+        _timed("claude_md", "t2", 3),
+        _timed("memkernel", "t1", 4, {"529": 1}, outcome="failed", checker_passed=False),
+        _timed("fs_grep", "t2", 5, {"none": 1}, outcome="failed", checker_passed=False),
+    ]
+    tail = report.truncated_sessions(receipts)
+    assert [(r["arm"], r["task_id"]) for r in tail] == [("memkernel", "t1"), ("fs_grep", "t2")]
+    text = report.render(receipts, PARAMS)
+    assert "| memkernel | 2 | 1 | 1/1 (100%) | 0 | 0 | 0 | none | 1 |" in text  # truncated: neither invalid nor scored
+    assert "| claude_md (primary) | 1 | 1 | 0 | 0 | 0 | 0 | 1 | +0.0 |" in text  # t1's pair truncated, t2's scored
+    assert "**Truncated:** 2 session(s)" in text and "- r memkernel t1 run 0 position 0" in text
+
+
+def test_errors_that_are_not_a_tail_stay_scored_and_counted() -> None:
+    receipts = [
+        _timed("memkernel", "t1", 0, {"529": 1}, outcome="failed", checker_passed=False),  # a burst, then recovery
+        _timed("claude_md", "t1", 1),
+        _timed(
+            "memkernel",
+            "t2",
+            2,
+            {"401": 1, "authentication_failed": 1},
+            valid=False,
+            invalid_reason="authentication_failed",
+            outcome=None,
+            checker_passed=None,
+        ),  # not a truncating key
+    ]
+    assert report.truncated_sessions(receipts) == []
+    text = report.render(receipts, PARAMS)
+    assert "| claude_md (primary) | 1 | 0 | 0 | 1 | 0 | 0 | 0 | -100.0 |" in text  # t1 scored, a memkernel failure
+    assert "| memkernel | 401: 1, 529: 1, authentication_failed: 1 |" in text
+    assert "Counts are error events, not failed calls" in text and "- Truncation: none." in text
+
+
+def test_calibration_api_errors_are_unknown_for_version_2_receipts() -> None:
+    old = _v2_calibration_receipt()
+    new = _receipt(phase="calibration", api_errors={"529": 2})
+    text = report.render([old, new], PARAMS)
+    assert (
+        "- API error events: unknown for 1 session(s) (schema version 2 receipts do not record them); "
+        "in the other 1: 529: 2" in text
+    )
+    assert "- API error events: none" in report.render([_receipt(phase="calibration")], PARAMS)
+    only_old = report.render([old], PARAMS)
+    assert "(schema version 2 receipts do not record them)\n" in only_old
+
+
+def test_the_report_cli_rejects_a_version_2_measured_receipt(tmp_path: Path) -> None:
+    receipts, params = tmp_path / "r.jsonl", tmp_path / "p.json"
+    params.write_text(json.dumps(PARAMS), encoding="utf-8")
+    receipts.write_text(json.dumps(_v2_calibration_receipt(phase="measured")) + "\n", encoding="utf-8")
+    assert report.main(["--receipts", str(receipts), "--params", str(params)]) == 1
+    receipts.write_text(json.dumps(_v2_calibration_receipt()) + "\n", encoding="utf-8")
+    assert report.main(["--receipts", str(receipts), "--params", str(params)]) == 0
+
+
+def test_the_estimate_reads_one_parameter_block_and_each_arms_groups() -> None:
+    estimate = load("estimate")
+    with pytest.raises(ValueError, match="exactly one"):
+        estimate.load_parameters("# no block\n")
+    with pytest.raises(ValueError, match="exactly one"):
+        estimate.load_parameters("```json\n{}\n```\n```json\n{}\n```\n")
+    with pytest.raises(ValueError, match="lack: model"):
+        estimate.load_parameters("```json\n{}\n```\n")
+    assert estimate.task_group("lc-compact-port") == "lc-compact" and estimate.task_group("lc-wiki-slugs") == "lc-wiki"
+    with pytest.raises(ValueError, match="no lifecycle group"):
+        estimate.task_group("demo-retain")
+    assert estimate.arm_groups("wiki_studio") == ("lc-wiki",)
+    assert estimate.arm_groups("memkernel") == estimate.GROUPS
+    # a group the calibration never ran cannot be estimated, so it is refused rather than costed at 0
+    receipts = [_receipt(group="lc-retain", run_id="c", chain_id="x")]
+    parameters = {
+        "prices_usd_per_mtok": {"input": 1, "cache_write": 1, "cache_read": 1, "output": 1},
+        "runs_per_arm_per_task": 1,
+        "tasks": ["lc-wiki-slugs"],
+        "arms": ["memkernel"],
+        "invalid_allowance": 0,
+    }
+    with pytest.raises(ValueError, match="no lc-wiki chain"):
+        estimate.estimate(parameters, receipts)
+    parameters["tasks"] = ["lc-retain-rounding"]
+    assert estimate.estimate(parameters, receipts)["total_usd"] == pytest.approx(2 / 1_000_000)
+
+
+def test_the_bootstrap_draws_only_through_random_so_every_python_gives_the_same_interval() -> None:
+    """SC-8: the published interval must reproduce byte for byte; these values are the same on 3.11 and 3.13."""
+    assert report.bootstrap_interval([100.0, 0.0, 0.0, -100.0, 50.0, 25.0, -50.0], 1000, 17) == (
+        -39.285714285714285,
+        50.0,
+    )
+    assert report.bootstrap_interval([100.0, 0.0, 50.0], 7, 3) == (16.666666666666668, 83.33333333333333)
+
+
+ANALYSIS = {key: POOLED[key] for key in report.PREREGISTERED}
+REPORT_ONLY = {**{k: v for k, v in POOLED.items() if k not in report.PREREGISTERED}, "code_sha": "c"}  # as _receipt
+PREREGISTERED_TASKS = [f"t{t:02d}" for t in range(20)] + ["t1"]
+
+
+def _preregistration(tmp_path: Path, **changes: Any) -> Path:
+    path = tmp_path / "preregistration.md"
+    block = {
+        **ANALYSIS,
+        **changes,
+        "tasks": PREREGISTERED_TASKS,
+        "runs_per_arm_per_task": 1,
+        "prices_usd_per_mtok": {"input": 2, "cache_write": 2.5, "cache_read": 0.1, "output": 10},
+        "prices_as_of": "x",
+        "invalid_allowance": 0,
+        "calibration_receipts": "x",
+        "spend_limit_usd": 1,
+    }
+    path.write_text(f"# Preregistration\n\n```json\n{json.dumps(block)}\n```\n", encoding="utf-8")
+    return path
+
+
+def _cli(
+    tmp_path: Path,
+    receipts: list[dict[str, Any]],
+    params: dict[str, Any],
+    prereg: Path | None,
+    capsys: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
+    receipts_path, params_path = tmp_path / "r.jsonl", tmp_path / "p.json"
+    receipts_path.write_text("".join(json.dumps(r) + "\n" for r in receipts), encoding="utf-8")
+    params_path.write_text(json.dumps(params), encoding="utf-8")
+    argv = ["--receipts", str(receipts_path), "--params", str(params_path)]
+    status = report.main(argv + (["--preregistration", str(prereg)] if prereg else []))
+    out, err = capsys.readouterr()
+    return status, out, err
+
+
+def test_the_report_takes_its_analysis_from_the_preregistration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review of 18d: the band, the bootstrap, alpha and the minimums are the preregistered ones, not --params'."""
+    prereg = _preregistration(tmp_path)
+    digest = records.sha256_bytes(prereg.read_bytes())
+    passed = ["passed"] * 20
+    receipts = [
+        {**r, "preregistration_sha256": digest}
+        for r in _pooled({"memkernel": passed, "claude_md": passed, "fs_grep": passed})
+    ]
+    status, text, _ = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 0 and _endpoint(text).count("| equivalent |") == 2 and "seed 17" in text
+
+    narrower = _preregistration(tmp_path, bootstrap_seed=5, min_tasks_inferential=21)  # a changed block
+    digest = records.sha256_bytes(narrower.read_bytes())
+    receipts = [{**r, "preregistration_sha256": digest} for r in receipts]
+    status, changed, _ = _cli(tmp_path, receipts, REPORT_ONLY, narrower, capsys)
+    assert status == 0 and "seed 5" in changed and "not applied (descriptive)" in changed
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("no-preregistration", "measured receipts need --preregistration"),
+        ("other-sha", "not this file's"),
+        ("params-disagree", "--params disagrees with the preregistration on: no_gain_band_points"),
+        ("missing-key", "lack: bootstrap_seed"),
+    ],
+)
+def test_the_report_refuses_an_analysis_that_is_not_the_preregistered_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str, message: str
+) -> None:
+    prereg = _preregistration(tmp_path)
+    digest = "0" * 64 if case == "other-sha" else records.sha256_bytes(prereg.read_bytes())
+    if case == "missing-key":
+        text = prereg.read_text(encoding="utf-8").replace('"bootstrap_seed": 17, ', "")
+        prereg.write_text(text, encoding="utf-8")
+        digest = records.sha256_bytes(prereg.read_bytes())
+    params = {**REPORT_ONLY, "no_gain_band_points": 5} if case == "params-disagree" else REPORT_ONLY
+    receipts = [_trial("memkernel", "t1", 0, preregistration_sha256=digest)]
+    status, _, err = _cli(tmp_path, receipts, params, None if case == "no-preregistration" else prereg, capsys)
+    assert status == 1 and message in err
+
+
+def test_a_significant_test_with_a_zero_mean_is_neither_gain_nor_loss() -> None:
+    """Review of 18d: 16 tasks at +0.25 and 4 at -1 give a mean of exactly 0 and Holm p 0.0236; FR-016 labels a
+    gain or a loss only by the mean's sign, so this falls to the interval rule."""
+    receipts = []
+    for t in range(20):
+        for run in range(4):
+            if t < 16:  # memkernel passes every run; the comparators pass three of four
+                mk, other = "passed", "failed" if run == 0 else "passed"
+            else:  # memkernel fails every run; the comparators pass every run
+                mk, other = "failed", "passed"
+            receipts.append(_trial("memkernel", f"t{t:02d}", run, outcome=mk, checker_passed=mk == "passed"))
+            for arm in ("claude_md", "fs_grep"):
+                receipts.append(_trial(arm, f"t{t:02d}", run, outcome=other, checker_passed=other == "passed"))
+    endpoint = _endpoint(report.render(receipts, POOLED))
+    assert "| claude_md | 20 | 80 | 16 | 4 | 0 | 0.0118 | 0.0236 | +0.0 |" in endpoint
+    assert "| loss |" not in endpoint and "| gain |" not in endpoint
+    assert endpoint.count("| no detectable difference (the test's direction and the mean's sign disagree) |") == 2
+
+
+def test_each_primary_comparison_carries_the_inferential_label_on_its_own() -> None:
+    """Review of 18d: 20 valid pairs against claude_md and 19 against fs_grep; only fs_grep is descriptive."""
+    passed, failed = ["passed"] * 20, ["failed"] * 20
+    receipts = _pooled({"memkernel": passed, "claude_md": failed, "fs_grep": failed})
+    receipts = [r for r in receipts if not (r["arm"] == "fs_grep" and r["task_id"] == "t19")]
+    text = report.render(receipts, {**POOLED, "min_tasks_inferential": 19})
+    endpoint = _endpoint(text)
+    assert "| claude_md | 20 | 20 |" in endpoint and endpoint.split("| claude_md |")[1].split("\n")[0].endswith(
+        "| gain |"
+    )
+    assert endpoint.split("| fs_grep |")[1].split("\n")[0].endswith("| not applied (descriptive) |")
+    assert "**Headline:** no gain claimed" in endpoint  # conservative: a gain needs every comparator
+    assert "Descriptive: at least one primary comparison" in text
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"invalid_allowance": float("nan")}, "invalid_allowance"),
+        ({"spend_limit_usd": float("inf")}, "spend_limit_usd"),
+        ({"runs_per_arm_per_task": 0}, "runs_per_arm_per_task"),
+        (
+            {"prices_usd_per_mtok": {"input": -1, "cache_write": 1, "cache_read": 1, "output": 1}},
+            "prices_usd_per_mtok.input",
+        ),
+        ({"prices_usd_per_mtok": {"input": 1, "cache_write": 1, "cache_read": 1}}, "prices_usd_per_mtok.output"),
+    ],
+)
+def test_the_estimate_refuses_parameters_that_are_not_finite_positive_numbers(
+    change: dict[str, Any], field: str
+) -> None:
+    """Review of 18d: invalid_allowance NaN printed $nan as within the limit and started the run."""
+    estimate = load("estimate")
+    parameters = {key: 1 for key in estimate.REQUIRED}
+    parameters["prices_usd_per_mtok"] = {"input": 1, "cache_write": 1, "cache_read": 1, "output": 1}
+    parameters.update(change)
+    with pytest.raises(ValueError, match=field.replace(".", "\\.")):
+        estimate.load_parameters(f"```json\n{json.dumps(parameters)}\n```\n")
+
+
+def test_a_mean_that_is_exactly_zero_is_zero_however_the_effects_add_up() -> None:
+    """Review of 18d: over five runs, fifteen task effects of +1/5, three of -1 and two ties sum to exactly 0, but
+    floating-point addition left a positive residue that labelled both comparisons gain. Effects are exact."""
+    receipts = []
+    for t in range(20):
+        for run in range(5):
+            if t < 15:  # memkernel passes every run; the comparators fail one of five
+                mk, other = "passed", "failed" if run == 0 else "passed"
+            elif t < 18:  # memkernel fails every run; the comparators pass every run
+                mk, other = "failed", "passed"
+            else:  # ties
+                mk = other = "passed"
+            receipts.append(_trial("memkernel", f"t{t:02d}", run, outcome=mk, checker_passed=mk == "passed"))
+            for arm in ("claude_md", "fs_grep"):
+                receipts.append(_trial(arm, f"t{t:02d}", run, outcome=other, checker_passed=other == "passed"))
+    effects, pairs = report.task_effects(report.assemble(receipts), "claude_md")
+    assert sum(effects.values()) == 0 and pairs == 100
+    text = report.render(receipts, POOLED)
+    endpoint = _endpoint(text)
+    assert "| claude_md | 20 | 100 | 15 | 3 | 2 |" in endpoint and "| 0.0151 |" in endpoint
+    assert "| gain |" not in endpoint and "| loss |" not in endpoint
+    assert "the test's direction and the mean's sign disagree" in endpoint
+    assert "**Headline:** no gain claimed" in endpoint
+
+
+def test_an_interval_on_the_band_edge_is_inside_it() -> None:
+    """Exact effects: every task at +1/10 is a mean and interval of exactly +10 points, inside a +/-10 band."""
+    receipts = []
+    for t in range(20):
+        for run in range(10):
+            mk, other = "passed", "failed" if run == 0 else "passed"
+            receipts.append(_trial("memkernel", f"t{t:02d}", run, outcome=mk, checker_passed=True))
+            for arm in ("claude_md", "fs_grep"):
+                receipts.append(_trial(arm, f"t{t:02d}", run, outcome=other, checker_passed=other == "passed"))
+    lenient = {**POOLED, "alpha": 0.0}  # no test can reject, so the interval rule decides
+    assert _endpoint(report.render(receipts, lenient)).count("| +10.0 to +10.0 | equivalent |") == 2
+
+
+def test_a_rejecting_test_whose_direction_and_mean_disagree_is_not_a_loss() -> None:
+    """Review of 18d (FR-016, second amendment of 2026-10-24): 16 tasks at +1/5 and 4 at -1 reject in memkernel's
+    favour (16 to 4, Holm p 0.0236) with a mean of -0.04; the old rule called that a loss."""
+    receipts = []
+    for t in range(20):
+        for run in range(5):
+            if t < 16:  # memkernel passes every run; the comparators fail one of five
+                mk, other = "passed", "failed" if run == 0 else "passed"
+            else:  # memkernel fails every run; the comparators pass every run
+                mk, other = "failed", "passed"
+            receipts.append(_trial("memkernel", f"t{t:02d}", run, outcome=mk, checker_passed=mk == "passed"))
+            for arm in ("claude_md", "fs_grep"):
+                receipts.append(_trial(arm, f"t{t:02d}", run, outcome=other, checker_passed=other == "passed"))
+    endpoint = _endpoint(report.render(receipts, POOLED))
+    assert "| claude_md | 20 | 100 | 16 | 4 | 0 | 0.0118 | 0.0236 | -4.0 |" in endpoint
+    assert "| loss |" not in endpoint and "| gain |" not in endpoint
+    assert endpoint.count("| no detectable difference (the test's direction and the mean's sign disagree) |") == 2
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"model": "another-model"}, "model another-model"),
+        ({"code_sha": "other"}, "code_sha other"),
+        ({"task_id": "unregistered"}, "task unregistered"),
+        ({"run_index": 1}, "run_index 1"),  # the block preregisters one run per arm per task
+    ],
+)
+def test_the_report_refuses_receipts_outside_the_preregistered_experiment(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], change: dict[str, Any], message: str
+) -> None:
+    """Review of #50: receipts naming the right preregistration but another model, code, task or run were counted
+    as the preregistered experiment and could produce a gain headline."""
+    prereg = _preregistration(tmp_path)
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = [
+        _trial("memkernel", "t1", 0, preregistration_sha256=digest),
+        _trial("claude_md", "t1", 0, preregistration_sha256=digest),
+    ]
+    status, _, _ = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 0
+    receipts[0] = {**receipts[0], **change}
+    status, out, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "outside the preregistered experiment" in err and message in err and out == ""
+
+
+def test_scored_sessions_with_api_errors_are_counted_by_arm_not_only_events() -> None:
+    """Review of #50 (FR-015a): one session with two 529s and two sessions with one each differ in sessions."""
+    one = [_timed("memkernel", "t1", 0, {"529": 2}), _timed("memkernel", "t2", 1), _timed("claude_md", "t1", 2)]
+    two = [
+        _timed("memkernel", "t1", 0, {"529": 1}),
+        _timed("memkernel", "t2", 1, {"529": 1}),
+        _timed("claude_md", "t1", 2),
+    ]
+    assert "| memkernel | 529: 2 | 1 |" in report.render(one, PARAMS)
+    assert "| memkernel | 529: 2 | 2 |" in report.render(two, PARAMS)
+    # a truncated session is listed with the tail, not counted as a scored session with errors
+    tail = [_timed("claude_md", "t1", 0), _timed("memkernel", "t1", 1, {"529": 1})]
+    assert "| memkernel | 529: 1 | 0 |" in report.render(tail, PARAMS)
+
+
+def test_sessions_of_excluded_trials_are_not_counted_as_scored_error_sessions() -> None:
+    """Review of #50: the count must follow the trial, not the session."""
+    invalid = [  # a 529 alongside the refusal that invalidated the trial
+        _timed(
+            "memkernel",
+            "t1",
+            0,
+            {"529": 1, "401": 1},
+            valid=False,
+            invalid_reason="authentication_failed",
+            outcome=None,
+            checker_passed=None,
+        ),
+        _timed("claude_md", "t1", 1),
+    ]
+    assert "| memkernel | 401: 1, 529: 1 | 0 |" in report.render(invalid, PARAMS)
+
+    def chained(position: int, minute: int, errors: dict[str, int]) -> dict[str, Any]:
+        return _trial(
+            "memkernel",
+            "t1",
+            0,
+            chain_length=2,
+            position=position,
+            stage="exposure" if position == 0 else "evaluation",
+            started_at=f"2026-11-01T10:{minute:02d}:00.000Z",
+            api_errors=errors,
+        )
+
+    # an early error session whose trial a later truncated session excludes
+    cut_later = [chained(0, 0, {"529": 1}), _timed("claude_md", "t1", 1), chained(1, 2, {"529": 1})]
+    text = report.render(cut_later, PARAMS)
+    assert "| memkernel | 529: 2 | 0 |" in text and "**Truncated:** 1 session(s)" in text
+
+
+def test_the_report_refuses_an_arm_the_preregistration_omits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prereg = _preregistration(tmp_path, arms=["bare", "placebo", "protocol", "claude_md", "memkernel"])
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = [_trial("fs_grep", "t1", 0, preregistration_sha256=digest)]
+    status, _, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "arm fs_grep" in err
