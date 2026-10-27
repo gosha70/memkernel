@@ -42,13 +42,13 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         With the memkernel[wiki] extra installed, "lint" carries wiki-studio's violations, audit
         errors and health findings for the whole wiki after the export (curated pages included);
         without the extra it is null and "lint_hint" says how to enable it; if the lint pass itself
-        failed it is null and "lint_error" says why. With wiki-studio >= 0.6.0 the pages go through its
+        failed it is null and "lint_error" says why. With wiki-studio >= 0.7.0 the pages go through its
         promote gate (a missing index.md and log.md are created first by wiki-studio's init), and the
         response adds "proposal", "submission_digest" and "archived_dir" from wiki-studio's receipt.
         If "archived_dir" is null the pages landed but wiki-studio did not finish (no archive, or a
         failure after its commit, checked against its receipt), and "archive_hint" gives the command
         that finishes it; "receipt_error" says the receipt could not
-        be read. A rejected export, or an installed wiki-studio that is broken or older than 0.6.0,
+        be read. A rejected export, or an installed wiki-studio that is broken or older than 0.7.0,
         writes no page and reports "gate_error" (a new wiki keeps the index.md and log.md init created).
         """
         app_ctx = _context(ctx)
@@ -86,11 +86,31 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         wiki_dir: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
-        """Index every curated wiki page under wiki_dir (default MEMKERNEL_WIKI_DIR) as a
-        long-term memory so recall() can find it. Idempotent: unchanged pages dedup, changed
-        pages supersede their previous version.
+        """Index wiki pages under wiki_dir (default MEMKERNEL_WIKI_DIR) as long-term memories so
+        recall() can find them. With wiki-studio >= 0.7.0 installed the import is governed
+        ("governed": true): only pages wiki-studio reports approved, whose bytes are the approved
+        revision, are imported; "not_approved" lists the others with their state and reason, and a
+        page edited after approval keeps its last approved memory. An approved page's "corrects"
+        frontmatter key (comma-separated memory ref_ids) supersedes the memories it names, keeping
+        their records: "corrections" lists them, "unresolved" the references not applied (unknown,
+        another project's, a wiki memory, already superseded) with a reason, "invalid_corrects" a
+        value that breaks the grammar. Without wiki-studio every page file is imported, drafts
+        included ("governed": false). An installed wiki-studio that is broken or older than 0.7.0
+        imports nothing and reports "import_error". Idempotent: an unchanged page is skipped, a
+        changed one supersedes its previous version.
         """
         app_ctx = _context(ctx)
-        importer = WikiImporter(app_ctx.memory_service, _resolve_wiki_dir(wiki_dir, app_ctx.settings))
+        importer = WikiImporter(
+            app_ctx.memory_service,
+            _resolve_wiki_dir(wiki_dir, app_ctx.settings),
+            project_root=Path(app_ctx.settings.project_root),
+        )
         report = importer.import_pages()
-        return json.dumps({"imported": report.imported, "skipped": report.skipped})
+        payload: dict[str, Any] = {"imported": report.imported, "skipped": report.skipped, "governed": report.governed}
+        if report.import_error is not None:
+            payload["import_error"] = report.import_error
+        for key in ("not_approved", "corrections", "unresolved", "invalid_corrects"):
+            value = getattr(report, key)
+            if value:
+                payload[key] = value
+        return json.dumps(payload)

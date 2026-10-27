@@ -450,6 +450,32 @@ class MemoryService:
             ):
                 self._vector_store.update_metadata(chunk.ref_id, update)
 
+    def supersede(self, ref_id: str, by_ref: str) -> bool:
+        """Mark the existing record ``ref_id`` as replaced by the existing record ``by_ref``.
+
+        Sets only the durable ``superseded_by`` marker (on ``ref_id`` and its owned
+        chunks), as ``retain(supersedes=...)`` does; the record's content and every
+        other field stay as they are, so its provenance remains. Returns True when it
+        set the marker, False when ``ref_id`` was already superseded by ``by_ref``.
+        Raises ``ValueError`` and changes nothing when either record is not in this
+        store (unknown, or another project's), when they are the same record, or when
+        ``ref_id`` is already superseded by a different record: an existing marker is
+        never overwritten.
+        """
+        if ref_id == by_ref:
+            raise ValueError(f"{ref_id} cannot supersede itself")
+        target = self._vector_store.get_by_id(ref_id)
+        if target is None:
+            raise ValueError(f"{ref_id} is not a memory in this store")
+        if self._vector_store.get_by_id(by_ref) is None:
+            raise ValueError(f"{by_ref} is not a memory in this store")
+        if target.superseded_by == by_ref:
+            return False
+        if target.superseded_by:
+            raise ValueError(f"{ref_id} is already superseded by {target.superseded_by}")
+        self._mark_superseded(ref_id, by_ref)
+        return True
+
     def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
         """Set the durable ``superseded_by`` marker on ``target_ref`` and its owned chunks."""
         if target_ref == by_ref or self._vector_store.get_by_id(target_ref) is None:

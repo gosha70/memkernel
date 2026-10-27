@@ -368,9 +368,20 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
         # Curate the draft, then import it: recall must return the curated page version.
         page = wiki_dir / "decisions/use-arq-for-background-jobs.md"
         page.write_text(page.read_text().replace("status: draft", "status: stable"))
+        if export["lint"] is not None:  # with the extra the import is governed: the curator approves the page
+            import wiki_studio.api as studio
+            from wiki_studio.paths import WikiPaths
+
+            studio.approve(
+                ["decisions/use-arq-for-background-jobs.md"],
+                WikiPaths.for_root(Path(str(tmp_path)), wiki_dir=wiki_dir),
+                by="curator",
+            )
         result = await client.call_tool("wiki_import", arguments={"wiki_dir": str(wiki_dir)})
         imported = json.loads(_text(result))
         assert imported["imported"] == ["decisions/use-arq-for-background-jobs.md"]
+        assert imported["governed"] is (export["lint"] is not None)  # approved-only with the extra (FR-011)
+        assert "import_error" not in imported
 
         result = await client.call_tool("recall", arguments={"query": "arq background jobs", "tier": "long_term"})
         refs = json.loads(_text(result))

@@ -136,3 +136,16 @@ older than 0.6.0, or one without `init`, `propose`, `promote` or `PageEdit`, is
 refused with `gate_error`; the export never falls back to unchecked writes.
 Only a missing extra uses the direct writer. The development lock is 0.6.0, so
 CI tests the floor.
+
+## Note (2026-10-27)
+
+The floor rises to `wiki-studio>=0.7.0,<1`, one floor for export and import
+(memkernel-0-6 part 2a, owner decision 2026-10-27: `pyproject.toml` states one
+constraint for the extra, so two floors would admit a version the importer
+refuses). 0.7.0 adds review state (`api.review_state`, approval records), which
+the governed import reads to bring in approved revisions only. The bridge now
+requires `init`, `propose`, `promote`, `PageEdit`, `review_state` and
+`read_page`; an installed wiki-studio without one of them, or older than 0.7.0,
+is refused. Without the extra the export uses the direct writer and the import
+reads the page files as before, reported as ungoverned. The development lock is
+0.7.0, so CI tests the floor.

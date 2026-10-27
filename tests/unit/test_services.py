@@ -565,3 +565,57 @@ def test_recall_without_checkpoint_only_returns_all() -> None:
     ref_ids = {r.ref_id for r in results}
     assert cp_ref in ref_ids
     assert reg_ref in ref_ids
+
+
+# ── supersede (memkernel-0-6 FR-017) ──────────────────────────────────────────
+
+
+def test_supersede_marks_the_old_record_and_changes_nothing_else() -> None:
+    svc, _, _ = _make_service()
+    old = svc.retain("Deploys happen on Fridays", MemoryType.CONVENTION, tags=["ops"])
+    new = svc.retain("Deploys happen on Tuesdays", MemoryType.CONVENTION)
+    before = svc.get(old, touch=False)
+
+    assert svc.supersede(old, new) is True
+
+    after = svc.get(old, touch=False)
+    assert before is not None and after is not None and after.superseded_by == new
+    assert (after.content, after.type, after.tier, after.tags) == (
+        before.content,
+        before.type,
+        before.tier,
+        before.tags,
+    )
+    assert old not in {m.ref_id for m in svc.list_memories()}  # no longer current
+    assert svc.supersede(old, new) is False  # idempotent
+
+
+@pytest.mark.parametrize("case", ["unknown", "missing replacement", "self", "already superseded by another"])
+def test_supersede_refuses_and_changes_nothing(case: str) -> None:
+    svc, _, _ = _make_service()
+    old = svc.retain("Deploys happen on Fridays", MemoryType.CONVENTION)
+    new = svc.retain("Deploys happen on Tuesdays", MemoryType.CONVENTION)
+    other = svc.retain("Deploys happen on Mondays", MemoryType.CONVENTION)
+    svc.supersede(other, new) if case == "already superseded by another" else None
+    target, by = {
+        "unknown": ("mem-unknown", new),
+        "missing replacement": (old, "mem-unknown"),
+        "self": (old, old),
+        "already superseded by another": (other, old),
+    }[case]
+    before = {m.ref_id: m.superseded_by for m in svc.list_memories(include_superseded=True)}
+
+    with pytest.raises(ValueError):
+        svc.supersede(target, by)
+
+    assert {m.ref_id: m.superseded_by for m in svc.list_memories(include_superseded=True)} == before
+
+
+def test_supersede_refuses_a_record_of_another_project() -> None:
+    svc, _, _ = _make_service()
+    foreign, _, _ = _make_service(_make_settings(project_id=f"other-{uuid.uuid4().hex[:8]}"))
+    elsewhere = foreign.retain("A memory of another project", MemoryType.FACT)
+    mine = svc.retain("A memory of this project", MemoryType.FACT)
+
+    with pytest.raises(ValueError, match="not a memory in this store"):
+        svc.supersede(elsewhere, mine)

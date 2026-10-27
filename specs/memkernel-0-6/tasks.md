@@ -22,14 +22,14 @@
 ## US3: Approved-only import (part 2a, wiki-studio 0.7.0)
 | # | Dep | Task | Files | Agent | Done |
 |---|-----|------|-------|-------|------|
-| 8 | | Floor 0.7.0 for both paths: extra, dev dependency, lock, `GATE_MIN_VERSION`, required calls incl. `review_state` and `read_page`; ADR-010 note (FR-003, FR-004) | `pyproject.toml`, `poetry.lock`, `src/memkernel/wiki/studio.py`, `docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`, tests | build | [ ] |
-| 9 | 8 | Governed import through `review_state` + `read_page` sha check; ungoverned without the extra; `import_error` below the floor; identity tags and idempotency; stale keeps its memory (FR-010–FR-013) | `src/memkernel/wiki/sync.py`, `src/memkernel/wiki/studio.py`, tests | build | [ ] |
+| 8 | | Floor 0.7.0 for both paths: extra, dev dependency, lock, `GATE_MIN_VERSION`, required calls incl. `review_state` and `read_page`; ADR-010 note (FR-003, FR-004) | `pyproject.toml`, `poetry.lock`, `src/memkernel/wiki/studio.py`, `docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`, tests | build | [x] |
+| 9 | 8 | Governed import through `review_state` + `read_page` sha check; ungoverned without the extra; `import_error` below the floor; identity tags and idempotency; stale keeps its memory (FR-010–FR-013) | `src/memkernel/wiki/sync.py`, `src/memkernel/wiki/studio.py`, tests | build | [x] |
 
 ## US4: `corrects` reconciliation (part 2a)
 | # | Dep | Task | Files | Agent | Done |
 |---|-----|------|-------|-------|------|
-| 10 | 9 | `corrects` grammar parser and its tests (incl. wiki-studio's multi-corrections fixture); `MemoryService.supersede` (FR-017; read and update memory-tiers.md first); reconciliation with `unresolved` and `invalid_corrects` (FR-014, FR-015, FR-017) | `src/memkernel/wiki/sync.py`, `src/memkernel/core/services.py`, `docs/architecture/memory-tiers.md`, tests | build | [ ] |
-| 11 | 10 | `ImportReport` fields and the `wiki_import` response and description; README (governed vs ungoverned import, `corrects`), CHANGELOG; run wiki-studio's Release B loop test and record it (FR-016, SC-8, SC-9) | `src/memkernel/wiki/sync.py`, `src/memkernel/mcp/tools/wiki.py`, `README.md`, `CHANGELOG.md`, tests | build | [ ] |
+| 10 | 9 | `corrects` grammar parser and its tests (incl. wiki-studio's multi-corrections fixture); `MemoryService.supersede` (FR-017; read and update memory-tiers.md first); reconciliation with `unresolved` and `invalid_corrects` (FR-014, FR-015, FR-017) | `src/memkernel/wiki/sync.py`, `src/memkernel/core/services.py`, `docs/architecture/memory-tiers.md`, tests | build | [x] |
+| 11 | 10 | `ImportReport` fields and the `wiki_import` response and description; README (governed vs ungoverned import, `corrects`), CHANGELOG; run wiki-studio's Release B loop test and record it (FR-016, SC-8, SC-9) | `src/memkernel/wiki/sync.py`, `src/memkernel/mcp/tools/wiki.py`, `README.md`, `CHANGELOG.md`, tests | build | [x] |
 
 ## Part 2b and 2c — to be specified
 2b: withdrawal on supersession, deprecation and deletion, with a per-page sync state and a retry path.

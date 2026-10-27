@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 INSTALL_HINT = "install memkernel[wiki] for lint and health"
 GATE_BACKEND = "memkernel"
 GATE_RATIONALE = "memkernel export"
-# The gate's floor (ADR-010 addendum): 0.6.0 scopes the commit to the planned writes, rolls back on any
+# The floor for export and import (ADR-010 addenda): 0.6.0 scopes the commit to the planned writes, rolls back on any
 # exception including a write that failed part-way, and records a receipt, so memkernel keeps no snapshot.
-GATE_MIN_VERSION = (0, 6, 0)
+GATE_MIN_VERSION = (0, 7, 0)  # 0.7.0 adds review state, which the governed import reads
+# Every wiki-studio call the bridge makes; an installed wiki-studio without one of them is refused.
+REQUIRED_CALLS = ("init", "propose", "promote", "PageEdit", "review_state", "read_page")
 STUDIO_DISTRIBUTION = "wiki-studio"
 RECEIPT_FILE = "receipt.json"
 RECEIPT_COMMIT_STATES = ("committing", "committed")  # wiki-studio wrote the receipt before or after its commit
@@ -154,7 +156,7 @@ class GateResult:
 
 
 def _release(version: str) -> tuple[int, ...]:
-    """The leading numeric release of a version string: "0.6.0rc1" -> (0, 6, 0)."""
+    """The leading numeric release of a version string: "0.7.0rc1" -> (0, 7, 0)."""
     parts: list[int] = []
     for piece in version.split(".")[:3]:
         digits = ""
@@ -169,22 +171,22 @@ def _release(version: str) -> tuple[int, ...]:
 
 
 def _below_floor(version: str) -> bool:
-    """True when ``version`` is older than :data:`GATE_MIN_VERSION`; a pre-release of the floor (0.6.0rc1) is older."""
+    """True when ``version`` is older than :data:`GATE_MIN_VERSION`; a pre-release of the floor (0.7.0rc1) is older."""
     release = _release(version)
     if not release:
         return True
     padded = (release + (0, 0, 0))[:3]
     if padded != GATE_MIN_VERSION:
         return padded < GATE_MIN_VERSION
-    # a marker after "post" belongs to a post-release, which is above the floor (0.6.0.post1.dev2 > 0.6.0)
+    # a marker after "post" belongs to a post-release, which is above the floor (0.7.0.post1.dev2 > 0.7.0)
     return _PRE_RELEASE.search(version.split("+", 1)[0].lower().split("post", 1)[0]) is not None
 
 
 def gate_available() -> Any | None:
-    """Return ``wiki_studio.api`` when it offers the proposal gate (wiki-studio >= 0.6.0), else ``None``.
+    """Return ``wiki_studio.api`` when it offers every call the bridge makes (wiki-studio >= 0.7.0), else ``None``.
 
     ``None`` means wiki-studio is absent, where the direct writer is the
-    supported path. An installed wiki-studio that is broken, older than 0.6.0,
+    supported path. An installed wiki-studio that is broken, older than 0.7.0,
     or lacks the calls the bridge makes raises :class:`GateError`: the validator
     is installed, so it must not be mistaken for its absence and let pages
     through unchecked.
@@ -200,7 +202,7 @@ def gate_available() -> Any | None:
     except metadata.PackageNotFoundError:
         version = "unknown"
     floor = ".".join(str(part) for part in GATE_MIN_VERSION)
-    missing = [name for name in ("init", "propose", "promote", "PageEdit") if not hasattr(api, name)]
+    missing = [name for name in REQUIRED_CALLS if not hasattr(api, name)]
     if _below_floor(version) or missing:
         detail = f" (missing {', '.join(missing)})" if missing else ""
         raise GateError(
@@ -208,6 +210,50 @@ def gate_available() -> Any | None:
             f"upgrade it (pip install 'wiki-studio>={floor},<1') or uninstall it to use the direct writer"
         )
     return api
+
+
+APPROVED_STATE = "approved"
+CHANGED_SINCE_CHECK = "live_bytes_differ_from_approved"  # read_page's bytes are not the approved revision
+
+
+@dataclass(frozen=True)
+class PageReview:
+    """One page's review state; for an importable page, the approved revision's text from a single read."""
+
+    path: str  # wiki-relative
+    page_key: str  # wiki-studio's page_id, else the normalised path
+    state: str
+    reason: str
+    text: str | None = None  # set only when the page is importable
+    sha256: str | None = None
+
+
+def review_pages(api: Any, wiki_dir: Path, project_root: Path) -> list[PageReview]:
+    """Every page's review state (memkernel-0-6 FR-010).
+
+    A page is importable only when ``review_state`` reports it approved and the
+    bytes ``read_page`` returns have the approved sha256; its text comes from
+    that same read, so an edit made after the check is never imported. Raises
+    :class:`GateError` on any failure of the installed wiki-studio.
+    """
+    try:
+        from wiki_studio.paths import WikiPaths
+
+        paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir)
+        reviews: list[PageReview] = []
+        for state in api.review_state(paths):
+            if state.state != APPROVED_STATE:
+                reviews.append(PageReview(state.path, state.page_key, state.state, state.reason))
+                continue
+            read = api.read_page(state.path, paths)
+            if read.sha256 != state.approved_sha256:
+                reviews.append(PageReview(state.path, state.page_key, state.state, CHANGED_SINCE_CHECK))
+                continue
+            reviews.append(PageReview(state.path, state.page_key, state.state, state.reason, read.text, read.sha256))
+    except Exception as exc:  # any failure of the installed wiki-studio is reported, never raised raw
+        logger.warning("wiki-studio review state failed for %s: %s", wiki_dir, exc)
+        raise GateError(f"wiki-studio review state failed: {exc}") from exc
+    return reviews
 
 
 def propose_and_promote(
