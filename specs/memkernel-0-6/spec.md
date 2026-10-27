@@ -18,7 +18,8 @@ Part 1 (US1–US2) is buildable against wiki-studio 0.6.0; part 2 (US3+) waits f
   as skipped, and writes nothing itself. `_WikiSnapshot` is removed. A failure after FR-002's `api.init` (for
   example in `propose`) leaves the new `index.md` and `log.md` in place: a valid, empty scaffold, not removed.
   memkernel 0.5 left a fresh wiki with no files after a rejected export; the CHANGELOG says so, and the
-  `gate_error` field's comment ("nothing was written") is corrected to "no page was written".
+  `gate_error` field's comment ("nothing was written") is corrected to "no page was written". The one exception,
+  where wiki-studio fails after it has committed the pages, is FR-009.
 - **FR-002 (scaffold through wiki-studio):** before proposing, the gated path MUST create a missing `index.md`
   and `log.md` with `api.init` (never overwrites; exclusive create), not with memkernel's own scaffold. The direct
   writer (no wiki-studio) keeps memkernel's scaffold. memkernel-0-5 SC-2's byte-identity therefore covers pages
@@ -42,7 +43,7 @@ Part 1 (US1–US2) is buildable against wiki-studio 0.6.0; part 2 (US3+) waits f
     promoting the proposal directory again finishes it and applies nothing twice;
   - `archive_hint`: set only in that case, and also logged as a warning. It says how to clear the state: the
     promote command, with the actual proposal directory and the `--root`, `--wiki-dir` and `--proposals-dir`
-    memkernel used, finishes the archive and applies nothing twice. The command runs through the interpreter
+    memkernel used, all absolute (as wiki-studio's `WikiPaths` holds them), so it works from any directory, finishes the archive and applies nothing twice. The command runs through the interpreter
     memkernel runs on (`<sys.executable> -m wiki_studio promote …`), not a `wiki-studio` found on `PATH`, so it
     reaches the same wiki-studio the export used even when that is installed only in memkernel's environment.
 
@@ -61,6 +62,21 @@ Part 1 (US1–US2) is buildable against wiki-studio 0.6.0; part 2 (US3+) waits f
   still says "wiki-studio >= 0.3" and that a rejected export "writes nothing"), and the CHANGELOG lists each
   added response key, as 0.5 did for `lint`, `lint_hint`, `lint_error` and `gate_error`. The tool count is
   unchanged.
+
+- **FR-009 (committed, then failed):** wiki-studio can commit the pages and then raise, for example when it
+  cannot rewrite its receipt as committed ("the edits were committed to the wiki … Promote the directory again to
+  finish"). When the gate raises after `propose` returned a proposal directory, memkernel MUST check whether the
+  commit happened, using wiki-studio's own record: the receipt left in that directory (state `committing` or
+  `committed`) and, for every page memkernel created, that the page's on-disk sha256 equals the receipt's
+  `post_sha256` for that path. wiki-studio writes that receipt before any wiki write, so a missing receipt means
+  nothing was committed (a refusal such as a create of an existing page) and is a `gate_error`, even when a page
+  with identical bytes is on disk. Only if the receipt exists but cannot be read or has no usable
+  `planned_writes`, it falls back to comparing each page's bytes on disk with the content memkernel proposed. If the check holds, the export is
+  reported as written and gated: the pages in `written`, `proposal`, `submission_digest` from the receipt when
+  readable, `archived_dir` null, no `gate_error`, and `archive_hint` with the promote command (FR-005) that
+  finishes it, preceded by wiki-studio's message; the hint is also logged as a warning. If the check does not
+  hold (validation refused, or wiki-studio rolled back), it is a `gate_error` as in FR-001. memkernel never runs
+  the promote again itself: that is the user's step, as the hint says.
 
 ## Constraints / What NOT to Build
 - No held-lock route (owner decision 1: snapshot removal chosen). No change to wiki-studio.
@@ -89,3 +105,8 @@ Part 1 (US1–US2) is buildable against wiki-studio 0.6.0; part 2 (US3+) waits f
   `archive_hint` naming that directory, and no `gate_error`. Running the hint's command exactly as given (through
   `sys.executable -m wiki_studio`) then archives the proposal and changes no wiki page. The `wiki_export` response
   carries the same keys (FR-008).
+- SC-7: With wiki-studio forced to fail after its commit (the receipt rewrite as committed), the export reports
+  the page as written and gated, `archived_dir = None`, no `gate_error`, and an `archive_hint` whose command,
+  run as given, finishes the promotion without changing the page. With the receipt present but unreadable, the
+  content check reports the page as written. A refusal before any receipt (another export created the same page
+  with identical bytes), a receipt whose state records no commit, and a rolled-back failure report `gate_error`.

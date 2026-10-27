@@ -14,6 +14,7 @@ origin:
     - https://github.com/gosha70/wiki-studio/blob/main/specs/pitches/38-release-b-governed-curation/pitch.md
   transcripts:
     - specs/memkernel-0-6/origin/2026-10-26-release-b-start.md
+    - specs/memkernel-0-6/origin/2026-10-27-committed-then-failed.md
   origin_claim: |
     Close the memkernel side of wiki-studio's Release B (memkernel #48): remove the
     bridge's whole-wiki snapshot and rollback and scaffold through wiki-studio's
