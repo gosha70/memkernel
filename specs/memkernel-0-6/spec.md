@@ -93,7 +93,9 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
 - **FR-010 (governed import):** with wiki-studio ≥ 0.7.0 installed, `WikiImporter.import_pages()` MUST import a
   page only when `api.review_state` reports it `approved` and `api.read_page(rel).sha256` equals the state's
   `approved_sha256` (wiki-studio's consumer guide); every other page is skipped and listed in a new
-  `ImportReport.not_approved` with its state and reason, so the report says why each page was skipped. memkernel
+  `ImportReport.not_approved` with its state and reason, so the report says why each page was skipped. The
+  memory's content is taken from the same `read_page` result whose sha256 was checked; the file is not read
+  again, so an edit between the check and the import can never be imported unapproved. memkernel
   never approves a page and never writes approval records.
 - **FR-011 (without the extra, and below the floor):** with wiki-studio absent, the import keeps today's
   behaviour (it reads the page files; drafts included) and reports `governed: false`; the README and the tool
@@ -106,7 +108,10 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   comma-separated `tags` field, so no new metadata key is added and records written before 0.6 load unchanged
   (their tag lists simply lack them). A page whose approved revision already
   has a live memory with that `page_key` and `page_sha` is not imported again. A new approved revision supersedes
-  the page's previous live memory (`supersedes`); a memory imported before 0.6 is matched by `page:<slug>`.
+  the page's previous live memory (`supersedes`). A memory imported before 0.6 (no `page_key` tag) is matched by
+  its `source`, the wiki-relative path, which is unique; never by `page:<slug>`, because slugs repeat across
+  directories (`decisions/retry.md` and `workflows/retry.md`), which also fixes today's importer superseding
+  one such page's memory with the other's.
 - **FR-013 (stale and other non-approved states):** a page that is `stale`, `policy-changed`, `unapproved` or
   `superseded` is not imported, and its existing memory is left as it is (withdrawal is part 2b): an edited
   page keeps its last approved memory until it is approved again.
@@ -117,11 +122,19 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   applied, and the page is listed in `ImportReport.invalid_corrects` with the reason. memkernel asks wiki-studio
   to record this grammar in ADR-0002; wiki-studio's fixture `tests/fixtures/corrects/multi-corrections.md` parses.
 - **FR-015 (reconciliation):** after a page is imported under FR-010, each `corrects` token that names a live
-  memory in this store, other than the page's own imported memories, is marked superseded by the page's new
-  memory (its `superseded_by` set; the record is kept, so its provenance remains). A token that names
-  no memory in this store (unknown, or another project's), or one already superseded by a different memory, is
-  listed in `ImportReport.unresolved` (page, token, reason) and never dropped silently. A token already superseded
+  memory in this store that did not come from the wiki (no `wiki` tag: an originating raw memory, as #48 says) is
+  marked superseded by the page's new memory (its `superseded_by` set; the record is kept, so its provenance
+  remains). A token that names a memory imported from the wiki (another page's, or this page's own) is not
+  applied: one source of truth per wiki fact, so a wrong wiki memory is fixed by correcting its page (owner
+  decision 2026-10-27); it is listed in `ImportReport.unresolved` with the reason "correct the page instead". A
+  token that names no memory in this store (unknown, or another project's), or one already superseded by a
+  different memory, is listed in `ImportReport.unresolved` (page, token, reason) and never dropped silently. A token already superseded
   by this page's memory is a no-op, so a second import changes nothing.
+- **FR-016 (report and tool):** `ImportReport` gains `governed`, `not_approved`, `corrections` (page, ref_id
+  applied), `unresolved`, `invalid_corrects` and `import_error`; the `wiki_import` response carries the same
+  keys, present only when they apply, as `wiki_export` does. `WikiImporter` accepts an optional `project_root`
+  (default the wiki directory's parent, as the exporter); the tool passes `MEMKERNEL_PROJECT_ROOT`. The MCP tool
+  count is unchanged.
 - **FR-017 (`MemoryService.supersede`, a core change):** the one new public method part 2a adds to `core/`.
   `supersede(ref_id, by_ref) -> bool` sets the durable `superseded_by` marker on `ref_id` (and its owned
   chunks), exactly as `retain(supersedes=...)` already does through `_mark_superseded`, and never edits the
@@ -133,17 +146,12 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   importer maps each refusal to `ImportReport.unresolved`. `docs/architecture/memory-tiers.md` is read before
   the change and updated: its supersession row (line 92) and API table (line 156) gain `supersede` and the
   `corrects` route.
-- **FR-016 (report and tool):** `ImportReport` gains `governed`, `not_approved`, `corrections` (page, ref_id
-  applied), `unresolved`, `invalid_corrects` and `import_error`; the `wiki_import` response carries the same
-  keys, present only when they apply, as `wiki_export` does. `WikiImporter` accepts an optional `project_root`
-  (default the wiki directory's parent, as the exporter); the tool passes `MEMKERNEL_PROJECT_ROOT`. The MCP tool
-  count is unchanged.
 
 ## Constraints / What NOT to Build
 - No held-lock route (owner decision 1: snapshot removal chosen). No change to wiki-studio.
 - Nothing of part 2 (review state, `corrects`, withdrawal, governed mode) in part 1.
 - No merge to `main` before the `v0.5.0` tag; no new runtime dependency (wiki-studio stays an optional extra).
-  `core/` is unchanged in part 1; part 2a adds only `MemoryService.supersede` (FR-015).
+  `core/` is unchanged in part 1; part 2a adds only `MemoryService.supersede` (FR-017).
 - Part 2a builds nothing of 2b or 2c: no withdrawal, no sync ledger, no governed mode, no curation debt, no
   `page_id` assignment (`assign_page_ids` stays off), no approval by memkernel.
 
@@ -187,9 +195,11 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
 - SC-9 (part 2a): memkernel's own tests cover, against the real wiki-studio 0.7.0: a draft and a self-declared
   approval are not imported; a stale page keeps its last approved memory and is imported once re-approved; a live
   sha256 that differs from `approved_sha256` is skipped; the import run twice adds no memory; `corrects` with
-  several tokens, an unknown token, another project's token, an invalid value, and a second import; without the
+  several tokens, an unknown token, another project's token, a token naming another page's wiki memory
+  (unresolved, "correct the page instead"), an invalid value, and a second import; without the
   extra the import is ungoverned and says so; below the floor it imports nothing and reports `import_error`; an
-  import over a store written before 0.6 (wiki memories without `page_key`/`page_sha`) matches them by
-  `page:<slug>` and supersedes rather than duplicates them; `supersede`'s refusals (unknown, another project,
+  import over a store written before 0.6 (wiki memories without `page_key`/`page_sha`) matches them by `source`
+  and supersedes rather than duplicates them, and two pages with the same slug in different directories keep
+  separate memories; `supersede`'s refusals (unknown, another project,
   self, already superseded by another) and its idempotence.
 
