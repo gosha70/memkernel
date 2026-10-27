@@ -6,7 +6,8 @@
 # that code. Python dependencies come from that commit's poetry.lock, with
 # hashes. The one exception is torch: the locked version, but the CPU build
 # from PyTorch's index, and the CUDA-only packages are left out. wiki-studio,
-# in its own venv, is the locked version with its locked hashes. The embedding
+# in its own venv, is the wiki_studio arm's pin with its hashes
+# (arms/wiki_studio/requirements.txt), not memkernel's locked version. The embedding
 # model is cached at a pinned revision and the build fails on any other. The resolved
 # environment is written to /opt/environment.txt and copied into every run.
 # Nothing from the host is mounted except the runs directory, and no credential
@@ -30,11 +31,6 @@ kept = [entry for entry in entries if entry.strip() and not skip.match(entry)]
 path.write_text("\n".join(kept) + "\n")
 torch = re.search(r'^name = "torch"\nversion = "([^"]+)"', Path("/lock/poetry.lock").read_text(), re.M)
 Path("/lock/torch-version").write_text(torch.group(1))
-# wiki-studio (no dependencies of its own) for its own venv, at the locked version with the locked hashes.
-import tomllib
-(ws,) = [p for p in tomllib.loads(Path("/lock/poetry.lock").read_text())["package"] if p["name"] == "wiki-studio"]
-hashes = " ".join(f"--hash={f['hash']}" for f in ws["files"])
-Path("/lock/wiki-studio.txt").write_text(f"wiki-studio=={ws['version']} {hashes}\n")
 EOF
 
 FROM ${PYTHON_IMAGE}
@@ -50,7 +46,7 @@ RUN apt-get update \
  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 
-COPY --from=lock /lock/requirements.txt /lock/torch-version /lock/wiki-studio.txt /opt/lock/
+COPY --from=lock /lock/requirements.txt /lock/torch-version /opt/lock/
 COPY . /opt/memkernel
 RUN python -m venv /opt/mk-venv \
  && /opt/mk-venv/bin/pip install --no-cache-dir --no-deps --require-hashes -r /opt/lock/requirements.txt \
@@ -59,7 +55,8 @@ RUN python -m venv /opt/mk-venv \
  && /opt/mk-venv/bin/pip install --no-cache-dir --no-deps /opt/memkernel \
  && /opt/mk-venv/bin/pip check \
  && python -m venv /opt/ws-venv \
- && /opt/ws-venv/bin/pip install --no-cache-dir --no-deps --require-hashes -r /opt/lock/wiki-studio.txt \
+ && /opt/ws-venv/bin/pip install --no-cache-dir --no-deps --require-hashes \
+      -r /opt/memkernel/eval/lifecycle-suite/arms/wiki_studio/requirements.txt \
  && test "$(/opt/ws-venv/bin/wiki-studio --version)" = "${WIKI_STUDIO_VERSION}" \
  && ln -s /opt/ws-venv/bin/wiki-studio /usr/local/bin/wiki-studio \
  && HF_HOME=/opt/cache/huggingface /opt/mk-venv/bin/python -c \

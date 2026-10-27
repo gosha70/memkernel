@@ -34,7 +34,8 @@ are installed from that commit's `poetry.lock` with hashes. The one exception
 is torch: the locked version, but the CPU build from PyTorch's index, without
 its CUDA packages. It also holds pinned tools:
 - Claude Code 2.1.288
-- wiki-studio 0.4.1
+- wiki-studio 0.4.1, the `wiki_studio` arm's pin with its hashes
+  (`arms/wiki_studio/requirements.txt`), independent of memkernel's `poetry.lock`
 - memkernel and its embedding model, downloaded at build time
 
 Inside the container, the agent sees only `/runs`. The API key arrives when the

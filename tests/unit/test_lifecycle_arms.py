@@ -148,6 +148,20 @@ def test_wiki_studio_arm_is_wiki_studio_v040_byte_for_byte_plus_three_keys() -> 
     assert hashlib.sha256((json.dumps(upstream, indent=2) + "\n").encode()).hexdigest() == source["config_sha256"]
 
 
+def test_the_image_installs_the_arms_own_wiki_studio_pin() -> None:
+    """#54: the arm's wiki-studio comes from its own hashed requirements, not memkernel's poetry.lock."""
+    import re
+
+    requirements = (SUITE_DIR / "arms" / "wiki_studio" / "requirements.txt").read_text(encoding="utf-8")
+    dockerfile = (SUITE_DIR / "calibration" / "Dockerfile").read_text(encoding="utf-8")
+    pinned = re.findall(r"^wiki-studio==(\S+)", requirements, re.M)
+    arg = re.findall(r"^ARG WIKI_STUDIO_VERSION=(\S+)$", dockerfile, re.M)
+    assert pinned == arg == [runner.load_arm("wiki_studio").cli_pin[1]]  # type: ignore[index]
+    assert len(re.findall(r"--hash=sha256:[0-9a-f]{64}", requirements)) == 2  # the wheel and the sdist
+    assert "-r /opt/memkernel/eval/lifecycle-suite/arms/wiki_studio/requirements.txt" in dockerfile
+    assert "wiki-studio.txt" not in dockerfile
+
+
 def test_wiki_studio_runs_on_lc_wiki_only_with_its_cli_pinned() -> None:
     arm = runner.load_arm("wiki_studio")
     assert arm.groups == ("lc-wiki",) and arm.cli_pin == ("wiki-studio", "0.4.1")

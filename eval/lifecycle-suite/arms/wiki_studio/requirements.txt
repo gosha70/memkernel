@@ -1,0 +1,6 @@
+# The wiki_studio arm's wiki-studio, pinned here with its PyPI hashes, independent of memkernel's poetry.lock
+# (#54): memkernel's own wiki-studio floor can move without changing what this arm measures. The version must
+# equal cli_pin in config.frozen.json and WIKI_STUDIO_VERSION in calibration/Dockerfile (tests/unit/test_lifecycle_arms.py).
+wiki-studio==0.4.1 \
+    --hash=sha256:cdf65c0b28605daf4896532a7fd79d6a63301b372ec868e8851860d19284f976 \
+    --hash=sha256:799eff76c1eaf60c52fe22776ac6a7dbe043c1c48e0b43c1852cad970c93e8ed
