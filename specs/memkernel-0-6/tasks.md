@@ -17,6 +17,7 @@
 |---|-----|------|---------|-------|------|
 | 5 | | `ExportReport.proposal`, `submission_digest`, `archived_dir` from the receipt where it actually is; `archive_hint` (also logged) when not archived; `receipt_error` when unreadable; the same keys and an updated description in the `wiki_export` response (FR-005, FR-008) | `src/memkernel/wiki/sync.py`, `src/memkernel/wiki/studio.py`, `src/memkernel/mcp/tools/wiki.py`, tests | build | [x] |
 | 6 | | README: lock-file ignore note; CHANGELOG `[Unreleased]`: snapshot removal and the scaffold left after a failed export, wiki-studio's scaffold for a new wiki (`stable`, different titles), floor 0.6.0, each new `wiki_export` response key (FR-001, FR-002, FR-006, FR-007, FR-008) | `README.md`, `CHANGELOG.md` | build | [x] |
+| 7 | | Committed, then failed: detect a commit from the receipt's `post_sha256` (content fallback), report it as written with the finishing hint; README, CHANGELOG (FR-009, SC-7) | `src/memkernel/wiki/studio.py`, `src/memkernel/wiki/sync.py`, tests, `README.md`, `CHANGELOG.md` | build | [x] |
 
 ## US3+: Part 2 (needs wiki-studio 0.7.0) — to be specified
 Approved-only import via `api.review_state`; `corrects` key and grammar with a round-trip fixture; withdrawal
