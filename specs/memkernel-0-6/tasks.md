@@ -19,6 +19,18 @@
 | 6 | | README: lock-file ignore note; CHANGELOG `[Unreleased]`: snapshot removal and the scaffold left after a failed export, wiki-studio's scaffold for a new wiki (`stable`, different titles), floor 0.6.0, each new `wiki_export` response key (FR-001, FR-002, FR-006, FR-007, FR-008) | `README.md`, `CHANGELOG.md` | build | [ ] |
 | 7 | | Committed, then failed: detect a commit from the receipt's `post_sha256` (content fallback), report it as written with the finishing hint; README, CHANGELOG (FR-009, SC-7) | `src/memkernel/wiki/studio.py`, `src/memkernel/wiki/sync.py`, tests, `README.md`, `CHANGELOG.md` | build | [ ] |
 
-## US3+: Part 2 (needs wiki-studio 0.7.0) — to be specified
-Approved-only import via `api.review_state`; `corrects` key and grammar with a round-trip fixture; withdrawal
-and reconciliation; governed configuration. Shaped once 0.7.0's API is published.
+## US3: Approved-only import (part 2a, wiki-studio 0.7.0)
+| # | Dep | Task | Files | Agent | Done |
+|---|-----|------|-------|-------|------|
+| 8 | | Floor 0.7.0 for both paths: extra, dev dependency, lock, `GATE_MIN_VERSION`, required calls incl. `review_state` and `read_page`; ADR-010 note (FR-003, FR-004) | `pyproject.toml`, `poetry.lock`, `src/memkernel/wiki/studio.py`, `docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`, tests | build | [ ] |
+| 9 | 8 | Governed import through `review_state` + `read_page` sha check; ungoverned without the extra; `import_error` below the floor; identity tags and idempotency; stale keeps its memory (FR-010–FR-013) | `src/memkernel/wiki/sync.py`, `src/memkernel/wiki/studio.py`, tests | build | [ ] |
+
+## US4: `corrects` reconciliation (part 2a)
+| # | Dep | Task | Files | Agent | Done |
+|---|-----|------|-------|-------|------|
+| 10 | 9 | `corrects` grammar parser and its tests (incl. wiki-studio's multi-corrections fixture); `MemoryService.supersede` (FR-017; read and update memory-tiers.md first); reconciliation with `unresolved` and `invalid_corrects` (FR-014, FR-015, FR-017) | `src/memkernel/wiki/sync.py`, `src/memkernel/core/services.py`, `docs/architecture/memory-tiers.md`, tests | build | [ ] |
+| 11 | 10 | `ImportReport` fields and the `wiki_import` response and description; README (governed vs ungoverned import, `corrects`), CHANGELOG; run wiki-studio's Release B loop test and record it (FR-016, SC-8, SC-9) | `src/memkernel/wiki/sync.py`, `src/memkernel/mcp/tools/wiki.py`, `README.md`, `CHANGELOG.md`, tests | build | [ ] |
+
+## Part 2b and 2c — to be specified
+2b: withdrawal on supersession, deprecation and deletion, with a per-page sync state and a retry path.
+2c: governed configuration (refuse the ungated writer, check the manifest policy) and curation debt at session start.
