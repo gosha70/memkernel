@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+<!-- memkernel 0.6, the Release B wiki bridge part 1 (memkernel #48); the 0.5 entries below move to [0.5.0] at the tag. -->
+
+### Changed
+
+- `memkernel[wiki]` now requires `wiki-studio>=0.6.0,<1`, and CI tests 0.6.0.
+  An installed wiki-studio older than 0.6.0 is refused with `gate_error`
+  (upgrade it, or uninstall it to use the direct writer); the export never
+  falls back to unchecked writes.
+- The gated `wiki_export` no longer snapshots and restores the wiki
+  (`_WikiSnapshot` is removed). wiki-studio 0.6.0 writes only the paths the
+  patch-set names, under its lock, and rolls back its own writes, so a failed
+  export cannot revert a page another writer committed during it, as the
+  restore could. A failed export to a new wiki now leaves an empty `index.md`
+  and `log.md`; in 0.5 it left no files.
+- A new wiki's `index.md` and `log.md` on the gated path are wiki-studio's
+  scaffold, created by its `init`: `status: stable`, titles `Wiki` and
+  `Wiki log`. memkernel's direct writer keeps its own (`status: draft`,
+  `Wiki Index`, `Wiki Edit Log`). Pages and the index and log entries are the
+  same on both paths; existing wikis are unaffected.
+
+### Added
+
+- `wiki_export` response keys for a gated export, from wiki-studio's receipt:
+  `proposal` (the proposal name), `submission_digest`, and `archived_dir`
+  (where wiki-studio archived the proposal; `null` when it committed the pages
+  but could not archive it). `archive_hint` appears only when `archived_dir` is
+  `null`, with the `promote` command that finishes the archive and applies
+  nothing twice (run through the interpreter memkernel uses). `receipt_error`
+  appears when the receipt could not be read; the export still succeeds. The
+  same fields are on `ExportReport`.
+- README: ignore wiki-studio's lock file next to the wiki directory.
+
 ### Added
 
 - `memkernel[wiki]` extra (ADR-010): wiki-studio as an optional dependency,

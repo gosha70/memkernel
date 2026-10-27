@@ -111,3 +111,28 @@ part-way leaves the wiki as it was. memkernel's snapshot and restore stay,
 because the floor is still 0.3.1. Removing them with the floor raised to 0.4.1
 is a separate change after the measured run, never while the protocol is
 frozen.
+
+## Note (2026-10-26)
+
+The floor for the extra and the dev dependency rises to `wiki-studio>=0.6.0,<1`,
+and memkernel's snapshot and restore are removed (memkernel #48, owner
+decision 1 of 2026-10-24: remove the snapshot rather than hold wiki-studio's
+lock). 0.4.1 already rolls back a write that fails part-way, on any exception,
+but its commit still writes every staged `*.md` that differs from the live
+wiki, and memkernel's restore rewrites every file it took. With another writer
+in the same wiki, either can put back a page that writer changed. 0.6.0 is the
+first release where that cannot happen: the commit writes only the paths the
+patch-set names, under an advisory lock, after checking that each `create`
+target is still absent, and it records a receipt. memkernel therefore has
+nothing of its own to restore. A failed export changes no page; a scaffold that
+`api.init` created for a new wiki stays.
+
+The gated path now scaffolds a missing `index.md` and `log.md` through
+`api.init` (exclusive create, never overwrites) instead of writing memkernel's
+own scaffold. wiki-studio's scaffold differs (`status: stable`, other titles),
+so the gated and direct writers produce the same pages and the same appended
+lines, but not the same scaffold for a new wiki. An installed wiki-studio
+older than 0.6.0, or one without `init`, `propose`, `promote` or `PageEdit`, is
+refused with `gate_error`; the export never falls back to unchecked writes.
+Only a missing extra uses the direct writer. The development lock is 0.6.0, so
+CI tests the floor.

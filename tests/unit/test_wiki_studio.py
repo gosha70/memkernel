@@ -15,7 +15,17 @@ import pytest
 
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryType
-from memkernel.wiki.studio import INSTALL_HINT, LintError, LintSummary, lint_wiki, load_studio
+from memkernel.wiki.studio import (
+    GATE_MIN_VERSION,
+    INSTALL_HINT,
+    GateError,
+    LintError,
+    LintSummary,
+    _release,
+    gate_available,
+    lint_wiki,
+    load_studio,
+)
 from memkernel.wiki.sync import WikiExporter
 from tests.unit.test_wiki import _service
 
@@ -106,6 +116,29 @@ def test_wiki_studio_is_declared_only_as_an_optional_extra() -> None:
 
     assert poetry["dependencies"]["wiki-studio"]["optional"] is True
     assert poetry["extras"] == {"wiki": ["wiki-studio"]}
+    floor = ".".join(str(part) for part in GATE_MIN_VERSION)  # the extra's floor is the gate's floor
+    assert poetry["dependencies"]["wiki-studio"]["version"] == f">={floor},<1"
+    assert poetry["group"]["dev"]["dependencies"]["wiki-studio"] == f">={floor},<1"
+
+
+@pytest.mark.parametrize(
+    ("version", "release"),
+    [("0.6.0", (0, 6, 0)), ("0.6.0rc1", (0, 6, 0)), ("0.10.2.post1", (0, 10, 2)), ("1", (1,)), ("unknown", ())],
+)
+def test_release_reads_the_leading_numeric_version(version: str, release: tuple[int, ...]) -> None:
+    assert _release(version) == release
+
+
+def test_a_wiki_studio_whose_version_cannot_be_read_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("wiki_studio.api")
+    from importlib import metadata
+
+    def missing(name: str) -> str:
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    with pytest.raises(GateError, match="wiki-studio unknown is installed"):
+        gate_available()
 
 
 def test_lint_failure_never_fails_the_export(
@@ -244,13 +277,26 @@ WRITTEN = ("decisions", "concepts", "workflows")
 
 
 def _written_files(wiki_dir: Path) -> dict[str, str]:
-    """Pages, index.md and log.md: what SC-2 compares (the gate's .audit/ is excluded)."""
+    """Pages, index.md and log.md (the gate's .audit/ is excluded)."""
     files = {}
     for path in sorted(wiki_dir.rglob("*.md")):
         rel = path.relative_to(wiki_dir).as_posix()
         if rel in ("index.md", "log.md") or rel.split("/")[0] in WRITTEN:
             files[rel] = path.read_text(encoding="utf-8")
     return files
+
+
+def _pages_and_entries(wiki_dir: Path) -> dict[str, object]:
+    """What memkernel-0-5 SC-2 compares since memkernel-0-6 FR-002: pages, and the index and log entry lines."""
+    files = _written_files(wiki_dir)
+    entries = {
+        name: [ln for ln in files.pop(name, "").splitlines() if ln.startswith("- ")] for name in ("index.md", "log.md")
+    }
+    return {**files, **entries}
+
+
+def _pages(wiki_dir: Path) -> dict[str, str]:
+    return {rel: text for rel, text in _written_files(wiki_dir).items() if rel not in ("index.md", "log.md")}
 
 
 @pytest.fixture
@@ -260,7 +306,7 @@ def fixed_day(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync, "_today", lambda: FIXED_DAY)
 
 
-def test_gated_export_matches_the_direct_writer_byte_for_byte(
+def test_gated_export_matches_the_direct_writer_in_pages_and_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
     pytest.importorskip("wiki_studio.api")
@@ -274,7 +320,10 @@ def test_gated_export_matches_the_direct_writer_byte_for_byte(
 
     assert gated.gated is True and direct.gated is False and gated.gate_error is None
     assert gated.written == direct.written and len(gated.written) == 3
-    assert _written_files(gated_wiki) == _written_files(direct_wiki)
+    assert _pages_and_entries(gated_wiki) == _pages_and_entries(direct_wiki)
+    # the scaffold of a new wiki is wiki-studio's on the gated path, memkernel's on the direct one (FR-002)
+    assert "title: Wiki\nstatus: stable" in (gated_wiki / "index.md").read_text(encoding="utf-8")
+    assert "title: Wiki Index\nstatus: draft" in (direct_wiki / "index.md").read_text(encoding="utf-8")
     assert (gated_wiki / ".audit" / "proposals").is_dir()  # the gate's own trail, outside the comparison
 
 
@@ -307,7 +356,7 @@ def test_a_rejected_export_leaves_pages_index_and_log_as_they_were(
     report = _export_three(fresh, tmp_path / "fresh").export()
     assert report.gate_error is not None and SCHEMA_REJECTION in report.gate_error  # rejected for the schema
     assert report.written == [] and report.gated is False
-    assert _written_files(fresh) == {}  # the scaffold this call created was removed again
+    assert _pages_and_entries(fresh) == {"index.md": [], "log.md": []}  # only the empty scaffold init created
 
     # A wiki that already took one clean export: every link resolves, so only the schema can reject.
     monkeypatch.setitem(sync.EXPORT_MAP, MemoryType.DECISION, ("decision", "decisions"))
@@ -456,10 +505,10 @@ def _gate_reached_the_write(caplog: pytest.LogCaptureFixture) -> bool:
 @pytest.mark.parametrize(
     "exc", [OSError(28, "No space left on device"), ValueError("not an OSError")], ids=["oserror", "other"]
 )
-def test_a_promote_that_fails_part_way_through_a_page_write_leaves_a_new_wiki_absent(
+def test_a_promote_that_fails_part_way_through_a_page_write_leaves_a_new_wiki_only_its_scaffold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fixed_day: None, exc: Exception
 ) -> None:
-    """wiki-studio 0.3.1 rolls back only completed writes, and only on OSError; memkernel restores the rest."""
+    """wiki-studio >= 0.6.0 rolls back a write that failed part-way, on any exception; memkernel restores nothing."""
     pytest.importorskip("wiki_studio.api")
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
     wiki = tmp_path / "wiki"
@@ -470,7 +519,8 @@ def test_a_promote_that_fails_part_way_through_a_page_write_leaves_a_new_wiki_ab
 
     assert _gate_reached_the_write(caplog)  # the failure happened while applying, not at validation
     assert report.gate_error is not None and report.written == [] and report.gated is False
-    assert not wiki.exists()  # no half-written page, no scaffold, no audit entry, no empty directory
+    assert _pages_and_entries(wiki) == {"index.md": [], "log.md": []}  # no half-written page, no entry
+    assert not (wiki / "decisions").exists() or not any((wiki / "decisions").iterdir())
 
 
 @pytest.mark.parametrize("target", ["decisions/use-arq-for-background-jobs.md", "index.md"], ids=["page", "index"])
@@ -498,7 +548,7 @@ def test_a_promote_that_fails_part_way_through_a_write_restores_a_curated_wiki(
     assert _files(wiki) == before  # index.md byte for byte, no orphan page, no extra audit entry
 
 
-def test_a_scaffold_write_that_fails_is_a_gate_error_and_removes_what_it_created(
+def test_a_log_write_that_fails_is_a_gate_error_and_writes_no_page(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("wiki_studio.api")
@@ -510,10 +560,10 @@ def test_a_scaffold_write_that_fails_is_a_gate_error_and_removes_what_it_created
 
     assert report.gate_error is not None and "Permission denied" in report.gate_error
     assert report.written == [] and report.skipped == 3
-    assert not wiki.exists()
+    assert _pages(wiki) == {}
 
 
-def test_a_restore_that_cannot_complete_says_so(
+def test_a_rollback_that_cannot_complete_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
     pytest.importorskip("wiki_studio.api")
@@ -523,7 +573,7 @@ def test_a_restore_that_cannot_complete_says_so(
         report = exporter.export()
 
     assert report.gate_error is not None and report.written == []
-    assert "could not be fully restored" in report.gate_error and "wiki/index.md" in report.gate_error
+    assert "rollback failed for index.md" in report.gate_error.lower()  # wiki-studio's own report, passed through
 
 
 def test_an_index_that_is_not_utf8_is_a_gate_error(tmp_path: Path) -> None:
@@ -537,47 +587,4 @@ def test_an_index_that_is_not_utf8_is_a_gate_error(tmp_path: Path) -> None:
 
     assert report.gate_error is not None and "index.md" in report.gate_error
     assert report.written == [] and report.skipped == 3
-    assert _files(wiki) == before
-
-
-def test_a_page_that_promote_rewrites_beyond_memkernels_edits_is_restored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
-) -> None:
-    """The snapshot covers every file promote can write, not only the ones memkernel's edits change."""
-    from wiki_studio import promoter
-
-    wiki, exporter = _curated_wiki(tmp_path)
-    before = _files(wiki)
-    stage = promoter._stage_wiki
-
-    def normalising_stage(paths: object, dest: Path) -> None:  # a future release that rewrites other pages
-        stage(paths, dest)  # type: ignore[arg-type]
-        page = dest / "concepts" / "all-services-log-json-to-stdout-never-write-log-files.md"
-        page.write_text(page.read_text(encoding="utf-8") + "\n<!-- normalised -->\n", encoding="utf-8")
-
-    monkeypatch.setattr(promoter, "_stage_wiki", normalising_stage)
-    normalised = (wiki / "concepts" / "all-services-log-json-to-stdout-never-write-log-files.md").resolve()
-    seen: list[str] = []
-    write_text = Path.write_text
-
-    def recording(self: Path, data: str, *args: object, **kwargs: object) -> int:
-        if self.resolve() == normalised:
-            seen.append(data)
-        return write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
-
-    write_bytes = Path.write_bytes
-    failed: list[Path] = []
-
-    def failing_plan_json(self: Path, data: bytes) -> int:  # promote writes .audit plan.json after every page
-        if not failed and self.name == "plan.json" and (wiki / ".audit").resolve() in self.resolve().parents:
-            failed.append(self)
-            raise ValueError("not an OSError")
-        return write_bytes(self, data)
-
-    monkeypatch.setattr(Path, "write_text", recording)
-    monkeypatch.setattr(Path, "write_bytes", failing_plan_json)
-    report = exporter.export()
-
-    assert any("<!-- normalised -->" in data for data in seen)  # promote did write the extra page live
-    assert report.gate_error is not None
     assert _files(wiki) == before

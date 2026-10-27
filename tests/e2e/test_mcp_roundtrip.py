@@ -361,6 +361,9 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
             assert export["lint_hint"]
         else:
             assert export["lint"]["violations"] == []
+            assert export["proposal"].startswith("memkernel-export-")  # the gate's receipt keys (FR-008)
+            assert export["submission_digest"] and export["archived_dir"]
+            assert "archive_hint" not in export and "receipt_error" not in export
 
         # Curate the draft, then import it: recall must return the curated page version.
         page = wiki_dir / "decisions/use-arq-for-background-jobs.md"
