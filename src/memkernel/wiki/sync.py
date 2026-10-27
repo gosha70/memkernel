@@ -104,7 +104,7 @@ class ExportReport:
     # From wiki-studio's receipt for a gated export (FR-005); None for the direct writer.
     proposal: str | None = None
     submission_digest: str | None = None
-    archived_dir: str | None = None  # None after a gated export: committed but not archived, see archive_hint
+    archived_dir: str | None = None  # None on a promoted export means committed but not archived: archive_hint
     archive_hint: str | None = None
     receipt_error: str | None = None
 

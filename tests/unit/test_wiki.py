@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,21 @@ Postgres for all services.
 
 Concurrent writes.
 """
+
+
+NO_EXTRA_ENV = "MK_TEST_NO_EXTRA"  # outside the MEMKERNEL_ prefix: MemKernelSettings warns about unknown keys
+
+
+def studio_api() -> Any:
+    """The installed ``wiki_studio.api``. Fails, never skips, when it is missing, unless ``MK_TEST_NO_EXTRA=1``
+    marks a deliberate no-extra run, so the wiki-studio evidence cannot silently stop running in CI."""
+    try:
+        import wiki_studio.api as api
+    except ImportError:
+        if os.environ.get(NO_EXTRA_ENV) == "1":
+            pytest.skip("deliberate no-extra run")
+        raise
+    return api
 
 
 def _service(**overrides: Any) -> MemoryService:
@@ -243,7 +259,7 @@ def test_export_skips_superseded_by_marker_not_window(tmp_path: Path) -> None:
 
 def test_exported_pages_lint_clean_with_wiki_studio(tmp_path: Path) -> None:
     """Contract with wiki-studio: whatever WikiExporter writes passes its structural lint and audit checks."""
-    api = pytest.importorskip("wiki_studio.api")
+    api = studio_api()
     from wiki_studio.paths import WikiPaths
 
     svc = _service()

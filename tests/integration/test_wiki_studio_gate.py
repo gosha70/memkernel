@@ -20,7 +20,7 @@ import pytest
 from memkernel.core.models import MemoryType
 from memkernel.wiki.pages import render_page
 from memkernel.wiki.sync import DEFAULT_PROPOSALS_SUBDIR, WikiExporter
-from tests.unit.test_wiki import _service
+from tests.unit.test_wiki import NO_EXTRA_ENV, _service
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -29,7 +29,12 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-api = pytest.importorskip("wiki_studio.api")
+try:  # fails, never skips, without wiki-studio, unless MK_TEST_NO_EXTRA=1 marks a deliberate no-extra run
+    import wiki_studio.api as api
+except ImportError:
+    if os.environ.get(NO_EXTRA_ENV) == "1":
+        pytest.skip("deliberate no-extra run", allow_module_level=True)
+    raise
 
 DECISION = "Use Postgres for the user DB\n\nBecause of concurrent writes."
 OTHER = "Use arq for background jobs\n\nBecause it is async-native."
@@ -65,15 +70,27 @@ def _another_writer(
     return rel, content.encode("utf-8")
 
 
-def _interleave(monkeypatch: pytest.MonkeyPatch, before_promote: Callable[[Callable[..., Any]], None]) -> list[Path]:
-    """Run ``before_promote(real_promote)`` between memkernel's propose and its promote; return what it promoted."""
+def _interleave(
+    monkeypatch: pytest.MonkeyPatch,
+    before_promote: Callable[[Callable[..., Any]], None],
+    raised: list[BaseException] | None = None,
+) -> list[Path]:
+    """Run ``before_promote(real_promote)`` between memkernel's propose and its promote; return what it promoted.
+
+    What memkernel's promote raised is appended to ``raised`` when given.
+    """
     real = api.promote
     calls: list[Path] = []
 
     def promote(proposal: Path, paths: Any, **kwargs: Any) -> Any:
         calls.append(proposal)
         before_promote(real)
-        return real(proposal, paths, **kwargs)
+        try:
+            return real(proposal, paths, **kwargs)
+        except BaseException as exc:
+            if raised is not None:
+                raised.append(exc)
+            raise
 
     monkeypatch.setattr(api, "promote", promote)
     return calls
@@ -98,10 +115,15 @@ def test_a_page_another_writer_creates_after_planning_is_refused_once_and_kept(
         rel, content = _another_writer(other_svc, tmp_path, DECISION, "curator-1", real)
         taken[rel] = content
 
-    calls = _interleave(monkeypatch, create_the_same_page)
+    raised: list[BaseException] = []
+    calls = _interleave(monkeypatch, create_the_same_page, raised)
     report = exporter.export()
 
+    from wiki_studio.errors import PromoteValidationError
+
     assert len(calls) == 1  # refused, not retried
+    assert len(raised) == 1 and isinstance(raised[0], PromoteValidationError)
+    assert PromoteValidationError.exit_code == 9  # the CLI's "create of an existing page" refusal
     assert report.gated is False and report.written == []
     assert report.gate_error is not None and DECISION_PAGE in report.gate_error
     assert (tmp_path / "wiki" / DECISION_PAGE).read_bytes() == taken[DECISION_PAGE]  # the other writer's page
@@ -285,6 +307,166 @@ def test_an_unarchived_export_reports_the_command_that_finishes_it(tmp_path: Pat
     assert finished.returncode == 0, finished.stderr
     assert not proposal_dir.exists() and _applied(tmp_path) == [report.proposal]
     assert _files(tmp_path / "wiki") == pages  # finishing the archive applied nothing twice
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores directory permissions")
+def test_the_archive_hint_works_from_any_directory_with_relative_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MEMKERNEL_PROJECT_ROOT defaults to "." and the README's wiki is knowledge/wiki: the hint must be absolute."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    svc = _service()
+    svc.retain(DECISION, MemoryType.DECISION)
+    applied = project / DEFAULT_PROPOSALS_SUBDIR / ".applied"
+    applied.mkdir(parents=True)
+    applied.chmod(0o500)
+    try:
+        report = WikiExporter(svc, Path("knowledge") / "wiki", project_root=Path(".")).export()
+    finally:
+        applied.chmod(0o700)
+
+    assert report.archived_dir is None and report.archive_hint is not None
+    command = shlex.split(report.archive_hint.split("to finish, run: ", 1)[1].split(" (it finishes", 1)[0])
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    finished = subprocess.run(command, capture_output=True, text=True, check=False, cwd=elsewhere)  # noqa: S603
+
+    assert finished.returncode == 0, finished.stderr
+    assert _applied(project) == [report.proposal]
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.parametrize("content", ["not json", "[]", "{}", '{"submission_digest": 7}'])
+def test_an_unusable_receipt_left_in_the_proposal_directory_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
+) -> None:
+    original = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "receipt.json" and ".applied" not in self.parts:
+            return content
+        return original(self, *args, **kwargs)
+
+    applied = tmp_path / DEFAULT_PROPOSALS_SUBDIR / ".applied"
+    applied.mkdir(parents=True)
+    applied.chmod(0o500)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    try:
+        report = _exporter(tmp_path, DECISION).export()
+    finally:
+        applied.chmod(0o700)
+
+    assert report.gated is True and report.written == [DECISION_PAGE] and report.gate_error is None
+    assert report.archived_dir is None and report.archive_hint is not None
+    assert report.submission_digest is None and report.receipt_error is not None
+
+
+# ── SC-7 and FR-009: committed, then failed ───────────────────────────────────
+
+
+def _fail_the_committed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """wiki-studio commits the pages, then cannot rewrite its receipt as committed (its step 3)."""
+    from wiki_studio import promoter
+
+    real = promoter._write_receipt
+    calls = [0]
+
+    def write_receipt(proposals_dir: Path, receipt: dict[str, Any]) -> bytes:
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError(28, "No space left on device")
+        return real(proposals_dir, receipt)
+
+    monkeypatch.setattr(promoter, "_write_receipt", write_receipt)
+
+
+def _run_hint(hint: str) -> subprocess.CompletedProcess[str]:
+    command = shlex.split(hint.split("to finish, run: ", 1)[1].split(" (it finishes", 1)[0])
+    return subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
+
+
+def test_an_export_committed_before_wiki_studio_failed_is_reported_as_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_the_committed_receipt(monkeypatch)
+    report = _exporter(tmp_path, DECISION).export()
+
+    assert report.gated is True and report.written == [DECISION_PAGE] and report.skipped == 0
+    assert report.gate_error is None and report.archived_dir is None and report.receipt_error is None
+    proposal_dir = tmp_path / DEFAULT_PROPOSALS_SUBDIR / str(report.proposal)
+    assert report.submission_digest == _receipt_digest(proposal_dir)
+    assert report.archive_hint is not None and "committed the export, then failed" in report.archive_hint
+
+    monkeypatch.undo()  # the user's own promote runs without the forced failure
+    pages = _files(tmp_path / "wiki")
+    finished = _run_hint(report.archive_hint)
+    assert finished.returncode == 0, finished.stderr
+    assert not proposal_dir.exists() and _applied(tmp_path) == [report.proposal]
+    assert _files(tmp_path / "wiki") == pages  # finishing applied nothing twice
+
+
+def test_a_refusal_before_any_receipt_is_a_gate_error_even_with_identical_bytes_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two exports of one store at once: the second is refused (create of an existing page) before wiki-studio
+    writes a receipt, while the first export's identical page is on disk. No receipt means no commit."""
+    svc = _service()
+    svc.retain(DECISION, MemoryType.DECISION)
+    first: list[Any] = []
+
+    def the_other_export_lands_first(real: Callable[..., Any]) -> None:
+        if not first:
+            with pytest.MonkeyPatch.context() as m:
+                m.setattr(api, "promote", real)
+                first.append(WikiExporter(svc, tmp_path / "wiki", project_root=tmp_path).export())
+
+    _interleave(monkeypatch, the_other_export_lands_first)
+    report = WikiExporter(svc, tmp_path / "wiki", project_root=tmp_path).export()
+
+    assert first[0].gated is True and first[0].written == [DECISION_PAGE]
+    assert report.gate_error is not None and "already exists" in report.gate_error
+    assert report.gated is False and report.written == [] and report.archive_hint is None
+
+
+def test_a_receipt_that_does_not_record_a_commit_is_a_gate_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The receipt's state is part of wiki-studio's record: one that is neither committing nor committed decides."""
+    import json
+
+    _fail_the_committed_receipt(monkeypatch)
+    original = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        text = original(self, *args, **kwargs)
+        if self.name == "receipt.json":
+            return json.dumps({**json.loads(text), "state": "planned"})
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    report = _exporter(tmp_path, DECISION).export()
+
+    assert report.gate_error is not None and report.written == [] and report.gated is False
+
+
+def test_without_a_usable_receipt_the_pages_bytes_decide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fail_the_committed_receipt(monkeypatch)
+    original = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "receipt.json":
+            raise OSError(5, "Input/output error")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    report = _exporter(tmp_path, DECISION).export()
+
+    assert report.gated is True and report.written == [DECISION_PAGE] and report.gate_error is None
+    assert report.submission_digest is None and report.archived_dir is None
+    assert report.receipt_error is not None and "Input/output error" in report.receipt_error
+    assert report.archive_hint is not None
 
 
 def test_an_unreadable_receipt_is_reported_and_never_fails_the_export(

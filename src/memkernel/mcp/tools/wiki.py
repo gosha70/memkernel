@@ -45,8 +45,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         failed it is null and "lint_error" says why. With wiki-studio >= 0.6.0 the pages go through its
         promote gate (a missing index.md and log.md are created first by wiki-studio's init), and the
         response adds "proposal", "submission_digest" and "archived_dir" from wiki-studio's receipt.
-        If "archived_dir" is null the pages landed but the proposal was not archived, and
-        "archive_hint" gives the command that finishes it; "receipt_error" says the receipt could not
+        If "archived_dir" is null the pages landed but wiki-studio did not finish (no archive, or a
+        failure after its commit, checked against its receipt), and "archive_hint" gives the command
+        that finishes it; "receipt_error" says the receipt could not
         be read. A rejected export, or an installed wiki-studio that is broken or older than 0.6.0,
         writes no page and reports "gate_error" (a new wiki keeps the index.md and log.md init created).
         """

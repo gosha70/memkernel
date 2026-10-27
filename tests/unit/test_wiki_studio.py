@@ -21,13 +21,14 @@ from memkernel.wiki.studio import (
     GateError,
     LintError,
     LintSummary,
+    _below_floor,
     _release,
     gate_available,
     lint_wiki,
     load_studio,
 )
 from memkernel.wiki.sync import WikiExporter
-from tests.unit.test_wiki import _service
+from tests.unit.test_wiki import _service, studio_api
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -65,7 +66,7 @@ def _export_three(wiki_dir: Path, project_root: Path) -> WikiExporter:
 
 
 def test_export_reports_lint_and_health_with_the_extra(tmp_path: Path) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     report = _export_three(tmp_path / "knowledge" / "wiki", tmp_path).export()
 
     assert len(report.written) == 3
@@ -129,8 +130,29 @@ def test_release_reads_the_leading_numeric_version(version: str, release: tuple[
     assert _release(version) == release
 
 
+@pytest.mark.parametrize(
+    ("version", "below"),
+    [
+        ("0.5.9", True),
+        ("0.6.0rc1", True),
+        ("0.6.0.dev3", True),
+        ("0.6.0a1", True),
+        ("unknown", True),
+        ("0.6.0", False),
+        ("0.6.0.post1", False),
+        ("0.6.0.post1.dev2", False),
+        ("0.6.0+local", False),
+        ("0.6", False),
+        ("0.7.0", False),
+        ("1.0.0rc1", False),
+    ],
+)
+def test_a_pre_release_of_the_floor_is_below_it(version: str, below: bool) -> None:
+    assert _below_floor(version) is below
+
+
 def test_a_wiki_studio_whose_version_cannot_be_read_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     from importlib import metadata
 
     def missing(name: str) -> str:
@@ -145,7 +167,7 @@ def test_lint_failure_never_fails_the_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A wiki-studio error after the pages are written is reported, not raised (finding: export already succeeded)."""
-    api = pytest.importorskip("wiki_studio.api")
+    api = studio_api()
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
 
     def boom(*args: object, **kwargs: object) -> object:
@@ -167,7 +189,7 @@ def test_lint_failure_never_fails_the_export(
 
 def test_lint_accepts_an_empty_project_root_from_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """MEMKERNEL_PROJECT_ROOT="" reaches the exporter as the empty string the tool turns into Path("")."""
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     monkeypatch.chdir(tmp_path)
     settings = MemKernelSettings(project_root="", chroma_persist_path="")
     wiki_dir = tmp_path / "knowledge" / "wiki"
@@ -206,7 +228,7 @@ def test_broken_installation_is_reported_not_treated_as_absent(
 
 def test_unrecognised_result_shape_is_a_lint_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An incompatible wiki-studio whose findings lack a field fails the lint, not the export."""
-    api = pytest.importorskip("wiki_studio.api")
+    api = studio_api()
 
     class Finding:
         kind = "weak-orphan"
@@ -309,7 +331,7 @@ def fixed_day(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_gated_export_matches_the_direct_writer_in_pages_and_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     from memkernel.wiki import sync
 
     gated_wiki, direct_wiki = tmp_path / "gated" / "wiki", tmp_path / "direct" / "wiki"
@@ -328,7 +350,7 @@ def test_gated_export_matches_the_direct_writer_in_pages_and_entries(
 
 
 def test_the_proposals_directory_is_explicit_or_memkernels_default(tmp_path: Path) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     svc_dir = tmp_path / "explicit"
     exporter = _export_three(svc_dir / "wiki", svc_dir)
     exporter._proposals_dir = svc_dir / "props"  # what the tool passes from MEMKERNEL_WIKI_PROPOSALS_DIR
@@ -346,7 +368,7 @@ SCHEMA_REJECTION = "page_type 'decision' should live under decisions/"
 def test_a_rejected_export_leaves_pages_index_and_log_as_they_were(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     from memkernel.wiki import sync
 
     # A decision page placed in concepts/ violates the schema; the gate refuses the whole patch-set.
@@ -388,7 +410,7 @@ def test_without_the_gate_the_direct_writer_runs_and_only_a_requested_gate_warns
 
 def test_export_without_index_updates_takes_the_direct_writer(tmp_path: Path) -> None:
     """Pages without index entries are orphans, which the gate rejects by design."""
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     report = _export_three(tmp_path / "wiki", tmp_path).export(update_index=False)
     assert report.gated is False and len(report.written) == 3
     assert not (tmp_path / "wiki" / "index.md").exists() and not (tmp_path / "wiki" / ".audit").exists()
@@ -397,7 +419,7 @@ def test_export_without_index_updates_takes_the_direct_writer(tmp_path: Path) ->
 def test_bypassing_a_requested_gate_with_update_index_false_warns(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.sync")
     exporter = WikiExporter(_service(), tmp_path / "wiki", project_root=tmp_path, proposals_dir=tmp_path / "props")
     exporter._service.retain("Use arq for background jobs", MemoryType.DECISION)
@@ -433,7 +455,7 @@ def test_a_broken_installation_with_a_requested_gate_and_nothing_to_export_does_
 def test_a_gate_setup_failure_is_a_gate_error_and_removes_the_scaffold_it_created(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
-    api = pytest.importorskip("wiki_studio.api")
+    api = studio_api()
     from memkernel.wiki import sync
 
     def broken_edit(*args: object, **kwargs: object) -> None:
@@ -509,7 +531,7 @@ def test_a_promote_that_fails_part_way_through_a_page_write_leaves_a_new_wiki_on
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fixed_day: None, exc: Exception
 ) -> None:
     """wiki-studio >= 0.6.0 rolls back a write that failed part-way, on any exception; memkernel restores nothing."""
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
     wiki = tmp_path / "wiki"
     exporter = _export_three(wiki, tmp_path)
@@ -535,7 +557,7 @@ def test_a_promote_that_fails_part_way_through_a_write_restores_a_curated_wiki(
     target: str,
     exc: Exception,
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
     wiki, exporter = _curated_wiki(tmp_path)
     before = _files(wiki)
@@ -551,7 +573,7 @@ def test_a_promote_that_fails_part_way_through_a_write_restores_a_curated_wiki(
 def test_a_log_write_that_fails_is_a_gate_error_and_writes_no_page(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     wiki = tmp_path / "wiki"
     exporter = _export_three(wiki, tmp_path)
     _fail_writes(monkeypatch, wiki, "log.md", PermissionError(13, "Permission denied"), partial=False)
@@ -566,7 +588,7 @@ def test_a_log_write_that_fails_is_a_gate_error_and_writes_no_page(
 def test_a_rollback_that_cannot_complete_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_day: None
 ) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     wiki, exporter = _curated_wiki(tmp_path)
     with monkeypatch.context() as m:
         _fail_writes(m, wiki, "index.md", OSError(5, "Input/output error"), partial=True, times=10)
@@ -577,7 +599,7 @@ def test_a_rollback_that_cannot_complete_is_reported(
 
 
 def test_an_index_that_is_not_utf8_is_a_gate_error(tmp_path: Path) -> None:
-    pytest.importorskip("wiki_studio.api")
+    studio_api()
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "index.md").write_bytes(b"# Index\n\xff\xfe broken\n")

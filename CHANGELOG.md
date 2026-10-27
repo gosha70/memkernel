@@ -31,7 +31,10 @@ All notable changes to this project are documented here. The format follows
 - `wiki_export` response keys for a gated export, from wiki-studio's receipt:
   `proposal` (the proposal name), `submission_digest`, and `archived_dir`
   (where wiki-studio archived the proposal; `null` when it committed the pages
-  but could not archive it). `archive_hint` appears only when `archived_dir` is
+  but could not archive it, or failed after committing them: memkernel checks
+  each page against the receipt's post-write sha256, or its bytes when the
+  receipt is unreadable, and reports such an export as written, not as a
+  `gate_error`). `archive_hint` appears only when `archived_dir` is
   `null`, with the `promote` command that finishes the archive and applies
   nothing twice (run through the interpreter memkernel uses). `receipt_error`
   appears when the receipt could not be read; the export still succeeds. The

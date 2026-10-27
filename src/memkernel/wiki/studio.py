@@ -13,18 +13,18 @@ to a copilot CLI, and memkernel runs inside one.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 import shlex
 import sys
 from dataclasses import dataclass
 from importlib import metadata
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ GATE_RATIONALE = "memkernel export"
 GATE_MIN_VERSION = (0, 6, 0)
 STUDIO_DISTRIBUTION = "wiki-studio"
 RECEIPT_FILE = "receipt.json"
+RECEIPT_COMMIT_STATES = ("committing", "committed")  # wiki-studio wrote the receipt before or after its commit
+_PRE_RELEASE = re.compile(r"(a|b|c|rc|alpha|beta|pre|preview|dev)\d*")  # PEP 440 pre- and dev-release markers
 
 
 class HealthItem(BaseModel):
@@ -166,6 +168,18 @@ def _release(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _below_floor(version: str) -> bool:
+    """True when ``version`` is older than :data:`GATE_MIN_VERSION`; a pre-release of the floor (0.6.0rc1) is older."""
+    release = _release(version)
+    if not release:
+        return True
+    padded = (release + (0, 0, 0))[:3]
+    if padded != GATE_MIN_VERSION:
+        return padded < GATE_MIN_VERSION
+    # a marker after "post" belongs to a post-release, which is above the floor (0.6.0.post1.dev2 > 0.6.0)
+    return _PRE_RELEASE.search(version.split("+", 1)[0].lower().split("post", 1)[0]) is not None
+
+
 def gate_available() -> Any | None:
     """Return ``wiki_studio.api`` when it offers the proposal gate (wiki-studio >= 0.6.0), else ``None``.
 
@@ -187,7 +201,7 @@ def gate_available() -> Any | None:
         version = "unknown"
     floor = ".".join(str(part) for part in GATE_MIN_VERSION)
     missing = [name for name in ("init", "propose", "promote", "PageEdit") if not hasattr(api, name)]
-    if _release(version) < GATE_MIN_VERSION or missing:
+    if _below_floor(version) or missing:
         detail = f" (missing {', '.join(missing)})" if missing else ""
         raise GateError(
             f"wiki-studio {version} is installed but the gate needs wiki-studio >= {floor}{detail}; "
@@ -203,13 +217,16 @@ def propose_and_promote(
 
     A missing ``index.md`` or ``log.md`` is created first with ``api.init``
     (exclusive create, never overwrites): the gate appends to them but refuses
-    to create them. Raises :class:`GateError` on any rejection or failure;
-    wiki-studio validates before writing and rolls back its own writes, so a
-    rejected patch-set changes no page. A scaffold ``api.init`` created stays.
+    to create them. Raises :class:`GateError` on any rejection or failure,
+    except when wiki-studio raised after it had committed the pages (FR-009):
+    that is returned as a result with the hint that finishes it. wiki-studio
+    validates before writing and rolls back its own writes, so a rejected
+    patch-set changes no page. A scaffold ``api.init`` created stays.
     """
     # One append per file, every index line in a single append-index edit and every log line in one append-log.
     index_lines = [page.index_line for page in pages if page.index_line is not None]
     log_lines = [page.log_line for page in pages if page.log_line is not None]
+    proposal: Path | None = None
     try:  # every wiki-studio call is inside the boundary, setup included, so the caller's cleanup always runs
         from wiki_studio.paths import WikiPaths
 
@@ -237,49 +254,122 @@ def propose_and_promote(
         proposal = api.propose(edits, paths, name=name, source="memkernel wiki_export", backend=GATE_BACKEND)
         result = api.promote(proposal, paths)
     except Exception as exc:  # any rejection or failure of the installed gate is reported, never raised raw
+        if proposal is not None:
+            landed = _committed_then_failed(exc, Path(proposal), pages, paths, name)
+            if landed is not None:
+                return landed
         logger.warning("wiki-studio gate rejected the export to %s: %s", wiki_dir, exc)
         raise GateError(f"wiki-studio gate rejected the export: {exc}") from exc
-    return _gate_result(result, name, wiki_dir, project_root, proposals_dir)
+    return _gate_result(result, name, paths)
 
 
-def _gate_result(result: Any, name: str, wiki_dir: Path, project_root: Path, proposals_dir: Path) -> GateResult:
+def _finish_hint(paths: Any, proposal_dir: Path, what: str) -> str:
+    """The promote command that finishes ``proposal_dir``, built from ``paths`` (``WikiPaths``, absolute against
+    the server's working directory) so it can be run from any directory, through memkernel's own interpreter."""
+    command = shlex.join(
+        [
+            sys.executable,
+            "-m",
+            "wiki_studio",
+            "--root",
+            str(paths.root),
+            "--wiki-dir",
+            str(paths.wiki_dir),
+            "--proposals-dir",
+            str(paths.proposals_dir),
+            "promote",
+            str(proposal_dir.absolute()),
+        ]
+    )
+    return f"{what}; to finish, run: {command} (it finishes the archive and applies nothing twice)"
+
+
+def _read_receipt(receipt_path: Path) -> dict[str, Any]:
+    data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("not a JSON object")
+    return data
+
+
+def _digest(receipt: dict[str, Any]) -> str:
+    value = receipt.get("submission_digest")
+    if not isinstance(value, str):
+        raise ValueError("no submission_digest")
+    return value
+
+
+def _committed_then_failed(
+    exc: Exception, proposal_dir: Path, pages: list[GatedPage], paths: Any, name: str
+) -> GateResult | None:
+    """FR-009: the GateResult of an export wiki-studio committed before it raised, or None when it did not commit.
+
+    The evidence is wiki-studio's own record: the receipt in ``proposal_dir`` (state ``committing`` or
+    ``committed``) and, for every page memkernel created, an on-disk sha256 equal to the receipt's
+    ``post_sha256``. A missing receipt means no commit. Only when the receipt exists but cannot be read are
+    the pages' bytes compared with what memkernel proposed. memkernel never promotes again itself; the hint
+    tells the user how.
+    """
+    receipt_path = proposal_dir / RECEIPT_FILE
+    if not receipt_path.exists() and not receipt_path.is_symlink():
+        return None  # wiki-studio writes its committing receipt before any wiki write: no receipt, no commit
+    receipt: dict[str, Any] | None = None
+    receipt_error = None
+    try:
+        receipt = _read_receipt(receipt_path)
+        post = {str(w["path"]): str(w["post_sha256"]) for w in receipt["planned_writes"]}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        post = None
+        receipt_error = f"could not read {receipt_path}: {error}"
+    try:
+        if post is not None and receipt is not None:
+            landed = receipt.get("state") in RECEIPT_COMMIT_STATES and all(
+                page.path in post and _sha256_file(paths.wiki_dir / page.path) == post[page.path] for page in pages
+            )
+        else:
+            landed = all((paths.wiki_dir / page.path).read_bytes() == page.content.encode("utf-8") for page in pages)
+    except OSError:
+        landed = False
+    if not pages or not landed:
+        return None
+    digest = None
+    if receipt is not None:
+        try:
+            digest = _digest(receipt)
+        except ValueError as error:
+            receipt_error = f"could not read {receipt_path}: {error}"
+    hint = _finish_hint(paths, proposal_dir, f"wiki-studio committed the export, then failed ({exc})")
+    logger.warning("wiki export to %s: %s", paths.wiki_dir, hint)
+    if receipt_error is not None:
+        logger.warning("wiki export to %s: %s", paths.wiki_dir, receipt_error)
+    return GateResult(
+        proposal=name, submission_digest=digest, archived_dir=None, archive_hint=hint, receipt_error=receipt_error
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _gate_result(result: Any, name: str, paths: Any) -> GateResult:
     """Read the receipt where it is: the archive, or the proposal directory when the archive step failed."""
     archived = result.archived_dir
     receipt_dir = archived if archived is not None else result.proposals_dir
     hint = None
     if archived is None:
-        command = shlex.join(
-            [
-                sys.executable,
-                "-m",
-                "wiki_studio",
-                "--root",
-                str(project_root),
-                "--wiki-dir",
-                str(wiki_dir),
-                "--proposals-dir",
-                str(proposals_dir),
-                "promote",
-                str(result.proposals_dir),
-            ]
+        hint = _finish_hint(
+            paths,
+            result.proposals_dir,
+            f"wiki-studio committed the export but did not archive the proposal {result.proposals_dir}",
         )
-        hint = (
-            f"wiki-studio committed the export but did not archive the proposal {result.proposals_dir}; "
-            f"to finish, run: {command} (it finishes the archive and applies nothing twice)"
-        )
-        logger.warning("wiki export to %s: %s", wiki_dir, hint)
+        logger.warning("wiki export to %s: %s", paths.wiki_dir, hint)
     digest = None
     receipt_error = None
     receipt_path = receipt_dir / RECEIPT_FILE
     try:
-        data = json.loads(receipt_path.read_text(encoding="utf-8"))
-        value = data.get("submission_digest") if isinstance(data, dict) else None
-        if not isinstance(value, str):
-            raise ValueError("no submission_digest")
-        digest = value
+        digest = _digest(_read_receipt(receipt_path))
     except (OSError, ValueError) as exc:  # the export landed; an unreadable receipt is reported, never fatal
         receipt_error = f"could not read {receipt_path}: {exc}"
-        logger.warning("wiki export to %s: %s", wiki_dir, receipt_error)
+        logger.warning("wiki export to %s: %s", paths.wiki_dir, receipt_error)
     return GateResult(
         proposal=name,
         submission_digest=digest,
