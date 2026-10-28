@@ -85,5 +85,5 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 23 | | Post the integration questions to `agent-memory-bench` (owner's approval required) | upstream issue | driver | [ ] |
+| 23 | | Post the integration questions to `agent-memory-bench` (owner's approval required): posted by the owner as GiulioDER/agent-memory-bench#121 (2026-10-16) | upstream issue | driver | [x] |
 | 24 | | After upstream confirms the path: adapter per FR-020 (rendered transcripts, document-store mode declared, write tools withheld), upstream PR; report any results separately with the read-only-retrieval statement | `agent-memory-bench` PR | build | [ ] |
