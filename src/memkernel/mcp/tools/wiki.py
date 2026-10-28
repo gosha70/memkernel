@@ -96,8 +96,10 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         another project's, a wiki memory, already superseded) with a reason, "invalid_corrects" a
         value that breaks the grammar. Without wiki-studio every page file is imported, drafts
         included ("governed": false). An installed wiki-studio that is broken or older than 0.7.0
-        imports nothing and reports "import_error". Idempotent: an unchanged page is skipped, a
-        changed one supersedes its previous version.
+        imports nothing and reports "import_error". "skipped" lists pages that cannot be imported
+        (unmapped type, deprecated, unparsable); "unchanged" lists approved pages already current,
+        whose corrects are still reconciled. Idempotent: a changed page supersedes its previous
+        version.
         """
         app_ctx = _context(ctx)
         importer = WikiImporter(
@@ -109,7 +111,7 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         payload: dict[str, Any] = {"imported": report.imported, "skipped": report.skipped, "governed": report.governed}
         if report.import_error is not None:
             payload["import_error"] = report.import_error
-        for key in ("not_approved", "corrections", "unresolved", "invalid_corrects"):
+        for key in ("unchanged", "not_approved", "corrections", "unresolved", "invalid_corrects"):
             value = getattr(report, key)
             if value:
                 payload[key] = value

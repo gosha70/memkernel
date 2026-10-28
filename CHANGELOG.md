@@ -47,8 +47,10 @@ All notable changes to this project are documented here. The format follows
 - `MemoryService.supersede(ref_id, by_ref)`: marks an existing record as
   replaced; idempotent, and it refuses (never overwrites) an unknown record,
   another project's, itself, or one already superseded by another.
-- `wiki_import` response keys: `governed`, and when they apply `not_approved`,
-  `corrections`, `unresolved`, `invalid_corrects` and `import_error`. The same
+- `wiki_import` response keys: `governed`, and when they apply `unchanged`
+  (approved pages already current; `skipped` now means only pages that cannot
+  be imported), `not_approved`, `corrections`, `unresolved`, `invalid_corrects`
+  and `import_error`. The same
   fields are on `ImportReport`; `WikiImporter` takes an optional `project_root`.
 
 - `wiki_export` response keys for a gated export, from wiki-studio's receipt:

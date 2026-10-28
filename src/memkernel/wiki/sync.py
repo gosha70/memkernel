@@ -127,7 +127,8 @@ class ImportReport:
     """
 
     imported: list[str] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)  # pages that cannot be imported (type, deprecated, unparsable)
+    unchanged: list[str] = field(default_factory=list)  # approved pages whose revision is already the live memory
     governed: bool = False
     not_approved: list[dict[str, str]] = field(default_factory=list)
     corrections: list[dict[str, str]] = field(default_factory=list)  # {"page", "ref_id"} superseded by the page
@@ -406,7 +407,7 @@ class WikiImporter:
         session_id: str | None,
         report: ImportReport,
     ) -> str | None:
-        """Retain one page; return the memory's ref_id, or None when it was skipped or already current."""
+        """Retain one page; return its live memory's ref_id (new, or already current), or None when skipped."""
         memory_type = IMPORT_MAP.get(page.page_type) if page else None
         if page is None or memory_type is None or page.status == "deprecated":
             report.skipped.append(rel)
@@ -418,8 +419,12 @@ class WikiImporter:
             sha_tag = f"{PAGE_SHA_TAG}{review.sha256}"
             tags += [f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}", sha_tag]
             if previous is not None and sha_tag in previous.tags:
-                report.skipped.append(rel)  # this approved revision is already the page's live memory
-                return None
+                # This approved revision is already the page's live memory. Its corrections are still reconciled
+                # (idempotent), so a reference that resolves only later, or one a failed import left, takes effect.
+                report.unchanged.append(rel)
+                return previous.ref_id
+            # A revision that changes only frontmatter keeps the same content, so retain dedups and merges the new
+            # tags into the existing record: the record then carries one page_sha tag per such revision.
         supersedes = previous.ref_id if previous is not None and previous.content != content else None
         ref_id = self._service.retain(
             content=content,

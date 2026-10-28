@@ -162,7 +162,7 @@ def test_importing_twice_adds_nothing(tmp_path: Path) -> None:
 
     again = w.import_pages()
 
-    assert again.imported == [] and rel in again.skipped and w.svc.count() == before
+    assert again.imported == [] and again.unchanged == [rel] and again.skipped == [] and w.svc.count() == before
     (memory,) = w.wiki_memories()
     assert any(tag.startswith("page_key:") for tag in memory.tags)
     assert any(tag.startswith("page_sha:") for tag in memory.tags)
@@ -304,6 +304,33 @@ def test_a_revised_correcting_page_keeps_its_correction_without_reporting_it_unr
     assert not any(m.content == WRONG for m in w.svc.list_memories())
     (current,) = w.wiki_memories()
     assert "Freeze on release weeks" in current.content
+
+
+def test_an_unchanged_page_retries_a_correction_that_could_not_be_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A correction left unresolved (here a refused supersede) takes effect on a later import of the same revision."""
+    w = Wiki(tmp_path)
+    w.svc.retain(WRONG, MemoryType.CONVENTION)
+    (rel,) = w.export()
+    (wrong,) = [m.ref_id for m in w.svc.list_memories() if m.content == WRONG]
+    w.update(rel, lambda text: _correct(text, wrong).replace(WRONG, RIGHT))
+    w.approve(rel)
+    real = w.svc.supersede
+
+    def refused(ref_id: str, by_ref: str) -> bool:
+        raise ValueError("store unavailable")
+
+    monkeypatch.setattr(w.svc, "supersede", refused)
+    first = w.import_pages()
+    assert first.imported == [rel] and [u["token"] for u in first.unresolved] == [wrong]
+    monkeypatch.setattr(w.svc, "supersede", real)
+
+    again = w.import_pages()
+
+    assert again.imported == [] and again.unchanged == [rel]
+    assert [c["ref_id"] for c in again.corrections] == [wrong] and again.unresolved == []
+    assert not any(m.content == WRONG for m in w.svc.list_memories())
 
 
 def test_unknown_and_other_project_references_are_reported_not_dropped(tmp_path: Path) -> None:
