@@ -109,8 +109,8 @@ As preregistered, the check ran before `measure` on the measured image, and agai
   as of 2026-10-27 10:36 UTC), against the preregistered estimate of $80.74 ($104.96 with the 30 percent
   margin). Console tokens: 127,940,963 in, 1,801,886 out, all Claude Sonnet 5.5. The receipts' input,
   cache-write and cache-read tokens plus the compaction estimate come to 127,672,231 **[receipts]**, 0.21
-  percent below the Console; the output differs by 251,200 tokens, the compaction summaries, which the
-  receipts do not record.
+  percent below the Console; the output is 251,200 tokens short, most likely the compaction summaries, which
+  the receipts do not record (not measured). The workspace ID is given in full, as in the calibration record.
 - **Credentials and cleanup [operator]:** the API key existed only for this workspace and was passed at run
   time, never stored in the image. After the runs were copied and verified (19,419 files, sha256 per file), the
   key was deleted, the workspace archived and the VM destroyed, on 2026-10-27.
@@ -129,3 +129,14 @@ arms (memkernel ahead on 3 tasks in each). Against `fs_grep`, memkernel was ahea
 the whole interval, +0.0 to +9.0, lies within the preregistered +/-10 point band, so the label is "equivalent".
 What this run can show is therefore limited mainly by its ceilings, which is a property of the task set as
 frozen, not of either arm.
+
+### 9. The preregistration's session count (deviation)
+
+The preregistration says "625 chains and 1,100 sessions: 2 sessions per chain in `lc-retain`, `lc-reval` and
+`lc-wiki`, 1 in `lc-compact`". The chain count is right; the session count is not: two frozen `lc-retain` tasks,
+`lc-retain-retry-revised` and `lc-retain-separator-revised`, are three-session chains (the revised-fact variant),
+so the run had 415 two-session, 150 one-session and 60 three-session chains, 1,160 sessions **[receipts]**. The
+tasks were run as frozen; the chains, the trials and the analysis are unaffected. The cost estimate was
+computed per chain from the calibration, whose only `lc-retain` task was a two-session chain, so it understated
+these 60 sessions by about $2.07 before its 20 percent allowance (60 sessions at the `lc-retain` estimate of
+$10.33 for 150 two-session chains); the run cost $63.85 against the estimate of $80.74 and the $150 limit.
