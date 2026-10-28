@@ -102,7 +102,8 @@ is blocked on it.
 - [ ] Agent-level evidence (#17), public benchmark: enter `agent-memory-bench`
       (public, preregistered, execution-graded, no LLM judge, own control arms
       incl. files-only) through a reviewable memkernel adapter; one
-      preregistered run per minor release
+      preregistered run per minor release; the integration questions are in
+      GiulioDER/agent-memory-bench#121
 
 ## Later / research
 
