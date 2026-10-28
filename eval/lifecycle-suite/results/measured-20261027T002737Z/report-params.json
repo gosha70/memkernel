@@ -1,0 +1,8 @@
+{
+  "title": "memkernel 0.5 lifecycle evaluation",
+  "code_sha": "641a508a2289b2d20775e6d149a0bb47678d1621",
+  "model": "claude-sonnet-5-5",
+  "preregistration_commit": "ddbe218441414243b97746109640fbf6caed82fa",
+  "tag": "v0.5.0",
+  "live_compaction_proven": "yes: all 12 calibration lc-compact sessions recorded exactly one compaction between exposure and evaluation (calibration/RECORD-2026-10-24.md)"
+}

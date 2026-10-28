@@ -6,8 +6,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-<!-- memkernel 0.6, the Release B wiki bridge part 1 (memkernel #48); the 0.5 entries below move to [0.5.0] at the tag. -->
-
 ### Changed
 
 - `memkernel[wiki]` now requires `wiki-studio>=0.6.0,<1`, and CI tests 0.6.0.
@@ -41,8 +39,16 @@ All notable changes to this project are documented here. The format follows
   same fields are on `ExportReport`.
 - README: ignore wiki-studio's lock file next to the wiki directory.
 
+## [0.5.0] - 2026-10-28
+
 ### Added
 
+- The 0.5 lifecycle evaluation (#17): `eval/lifecycle-suite/report-0.5.0.md`, a
+  maintainer-run supplemental evaluation, preregistered before the run, with
+  its committed receipts, report parameters and disclosures under
+  `eval/lifecycle-suite/results/measured-20261027T002737Z/`. No gain is
+  claimed: against `claude_md` "no detectable difference" (memkernel ahead on
+  6 tasks, behind on none, tied on 14), against `fs_grep` "equivalent".
 - `memkernel[wiki]` extra (ADR-010): wiki-studio as an optional dependency,
   imported lazily and silent when absent. With it installed, `wiki_export`
   returns wiki-studio's lint and health findings for the wiki under `lint`
