@@ -34,7 +34,7 @@ MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory a
 - **An index of the whole repository.** `code` memories are the snapshots the agent chose to retain, not an automatic scan of every file.
 - **A cross-project knowledge base.** One store per project id. Sharing is deliberate: a second server with a shared id, or the wiki bridge.
 
-**Evidence.** `eval/run_eval.py` measures retrieval (recall@k, precision@k, MRR). An agent-level benchmark that runs the same agent with and without MemKernel, including a negative control where files already carry all state, is tracked in [#17](https://github.com/gosha70/memkernel/issues/17). Results will be published per minor release, including the cases with no gain.
+**Evidence.** `eval/run_eval.py` measures retrieval (recall@k, precision@k, MRR). The 0.5 lifecycle evaluation, a **maintainer-run supplemental evaluation** (memkernel's own runner, preregistered and announced in [#17](https://github.com/gosha70/memkernel/issues/17) before the run), ran the same agent in seven arms on 20 tasks: [report](eval/lifecycle-suite/report-0.5.0.md). **No gain is claimed.** Against files alone (`claude_md`), memkernel's memory store was ahead on 6 tasks, behind on none and tied on 14 (Holm-adjusted p 0.0625: "no detectable difference"; with so many ties this task set could not have reached significance); against earlier transcripts (`fs_grep`) it was equivalent. Two of the four task groups hit a ceiling, every arm passing every trial. The report's disclosures list its deviations and known defects. Results are published per minor release, including the cases with no gain.
 
 ---
 

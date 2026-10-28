@@ -6,8 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 ### Added
 
+- The 0.5 lifecycle evaluation (#17): `eval/lifecycle-suite/report-0.5.0.md`, a
+  maintainer-run supplemental evaluation, preregistered before the run, with
+  its committed receipts, report parameters and disclosures under
+  `eval/lifecycle-suite/results/measured-20261027T002737Z/`. No gain is
+  claimed: against `claude_md` "no detectable difference" (memkernel ahead on
+  6 tasks, behind on none, tied on 14), against `fs_grep` "equivalent".
 - `memkernel[wiki]` extra (ADR-010): wiki-studio as an optional dependency,
   imported lazily and silent when absent. With it installed, `wiki_export`
   returns wiki-studio's lint and health findings for the wiki under `lint`
