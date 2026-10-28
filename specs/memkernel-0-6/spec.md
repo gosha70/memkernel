@@ -128,9 +128,14 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   applied: one source of truth per wiki fact, so a wrong wiki memory is fixed by correcting its page (owner
   decision 2026-10-27); it is listed in `ImportReport.unresolved` with the reason "correct the page instead". A
   token that names no memory in this store (unknown, or another project's), or one already superseded by a
-  different memory, is listed in `ImportReport.unresolved` (page, token, reason) and never dropped silently. A token already superseded
+  different memory, is listed in `ImportReport.unresolved` (page, token, reason) and never dropped silently.
+  Reconciliation runs on every import of an approved page, including one whose revision is already current
+  (amended 2026-10-27): corrections already applied are no-ops, and one left unresolved earlier is applied
+  once it can be. A token already superseded
   by this page's memory is a no-op, so a second import changes nothing.
-- **FR-016 (report and tool):** `ImportReport` gains `governed`, `not_approved`, `corrections` (page, ref_id
+- **FR-016 (report and tool):** `ImportReport` gains `governed`, `unchanged` (approved pages whose revision is
+  already the live memory; amended 2026-10-27, so `skipped` means only pages that cannot be imported),
+  `not_approved`, `corrections` (page, ref_id
   applied), `unresolved`, `invalid_corrects` and `import_error`; the `wiki_import` response carries the same
   keys, present only when they apply, as `wiki_export` does. `WikiImporter` accepts an optional `project_root`
   (default the wiki directory's parent, as the exporter); the tool passes `MEMKERNEL_PROJECT_ROOT`. The MCP tool
