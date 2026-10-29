@@ -36,7 +36,15 @@ GATE_RATIONALE = "memkernel export"
 GATE_MIN_VERSION = (0, 6, 0)
 STUDIO_DISTRIBUTION = "wiki-studio"
 RECEIPT_FILE = "receipt.json"
-RECEIPT_COMMIT_STATES = ("committing", "committed")  # wiki-studio wrote the receipt before or after its commit
+RECEIPT_COMMITTING = "committing"
+RECEIPT_COMMITTED = "committed"
+RECEIPT_COMMIT_STATES = (RECEIPT_COMMITTING, RECEIPT_COMMITTED)  # the only states wiki-studio writes
+_COMMITTED, _NOT_COMMITTED, _UNCERTAIN = "committed", "not committed", "uncertain"  # FR-009's three outcomes
+RECOVERY_NOTE = (
+    "a recovery attempt: wiki-studio applies nothing twice, but if the wiki or the proposal changed since, it may "
+    "refuse with uncertain_outcome or payload_changed and write nothing; then compare the wiki with"
+)
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 _PRE_RELEASE = re.compile(r"(a|b|c|rc|alpha|beta|pre|preview|dev)\d*")  # PEP 440 pre- and dev-release markers
 
 
@@ -129,7 +137,21 @@ def lint_wiki(wiki_dir: Path, project_root: Path, *, require_studio: bool = Fals
 
 
 class GateError(RuntimeError):
-    """wiki-studio's gate rejected or failed to apply an export, or is too old to use; no page was written."""
+    """wiki-studio's gate rejected or failed to apply an export, or is too old to use; no page was written,
+    except for the subclass GateUncertainError."""
+
+
+class GateUncertainError(GateError):
+    """FR-009: wiki-studio failed during its commit and its receipt shows neither a commit nor a rollback.
+
+    memkernel's pages may be on disk; ``uncertain_outcome`` names them and the receipt to compare the wiki with.
+    """
+
+    def __init__(self, message: str, *, proposal: str, uncertain_outcome: str, receipt_error: str | None) -> None:
+        super().__init__(message)
+        self.proposal = proposal
+        self.uncertain_outcome = uncertain_outcome
+        self.receipt_error = receipt_error
 
 
 @dataclass(frozen=True)
@@ -219,7 +241,9 @@ def propose_and_promote(
     (exclusive create, never overwrites): the gate appends to them but refuses
     to create them. Raises :class:`GateError` on any rejection or failure,
     except when wiki-studio raised after it had committed the pages (FR-009):
-    that is returned as a result with the hint that finishes it. wiki-studio
+    that is returned as a result with the hint that tries to finish it. When
+    its receipt shows neither a commit nor a rollback, :class:`GateUncertainError`
+    is raised: the pages may be on disk. wiki-studio
     validates before writing and rolls back its own writes, so a rejected
     patch-set changes no page. A scaffold ``api.init`` created stays.
     """
@@ -281,7 +305,9 @@ def _finish_hint(paths: Any, proposal_dir: Path, what: str) -> str:
             str(proposal_dir.absolute()),
         ]
     )
-    return f"{what}; to finish, run: {command} (it finishes the archive and applies nothing twice)"
+    return (
+        f"{what}; to try to finish, run: {command} ({RECOVERY_NOTE} {proposal_dir.absolute() / RECEIPT_FILE} by hand)"
+    )
 
 
 def _read_receipt(receipt_path: Path) -> dict[str, Any]:
@@ -303,34 +329,53 @@ def _committed_then_failed(
 ) -> GateResult | None:
     """FR-009: the GateResult of an export wiki-studio committed before it raised, or None when it did not commit.
 
-    The evidence is wiki-studio's own record: the receipt in ``proposal_dir`` (state ``committing`` or
-    ``committed``) and, for every page memkernel created, an on-disk sha256 equal to the receipt's
-    ``post_sha256``. A missing receipt means no commit. Only when the receipt exists but cannot be read are
-    the pages' bytes compared with what memkernel proposed. memkernel never promotes again itself; the hint
-    tells the user how.
+    The outcome is classified from wiki-studio's own record, the receipt in ``proposal_dir``, by the rule
+    wiki-studio's classifier applies to a ``committing`` receipt: committed when every planned write (the pages,
+    the index and the log) is at its ``post_sha256``, not committed when every one is at its ``pre_sha256``,
+    uncertain otherwise. A ``committed`` receipt holds when memkernel's pages are at their ``post_sha256``. A
+    missing receipt means no commit. Only when the receipt cannot be read, is in an unknown state (wiki-studio
+    calls that corrupt), or its ``planned_writes`` is unusable, are the pages' bytes compared with what memkernel
+    proposed. An uncertain outcome raises GateUncertainError.
+    memkernel never promotes again itself; the hint tells the user how.
     """
     receipt_path = proposal_dir / RECEIPT_FILE
-    if not receipt_path.exists() and not receipt_path.is_symlink():
+    if not pages or (not receipt_path.exists() and not receipt_path.is_symlink()):
         return None  # wiki-studio writes its committing receipt before any wiki write: no receipt, no commit
     receipt: dict[str, Any] | None = None
     receipt_error = None
+    writes = None
     try:
         receipt = _read_receipt(receipt_path)
-        post = {str(w["path"]): str(w["post_sha256"]) for w in receipt["planned_writes"]}
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        post = None
+    except (OSError, ValueError) as error:
         receipt_error = f"could not read {receipt_path}: {error}"
-    try:
-        if post is not None and receipt is not None:
-            landed = receipt.get("state") in RECEIPT_COMMIT_STATES and all(
-                page.path in post and _sha256_file(paths.wiki_dir / page.path) == post[page.path] for page in pages
-            )
-        else:
-            landed = all((paths.wiki_dir / page.path).read_bytes() == page.content.encode("utf-8") for page in pages)
-    except OSError:
-        landed = False
-    if not pages or not landed:
+    else:
+        try:
+            if receipt.get("state") not in RECEIPT_COMMIT_STATES:
+                raise ValueError(f"unknown state {receipt.get('state')!r}")
+            writes = _planned_writes(receipt, pages)
+        except ValueError as error:
+            receipt_error = f"could not use {receipt_path}: {error}"
+    if writes is not None and receipt is not None:
+        outcome = _classify(receipt["state"], writes, pages, paths.wiki_dir)
+    else:
+        outcome = _compare_bytes(pages, paths.wiki_dir)
+    if outcome == _NOT_COMMITTED:
         return None
+    if outcome == _UNCERTAIN:
+        uncertain = (
+            f"wiki-studio's outcome is uncertain: memkernel's pages may be on disk "
+            f"({', '.join(page.path for page in pages)}); compare the wiki with {receipt_path.absolute()} by hand "
+            "before exporting again"
+        )
+        logger.warning("wiki export to %s: %s (%s)", paths.wiki_dir, uncertain, exc)
+        if receipt_error is not None:
+            logger.warning("wiki export to %s: %s", paths.wiki_dir, receipt_error)
+        raise GateUncertainError(
+            f"wiki-studio failed during its commit: {exc}",
+            proposal=name,
+            uncertain_outcome=uncertain,
+            receipt_error=receipt_error,
+        ) from exc
     digest = None
     if receipt is not None:
         try:
@@ -344,6 +389,91 @@ def _committed_then_failed(
     return GateResult(
         proposal=name, submission_digest=digest, archived_dir=None, archive_hint=hint, receipt_error=receipt_error
     )
+
+
+def _planned_writes(receipt: dict[str, Any], pages: list[GatedPage]) -> dict[str, tuple[str | None, str]]:
+    """The receipt's ``planned_writes`` as path -> (pre_sha256, post_sha256); ValueError when it is unusable
+    (FR-009): not a non-empty list of writes with a string path, a sha256 ``post_sha256`` and a null or sha256
+    ``pre_sha256``, with a path listed twice, or missing a page memkernel created."""
+    planned = receipt.get("planned_writes")
+    if not isinstance(planned, list) or not planned:
+        raise ValueError("no usable planned_writes")
+    writes: dict[str, tuple[str | None, str]] = {}
+    for write in planned:
+        pre = write.get("pre_sha256") if isinstance(write, dict) else None
+        if (
+            not isinstance(write, dict)
+            or not isinstance(write.get("path"), str)
+            or not _is_sha256(write.get("post_sha256"))
+            or not (pre is None or _is_sha256(pre))
+        ):
+            raise ValueError(f"malformed planned_writes entry {write!r}")
+        if write["path"] in writes:
+            raise ValueError(f"duplicate planned_writes path {write['path']!r}")
+        writes[write["path"]] = (pre, write["post_sha256"])
+    missing = [page.path for page in pages if page.path not in writes]
+    if missing:
+        raise ValueError(f"planned_writes does not record {missing}")
+    return writes
+
+
+def _classify(state: object, writes: dict[str, tuple[str | None, str]], pages: list[GatedPage], wiki_dir: Path) -> str:
+    """FR-009 on a usable receipt: wiki-studio's ``committing`` rule over every planned write; for a
+    ``committed`` receipt, memkernel's pages at their ``post_sha256`` or uncertain."""
+    if state == RECEIPT_COMMITTED:
+        at_post = all(_live_sha256(wiki_dir, page.path) == writes[page.path][1] for page in pages)
+        return _COMMITTED if at_post else _UNCERTAIN
+    live = {rel: _live_sha256(wiki_dir, rel) for rel in writes}
+    if all(live[rel] == post for rel, (_, post) in writes.items()):
+        return _COMMITTED
+    if all(live[rel] == pre for rel, (pre, _) in writes.items()):
+        return _NOT_COMMITTED
+    return _UNCERTAIN
+
+
+def _compare_bytes(pages: list[GatedPage], wiki_dir: Path) -> str:
+    """FR-009's fallback: every page as proposed is committed, every page absent is not, anything else uncertain."""
+    found: list[bytes | None] = []
+    for page in pages:
+        target = wiki_dir / page.path
+        try:
+            found.append(target.read_bytes() if target.exists() or target.is_symlink() else None)
+        except OSError:
+            return _UNCERTAIN
+    if all(data == page.content.encode("utf-8") for data, page in zip(found, pages, strict=True)):
+        return _COMMITTED
+    if all(data is None for data in found):
+        return _NOT_COMMITTED
+    return _UNCERTAIN
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and _SHA256_HEX.fullmatch(value) is not None
+
+
+_UNREADABLE = "unreadable"  # matches no sha256 and no absent (None) pre state
+
+
+def _live_sha256(wiki_dir: Path, rel: str) -> str | None:
+    """The sha256 of ``rel`` in the wiki, None when absent; ``_UNREADABLE`` when it is not a plain relative path,
+    any part of it is a symlink, it is not a regular file or it cannot be read (it then matches neither the pre
+    nor the post state, as in wiki-studio's ``contain``)."""
+    parts = rel.split("/")
+    if "\\" in rel or any(part in ("", ".", "..") for part in parts):  # absolute, empty, dotted or backslashed
+        return _UNREADABLE
+    live = wiki_dir
+    try:
+        for part in parts:
+            live = live / part
+            if live.is_symlink():
+                return _UNREADABLE
+        if not live.exists():
+            return None
+        if not live.is_file():
+            return _UNREADABLE
+        return _sha256_file(live)
+    except OSError:
+        return _UNREADABLE
 
 
 def _sha256_file(path: Path) -> str:

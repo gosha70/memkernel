@@ -30,13 +30,23 @@ All notable changes to this project are documented here. The format follows
   `proposal` (the proposal name), `submission_digest`, and `archived_dir`
   (where wiki-studio archived the proposal; `null` when it committed the pages
   but could not archive it, or failed after committing them: memkernel checks
-  each page against the receipt's post-write sha256, or its bytes when the
-  receipt is unreadable, and reports such an export as written, not as a
-  `gate_error`). `archive_hint` appears only when `archived_dir` is
-  `null`, with the `promote` command that finishes the archive and applies
-  nothing twice (run through the interpreter memkernel uses). `receipt_error`
-  appears when the receipt could not be read; the export still succeeds. The
-  same fields are on `ExportReport`.
+  the receipt's planned writes against their post-write sha256, every write,
+  index and log included, while the receipt still says `committing`; it
+  compares the pages' bytes only when the receipt or its planned writes are
+  unusable, and reports such an export as written, not as a `gate_error`).
+  `archive_hint` appears only when `archived_dir` is `null`, with the
+  `promote` command that tries to finish (run through the interpreter
+  memkernel uses): it applies nothing twice, but if the wiki or the proposal
+  changed since, it may refuse (`uncertain_outcome` or `payload_changed`)
+  and write nothing, and the wiki must be compared with the receipt by hand.
+  `receipt_error` appears when the receipt could not be read or used; the
+  export still succeeds.
+  `uncertain_outcome` (with `gate_error` and `proposal`) appears when
+  wiki-studio failed during its commit and its receipt shows neither a commit
+  nor a rollback, for example the page written but the `index.md` write failed
+  and the page's rollback failed: the pages may be on disk, `written` is empty,
+  and the message names the pages and the `receipt.json` to compare the wiki
+  with by hand. The same fields are on `ExportReport`.
 - README: ignore wiki-studio's lock file next to the wiki directory.
 
 ## [0.5.0] - 2026-10-28

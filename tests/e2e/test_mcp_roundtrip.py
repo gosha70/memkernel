@@ -335,6 +335,34 @@ async def test_tiered_memory_roundtrip_promote_consolidate() -> None:
 
 
 @pytest.mark.e2e
+async def test_wiki_export_reports_an_uncertain_outcome(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-008/FR-009: an uncertain outcome carries gate_error, uncertain_outcome and proposal, and no written page."""
+    from memkernel.wiki.sync import ExportReport, WikiExporter
+
+    uncertain = ExportReport(
+        skipped=1,
+        gate_error="wiki-studio failed during its commit: index.md",
+        proposal="memkernel-export-x",
+        uncertain_outcome="wiki-studio's outcome is uncertain: memkernel's pages may be on disk (decisions/a.md)",
+    )
+    monkeypatch.setattr(WikiExporter, "export", lambda self: uncertain)
+    settings = MemKernelSettings(
+        project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}",
+        chroma_persist_path="",
+        wiki_dir=f"{tmp_path}/wiki",
+        project_root=str(tmp_path),
+    )
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+
+    async with create_connected_server_and_client_session(server) as client:
+        export = json.loads(_text(await client.call_tool("wiki_export", arguments={})))
+
+    assert export["written"] == [] and export["gate_error"] == uncertain.gate_error
+    assert export["uncertain_outcome"] == uncertain.uncertain_outcome and export["proposal"] == "memkernel-export-x"
+    assert "archive_hint" not in export and "receipt_error" not in export
+
+
+@pytest.mark.e2e
 async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
     """wiki_export compiles long-term memories to pages; wiki_import indexes curated pages."""
     from pathlib import Path
@@ -364,6 +392,7 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
             assert export["proposal"].startswith("memkernel-export-")  # the gate's receipt keys (FR-008)
             assert export["submission_digest"] and export["archived_dir"]
             assert "archive_hint" not in export and "receipt_error" not in export
+            assert "uncertain_outcome" not in export
 
         # Curate the draft, then import it: recall must return the curated page version.
         page = wiki_dir / "decisions/use-arq-for-background-jobs.md"
