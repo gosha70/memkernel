@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `memkernel[wiki]` now requires `wiki-studio>=0.6.0,<1`, and CI tests 0.6.0.
+  An installed wiki-studio older than 0.6.0 is refused with `gate_error`
+  (upgrade it, or uninstall it to use the direct writer); the export never
+  falls back to unchecked writes.
+- The gated `wiki_export` no longer snapshots and restores the wiki
+  (`_WikiSnapshot` is removed). wiki-studio 0.6.0 writes only the paths the
+  patch-set names, under its lock, and rolls back its own writes, so a failed
+  export cannot revert a page another writer committed during it, as the
+  restore could. A failed export to a new wiki now leaves an empty `index.md`
+  and `log.md`; in 0.5 it left no files.
+- A new wiki's `index.md` and `log.md` on the gated path are wiki-studio's
+  scaffold, created by its `init`: `status: stable`, titles `Wiki` and
+  `Wiki log`. memkernel's direct writer keeps its own (`status: draft`,
+  `Wiki Index`, `Wiki Edit Log`). Pages and the index and log entries are the
+  same on both paths; existing wikis are unaffected.
+
+### Added
+
+- `wiki_export` response keys for a gated export, from wiki-studio's receipt:
+  `proposal` (the proposal name), `submission_digest`, and `archived_dir`
+  (where wiki-studio archived the proposal; `null` when it committed the pages
+  but could not archive it, or failed after committing them: memkernel checks
+  the receipt's planned writes against their post-write sha256, every write,
+  index and log included, while the receipt still says `committing`; it
+  compares the pages' bytes only when the receipt or its planned writes are
+  unusable, and reports such an export as written, not as a `gate_error`).
+  `archive_hint` appears only when `archived_dir` is `null`, with the
+  `promote` command that tries to finish (run through the interpreter
+  memkernel uses): it applies nothing twice, but if the wiki or the proposal
+  changed since, it may refuse (`uncertain_outcome` or `payload_changed`)
+  and write nothing, and the wiki must be compared with the receipt by hand.
+  `receipt_error` appears when the receipt could not be read or used; the
+  export still succeeds.
+  `uncertain_outcome` (with `gate_error` and `proposal`) appears when
+  wiki-studio failed during its commit and its receipt shows neither a commit
+  nor a rollback, for example the page written but the `index.md` write failed
+  and the page's rollback failed: the pages may be on disk, `written` is empty,
+  and the message names the pages and the `receipt.json` to compare the wiki
+  with by hand. The same fields are on `ExportReport`.
+- README: ignore wiki-studio's lock file next to the wiki directory.
+
 ## [0.5.0] - 2026-10-28
 
 ### Added

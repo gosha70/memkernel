@@ -42,10 +42,18 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         With the memkernel[wiki] extra installed, "lint" carries wiki-studio's violations, audit
         errors and health findings for the whole wiki after the export (curated pages included);
         without the extra it is null and "lint_hint" says how to enable it; if the lint pass itself
-        failed it is null and "lint_error" says why. With wiki-studio >= 0.3 the pages go through its
-        promote gate (index.md and log.md are scaffolded first); a rejected export, or an installed but
-        broken wiki-studio, writes nothing and reports "gate_error". The pages, index.md and log.md
-        written are the same either way.
+        failed it is null and "lint_error" says why. With wiki-studio >= 0.6.0 the pages go through its
+        promote gate (a missing index.md and log.md are created first by wiki-studio's init), and the
+        response adds "proposal", "submission_digest" and "archived_dir" from wiki-studio's receipt.
+        If "archived_dir" is null the pages landed but wiki-studio did not finish (no archive, or a
+        failure after its commit, checked against its receipt), and "archive_hint" gives the command
+        that tries to finish it (wiki-studio may refuse it, writing nothing, if the wiki or the proposal
+        changed since);
+        "receipt_error" says the receipt could not be read or used. A rejected export, or an installed
+        wiki-studio that is broken or older than 0.6.0, writes no page and reports "gate_error" (a new
+        wiki keeps the index.md and log.md init created). If wiki-studio failed during its commit and
+        its receipt shows neither a commit nor a rollback, "gate_error" comes with "uncertain_outcome"
+        and "proposal": the pages may be on disk; compare the wiki with the named receipt.json.
         """
         app_ctx = _context(ctx)
         proposals = app_ctx.settings.wiki_proposals_dir
@@ -59,6 +67,19 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         payload: dict[str, Any] = {"written": report.written, "skipped": report.skipped}
         if report.gate_error is not None:
             payload["gate_error"] = report.gate_error
+        if report.uncertain_outcome is not None:
+            payload["uncertain_outcome"] = report.uncertain_outcome
+            payload["proposal"] = report.proposal
+            if report.receipt_error is not None:
+                payload["receipt_error"] = report.receipt_error
+        if report.gated:
+            payload["proposal"] = report.proposal
+            payload["submission_digest"] = report.submission_digest
+            payload["archived_dir"] = report.archived_dir
+            if report.archive_hint is not None:
+                payload["archive_hint"] = report.archive_hint
+            if report.receipt_error is not None:
+                payload["receipt_error"] = report.receipt_error
         if report.lint is not None:
             payload["lint"] = report.lint.model_dump(mode="json")
         elif report.lint_error is not None:

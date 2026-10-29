@@ -32,7 +32,7 @@ pydantic = ">=2.0,<3"
 pydantic-settings = ">=2.0,<3"
 fastapi = ">=0.115,<1"
 # Optional integrations (ADR-010): installed only through an extra; imported lazily.
-wiki-studio = { version = ">=0.3.1,<1", optional = true }
+wiki-studio = { version = ">=0.6.0,<1", optional = true }
 
 [tool.poetry.extras]
 wiki = ["wiki-studio"]
@@ -45,7 +45,7 @@ ruff = ">=0.9"
 mypy = ">=1.13"
 httpx = ">=0.27"
 pip-audit = "^2.10.0"
-wiki-studio = ">=0.3.1,<1"
+wiki-studio = ">=0.6.0,<1"
 
 [build-system]
 requires = ["poetry-core"]
