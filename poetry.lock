@@ -6444,14 +6444,14 @@ files = [
 
 [[package]]
 name = "wiki-studio"
-version = "0.6.0"
+version = "0.7.0"
 description = "Karpathy-pattern LLM wiki maintainer: ingest, promote, query, lint and audit a curated markdown knowledge base."
 optional = false
 python-versions = "<3.14,>=3.11"
 groups = ["main", "dev"]
 files = [
-    {file = "wiki_studio-0.6.0-py3-none-any.whl", hash = "sha256:aadd0e935f4cd55c683a6a5d334a432d292441b689b848b59c10d881f4921584"},
-    {file = "wiki_studio-0.6.0.tar.gz", hash = "sha256:e757b2b62160ea8781cb804ede163369ec5400d8569e737cbcd5dfbc3a96ee18"},
+    {file = "wiki_studio-0.7.0-py3-none-any.whl", hash = "sha256:29f20d2a20a39c941dd799f0998a139b3702ea0089cb201811d539f6040b64a5"},
+    {file = "wiki_studio-0.7.0.tar.gz", hash = "sha256:7a66343a01322bfcbdb386fb2048e11e6a42508114a461b9c102f65282ad7767"},
 ]
 markers = {main = "extra == \"wiki\""}
 
@@ -6614,4 +6614,4 @@ wiki = ["wiki-studio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "bf95521587fa99e6b88324636d9d40f58484d1263992fcde60d07e48e449f2a6"
+content-hash = "c60185b4b7c493400de20860a0f299c80072f5d89e79581b8fccaeeb0296f2ed"

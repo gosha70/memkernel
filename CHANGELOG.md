@@ -8,12 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- `memkernel[wiki]` now requires `wiki-studio>=0.6.0,<1`, and CI tests 0.6.0.
-  An installed wiki-studio older than 0.6.0 is refused with `gate_error`
+- **`wiki_import` is governed when the extra is installed** (wiki-studio 0.7.0
+  review state): only pages wiki-studio reports approved are imported, and only
+  when their bytes are still the approved revision. A draft, a page that
+  declares itself approved, or a page edited after approval is skipped and
+  listed in `not_approved`; an edited page keeps its last approved memory until
+  it is approved again. **For existing users with the extra this is a behaviour
+  change:** `wiki_import` imports nothing until a curator approves pages with
+  `wiki-studio approve` (a wiki without wiki-studio's manifest reports
+  `manifest_missing`), and drafts imported by earlier versions stay in the
+  store: they are the long-term memories tagged `wiki` without a `page_sha:`
+  tag. Imported memories carry `page_key:` and `page_sha:` tags, so a second
+  import adds nothing. Without the extra the import reads the page files as
+  before.
+- `memkernel[wiki]` now requires `wiki-studio>=0.7.0,<1`, one floor for export
+  and import, and CI tests 0.7.0. An installed wiki-studio older than 0.7.0, or
+  one without a call the bridge makes, is refused with `gate_error`
   (upgrade it, or uninstall it to use the direct writer); the export never
   falls back to unchecked writes.
 - The gated `wiki_export` no longer snapshots and restores the wiki
-  (`_WikiSnapshot` is removed). wiki-studio 0.6.0 writes only the paths the
+  (`_WikiSnapshot` is removed). wiki-studio (since 0.6.0) writes only the paths the
   patch-set names, under its lock, and rolls back its own writes, so a failed
   export cannot revert a page another writer committed during it, as the
   restore could. A failed export to a new wiki now leaves an empty `index.md`
@@ -26,6 +40,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The `corrects` frontmatter key: an approved page's comma-separated memory
+  `ref_id`s are superseded by the page's memory on import, their records kept.
+- `MemoryService.supersede(ref_id, by_ref)`: marks an existing record as
+  replaced; idempotent, and it refuses (never overwrites) an unknown record,
+  another project's, itself, or one already superseded by another.
+- `wiki_import` response keys: `governed`, and when they apply `unchanged`
+  (approved pages already current; `skipped` now means only pages that cannot
+  be imported), `not_approved`, `corrections`, `unresolved`, `invalid_corrects`
+  and `import_error`. The same
+  fields are on `ImportReport`; `WikiImporter` takes an optional `project_root`.
 - `wiki_export` response keys for a gated export, from wiki-studio's receipt:
   `proposal` (the proposal name), `submission_digest`, and `archived_dir`
   (where wiki-studio archived the proposal; `null` when it committed the pages
@@ -48,6 +72,23 @@ All notable changes to this project are documented here. The format follows
   and the message names the pages and the `receipt.json` to compare the wiki
   with by hand. The same fields are on `ExportReport`.
 - README: ignore wiki-studio's lock file next to the wiki directory.
+
+### Fixed
+
+- `wiki_import` matched a page's previous memory by slug, so two pages with the
+  same slug in different directories superseded each other's memory; it now
+  matches by the page's path.
+- `wiki_import` merged two pages with identical title and body into one memory
+  (and a page into an agent's memory with the same text), so editing one page
+  left the other without a live memory. Each page now keeps its own memory:
+  the import deduplicates only within the page's path, through `retain`'s new
+  keyword-only `dedup_source`. A memory two pages already share stays with the
+  page whose path is its `source`; the other page gets its own on its next
+  import.
+- `MemoryService.supersede` and `retain(supersedes=...)` marked a record before
+  its owned chunks, so a failure part-way left chunks unmarked that no retry
+  repaired. Chunks are now marked first and the record last, and a repeated
+  call marks any chunk still without a marker.
 
 ## [0.5.0] - 2026-10-28
 

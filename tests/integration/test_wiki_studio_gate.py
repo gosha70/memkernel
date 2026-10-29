@@ -266,15 +266,18 @@ def test_an_older_wiki_studio_is_refused_and_nothing_is_written(
     report = _exporter(tmp_path, DECISION).export()
 
     assert report.gate_error is not None and "wiki-studio 0.5.0" in report.gate_error
-    assert ">= 0.6.0" in report.gate_error
+    assert ">= 0.7.0" in report.gate_error
     assert report.written == [] and report.skipped == 1 and not (tmp_path / "wiki").exists()
 
 
-def test_a_wiki_studio_without_init_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delattr(api, "init")
+@pytest.mark.parametrize("call", ["init", "review_state", "read_page"])
+def test_a_wiki_studio_without_a_call_the_bridge_makes_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, call: str
+) -> None:
+    monkeypatch.delattr(api, call)
     report = _exporter(tmp_path, DECISION).export()
 
-    assert report.gate_error is not None and "missing init" in report.gate_error
+    assert report.gate_error is not None and f"missing {call}" in report.gate_error
     assert report.written == [] and not (tmp_path / "wiki").exists()
 
 

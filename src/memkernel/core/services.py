@@ -259,6 +259,8 @@ class MemoryService:
         tags: list[str] | None = None,
         supersedes: str | None = None,
         promoted_from: str | None = None,
+        *,
+        dedup_source: bool = False,
     ) -> str:
         """Store content and return its ref_id.
 
@@ -277,7 +279,10 @@ class MemoryService:
         memkernel record keeps only a summary (``get`` never returns the
         body; use ``ask``). ``source`` names the document.
 
-        Idempotent: identical content + type returns the existing ref_id.
+        Idempotent: identical content + type returns the existing ref_id. With
+        ``dedup_source`` a single record's dedup hit also requires the same ``source``
+        (memkernel-0-6 FR-012: one memory per wiki page, never merged with another
+        page's or an agent's identical text).
         """
         extra = _ExtraMeta(importance=importance, tags=tags or [], supersedes=supersedes, promoted_from=promoted_from)
         if type == MemoryType.DOCUMENT and self._document_store is not None:
@@ -285,7 +290,7 @@ class MemoryService:
         if type == MemoryType.CODE:
             return self._retain_code(content, session_id, checkpoint, source, extra)
 
-        return self._retain_single(content, type, session_id, checkpoint, source, extra)
+        return self._retain_single(content, type, session_id, checkpoint, source, extra, dedup_source=dedup_source)
 
     def _retain_code(
         self,
@@ -450,13 +455,47 @@ class MemoryService:
             ):
                 self._vector_store.update_metadata(chunk.ref_id, update)
 
+    def supersede(self, ref_id: str, by_ref: str) -> bool:
+        """Mark the existing record ``ref_id`` as replaced by the existing record ``by_ref``.
+
+        Sets only the durable ``superseded_by`` marker (on ``ref_id`` and its owned
+        chunks), as ``retain(supersedes=...)`` does; the record's content and every
+        other field stay as they are, so its provenance remains. Returns True when it
+        set the marker, False when ``ref_id`` was already superseded by ``by_ref``; that
+        call still marks any owned chunk left without the marker, so a retry completes
+        a partial mark.
+        Raises ``ValueError`` and changes nothing when either record is not in this
+        store (unknown, or another project's), when they are the same record, or when
+        ``ref_id`` is already superseded by a different record: an existing marker is
+        never overwritten.
+        """
+        if ref_id == by_ref:
+            raise ValueError(f"{ref_id} cannot supersede itself")
+        target = self._vector_store.get_by_id(ref_id)
+        if target is None:
+            raise ValueError(f"{ref_id} is not a memory in this store")
+        if self._vector_store.get_by_id(by_ref) is None:
+            raise ValueError(f"{by_ref} is not a memory in this store")
+        if target.superseded_by == by_ref:
+            self._mark_superseded(ref_id, by_ref)  # idempotent: repairs chunks a failed earlier mark left
+            return False
+        if target.superseded_by:
+            raise ValueError(f"{ref_id} is already superseded by {target.superseded_by}")
+        self._mark_superseded(ref_id, by_ref)
+        return True
+
     def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
-        """Set the durable ``superseded_by`` marker on ``target_ref`` and its owned chunks."""
+        """Set the durable ``superseded_by`` marker on ``target_ref``'s owned chunks, then on ``target_ref``.
+
+        The record is marked last: it is what ``supersede`` checks, so a failure part-way leaves it unmarked and
+        a retry marks everything. Only chunks without a marker are written: an existing marker is never overwritten.
+        """
         if target_ref == by_ref or self._vector_store.get_by_id(target_ref) is None:
             return
-        self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
         for chunk in self._owned_chunks(target_ref):
-            self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
+            if not chunk.superseded_by:
+                self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
+        self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
 
     def _delete_owned_chunks(self, canonical: Memory) -> None:
         """Delete a canonical's owned chunk records; legacy shared chunk_refs only when nothing else references them."""
@@ -523,18 +562,21 @@ class MemoryService:
         source: str,
         extra: _ExtraMeta | None = None,
         dedup: bool = True,
+        dedup_source: bool = False,
     ) -> str:
         """Store a single content string and return its ref_id.
 
         ``dedup=False`` skips the content-hash check for records whose identity
-        is not their text (document summaries).
+        is not their text (document summaries); ``dedup_source`` scopes it to
+        records with the same ``source``.
         """
         extra = extra or _ExtraMeta()
         resolved_session = session_id or self._settings.default_session_id
         content_hash = compute_content_hash(content)
 
         # Dedup check: same hash + same type -> update metadata, return existing id
-        existing = self._vector_store.find_by_hash(content_hash, type.value) if dedup else None
+        scope = source if dedup_source else None
+        existing = self._vector_store.find_by_hash(content_hash, type.value, source=scope) if dedup else None
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             return existing.ref_id

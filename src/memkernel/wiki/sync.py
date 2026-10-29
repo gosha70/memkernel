@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -33,10 +34,12 @@ from memkernel.wiki.studio import (
     GateUncertainError,
     LintError,
     LintSummary,
+    PageReview,
     gate_available,
     lint_wiki,
     load_studio,
     propose_and_promote,
+    review_pages,
 )
 
 if TYPE_CHECKING:
@@ -46,6 +49,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WIKI_TAG = "wiki"
+PAGE_KEY_TAG = "page_key:"
+PAGE_SHA_TAG = "page_sha:"
+CORRECTS_KEY = "corrects"  # memkernel's frontmatter key (wiki-studio ADR-0002 registers it, keeps it byte for byte)
+_CORRECTS_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 INDEX_FILE = "index.md"
 LOG_FILE = "log.md"
 DEFAULT_PROPOSALS_SUBDIR = Path(".memkernel") / "wiki-proposals"
@@ -113,10 +120,23 @@ class ExportReport:
 
 @dataclass
 class ImportReport:
-    """Outcome of an import run."""
+    """Outcome of an import run.
+
+    ``governed`` is True when wiki-studio's review state decided what was imported (approved revisions only),
+    False when wiki-studio is not installed and the page files were read directly (drafts included).
+    ``not_approved`` lists the pages a governed import skipped, each with its review state and reason;
+    ``import_error`` says why nothing was imported (an installed wiki-studio that is broken or too old).
+    """
 
     imported: list[str] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)  # pages that cannot be imported (type, deprecated, unparsable)
+    unchanged: list[str] = field(default_factory=list)  # approved pages whose revision is already the live memory
+    governed: bool = False
+    not_approved: list[dict[str, str]] = field(default_factory=list)
+    corrections: list[dict[str, str]] = field(default_factory=list)  # {"page", "ref_id"} superseded by the page
+    unresolved: list[dict[str, str]] = field(default_factory=list)  # {"page", "token", "reason"}
+    invalid_corrects: list[dict[str, str]] = field(default_factory=list)  # {"page", "reason"}
+    import_error: str | None = None
 
 
 class WikiExporter:
@@ -314,48 +334,171 @@ def _log_scaffold() -> str:
 
 
 class WikiImporter:
-    """Index curated wiki pages as long-term memories."""
+    """Index wiki pages as long-term memories: approved revisions only when wiki-studio is installed."""
 
-    def __init__(self, service: MemoryService, wiki_dir: Path) -> None:
+    def __init__(self, service: MemoryService, wiki_dir: Path, project_root: Path | None = None) -> None:
         self._service = service
         self._wiki_dir = Path(wiki_dir)
+        self._project_root = Path(project_root) if project_root is not None else self._wiki_dir.parent
 
     def import_pages(self, session_id: str | None = None) -> ImportReport:
-        """Retain every page with a mapped page_type; return what was imported/skipped."""
+        """Retain each importable page; return what was imported, skipped and why (memkernel-0-6 FR-010-FR-016)."""
         report = ImportReport()
-        existing = {
-            self._page_tag(m): m
-            for m in self._service.list_memories(tier=MemoryTier.LONG_TERM)
-            if WIKI_TAG in m.tags and self._page_tag(m)
-        }
+        try:
+            api = gate_available()
+            reviews = review_pages(api, self._wiki_dir, self._project_root) if api is not None else None
+        except GateError as exc:  # installed but broken, too old or failing: never fall back to the ungoverned path
+            report.import_error = str(exc)
+            logger.warning("wiki import from %s refused: %s", self._wiki_dir, exc)
+            return report
+        live = [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if WIKI_TAG in m.tags]
+        if reviews is None:
+            self._import_files(report, live, session_id)
+        else:
+            report.governed = True
+            self._import_reviewed(reviews, report, live, session_id)
+        return report
+
+    def _import_files(self, report: ImportReport, live: list[Memory], session_id: str | None) -> None:
+        """Without wiki-studio: every page file, drafts included (ungoverned, as before 0.6)."""
         for path in sorted(self._wiki_dir.rglob("*.md")):
             rel = path.relative_to(self._wiki_dir).as_posix()
             if rel.startswith(("schema/", "scripts/", ".")):
                 continue
             page = parse_page(path.read_text(encoding="utf-8"))
-            memory_type = IMPORT_MAP.get(page.page_type) if page else None
-            if page is None or memory_type is None or page.status == "deprecated":
-                report.skipped.append(rel)
+            self._retain_page(rel, page, None, live, session_id, report)
+
+    def _import_reviewed(
+        self, reviews: list[PageReview], report: ImportReport, live: list[Memory], session_id: str | None
+    ) -> None:
+        for review in sorted(reviews, key=lambda r: r.path):
+            if review.text is None:
+                report.not_approved.append({"path": review.path, "state": review.state, "reason": review.reason})
                 continue
-            content = f"{page.title}\n\n{page.body}".strip()
-            tags = [WIKI_TAG, f"page:{page.slug}", f"page_type:{page.page_type}"]
-            previous = existing.get(f"page:{page.slug}")
-            supersedes = previous.ref_id if previous is not None and previous.content != content else None
-            self._service.retain(
-                content=content,
-                type=memory_type,
-                session_id=session_id,
-                source=rel,
-                importance=0.9 if page.status == "stable" else 0.7,
-                tags=tags,
-                supersedes=supersedes,
-            )
-            report.imported.append(rel)
-        return report
+            page = parse_page(review.text)
+            ref_id = self._retain_page(review.path, page, review, live, session_id, report)
+            if ref_id is not None and page is not None:
+                self._reconcile(review.path, page, review, ref_id, report)
+
+    def _reconcile(self, rel: str, page: WikiPage, review: PageReview, ref_id: str, report: ImportReport) -> None:
+        """FR-015: supersede the originating memories an approved page's ``corrects`` names by the page's memory."""
+        raw = page.extra.get(CORRECTS_KEY)
+        if raw is None:
+            return
+        try:
+            tokens = parse_corrects(raw)
+        except ValueError as exc:
+            report.invalid_corrects.append({"page": rel, "reason": str(exc)})
+            return
+        for token in tokens:
+            target = self._service.get(token, touch=False)
+            if target is None:
+                reason = "not a memory in this store"
+            elif WIKI_TAG in target.tags:
+                reason = "a memory imported from the wiki: correct the page instead"
+            elif target.superseded_by and self._is_this_pages(target.superseded_by, rel, review):
+                # Corrected by this page (this or an earlier revision): still in effect. The idempotent call
+                # completes a mark an earlier import left partial (owned chunks without the marker).
+                self._service.supersede(token, target.superseded_by)
+                continue
+            else:
+                try:
+                    if self._service.supersede(token, ref_id):
+                        report.corrections.append({"page": rel, "ref_id": token})
+                    continue
+                except ValueError as exc:
+                    reason = str(exc)
+            report.unresolved.append({"page": rel, "token": token, "reason": reason})
+
+    def _retain_page(
+        self,
+        rel: str,
+        page: WikiPage | None,
+        review: PageReview | None,
+        live: list[Memory],
+        session_id: str | None,
+        report: ImportReport,
+    ) -> str | None:
+        """Retain one page; return its live memory's ref_id (new, or already current), or None when skipped."""
+        memory_type = IMPORT_MAP.get(page.page_type) if page else None
+        if page is None or memory_type is None or page.status == "deprecated":
+            report.skipped.append(rel)
+            return None
+        content = f"{page.title}\n\n{page.body}".strip()
+        tags = [WIKI_TAG, f"page:{page.slug}", f"page_type:{page.page_type}"]
+        previous = self._previous(rel, review, live)
+        if review is not None:
+            sha_tag = f"{PAGE_SHA_TAG}{review.sha256}"
+            tags += [f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}", sha_tag]
+            if previous is not None and sha_tag in previous.tags:
+                # This approved revision is already the page's live memory. Its corrections are still reconciled
+                # (idempotent), so a reference that resolves only later, or one a failed import left, takes effect.
+                report.unchanged.append(rel)
+                return previous.ref_id
+            # A revision that changes only frontmatter keeps the same content, so retain dedups and merges the new
+            # tags into the existing record: the record then carries one page_sha tag per such revision.
+        supersedes = previous.ref_id if previous is not None and previous.content != content else None
+        ref_id = self._service.retain(
+            content=content,
+            type=memory_type,
+            session_id=session_id,
+            source=rel,
+            importance=0.9 if page.status == "stable" else 0.7,
+            tags=tags,
+            supersedes=supersedes,
+            dedup_source=True,  # FR-012: one memory per page, never merged with identical text from elsewhere
+        )
+        report.imported.append(rel)
+        return ref_id
+
+    def _is_this_pages(self, ref_id: str, rel: str, review: PageReview) -> bool:
+        """Whether ``ref_id`` is a memory imported from this page (any revision)."""
+        memory = self._service.get(ref_id, touch=False)
+        key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
+        return memory is not None and WIKI_TAG in memory.tags and (key_tag in memory.tags or memory.source == rel)
 
     @staticmethod
-    def _page_tag(memory: Memory) -> str:
-        for tag in memory.tags:
-            if tag.startswith("page:"):
-                return tag
-        return ""
+    def _previous(rel: str, review: PageReview | None, live: list[Memory]) -> Memory | None:
+        """The page's live memory: by page key, else by its wiki-relative path (never by slug).
+
+        The path fallback also covers a page whose key changed (a curator added a ``page_id``) and an edit read
+        without wiki-studio after a governed import, so a page never ends up with two live memories. A record
+        carrying several page keys (two pages merged by the unscoped dedup before FR-012's amendment) belongs to
+        the page whose path is its ``source``; for any other page it is never the previous memory, so that page
+        gets its own record and never supersedes the shared one.
+        """
+        if review is not None:
+            key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
+            for memory in live:
+                if key_tag in memory.tags and (memory.source == rel or not _shared(memory)):
+                    return memory
+        for memory in live:
+            if memory.source == rel:
+                return memory
+        return None
+
+
+def _shared(memory: Memory) -> bool:
+    """Whether ``memory`` carries more than one page key: two pages merged into one record before FR-012's fix."""
+    return sum(tag.startswith(PAGE_KEY_TAG) for tag in memory.tags) > 1
+
+
+def _tag_safe(value: str) -> str:
+    """Tags are stored comma-separated: a comma in a page key would split it into two tags."""
+    return value.replace("%", "%25").replace(",", "%2C")
+
+
+def parse_corrects(value: str) -> list[str]:
+    """The ``corrects`` grammar (memkernel-0-6 FR-014): one line, a comma-separated list of tokens, each of letters,
+    digits, ``-`` and ``_``, with optional whitespace around commas. Raises ``ValueError`` naming what is wrong."""
+    if "\n" in value or "\r" in value:
+        raise ValueError("corrects must be one line")
+    if not value.strip():
+        raise ValueError("corrects is empty")
+    tokens = [part.strip() for part in value.split(",")]
+    for token in tokens:
+        if not token:
+            raise ValueError("corrects has an empty token")
+        if not _CORRECTS_TOKEN.fullmatch(token):
+            raise ValueError(f"corrects token {token!r} has a character other than letters, digits, '-' or '_'")
+    return tokens

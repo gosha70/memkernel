@@ -124,7 +124,7 @@ def test_wiki_studio_is_declared_only_as_an_optional_extra() -> None:
 
 @pytest.mark.parametrize(
     ("version", "release"),
-    [("0.6.0", (0, 6, 0)), ("0.6.0rc1", (0, 6, 0)), ("0.10.2.post1", (0, 10, 2)), ("1", (1,)), ("unknown", ())],
+    [("0.7.0", (0, 7, 0)), ("0.7.0rc1", (0, 7, 0)), ("0.10.2.post1", (0, 10, 2)), ("1", (1,)), ("unknown", ())],
 )
 def test_release_reads_the_leading_numeric_version(version: str, release: tuple[int, ...]) -> None:
     assert _release(version) == release
@@ -133,17 +133,17 @@ def test_release_reads_the_leading_numeric_version(version: str, release: tuple[
 @pytest.mark.parametrize(
     ("version", "below"),
     [
-        ("0.5.9", True),
-        ("0.6.0rc1", True),
-        ("0.6.0.dev3", True),
-        ("0.6.0a1", True),
+        ("0.6.9", True),
+        ("0.7.0rc1", True),
+        ("0.7.0.dev3", True),
+        ("0.7.0a1", True),
         ("unknown", True),
-        ("0.6.0", False),
-        ("0.6.0.post1", False),
-        ("0.6.0.post1.dev2", False),
-        ("0.6.0+local", False),
-        ("0.6", False),
         ("0.7.0", False),
+        ("0.7.0.post1", False),
+        ("0.7.0.post1.dev2", False),
+        ("0.7.0+local", False),
+        ("0.7", False),
+        ("0.8.0", False),
         ("1.0.0rc1", False),
     ],
 )
@@ -530,7 +530,7 @@ def _gate_reached_the_write(caplog: pytest.LogCaptureFixture) -> bool:
 def test_a_promote_that_fails_part_way_through_a_page_write_leaves_a_new_wiki_only_its_scaffold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fixed_day: None, exc: Exception
 ) -> None:
-    """wiki-studio >= 0.6.0 rolls back a write that failed part-way, on any exception; memkernel restores nothing."""
+    """wiki-studio rolls back a write that failed part-way, on any exception; memkernel restores nothing."""
     studio_api()
     caplog.set_level(logging.WARNING, logger="memkernel.wiki.studio")
     wiki = tmp_path / "wiki"

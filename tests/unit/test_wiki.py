@@ -191,10 +191,19 @@ def _write_wiki(root: Path) -> None:
     (root / "notes.md").write_text("no frontmatter here\n")
 
 
-def test_import_indexes_pages_as_long_term_memories(tmp_path: Path) -> None:
+@pytest.fixture
+def ungoverned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without wiki-studio the import reads the page files, drafts included (memkernel-0-6 FR-011)."""
+    from memkernel.wiki import sync
+
+    monkeypatch.setattr(sync, "gate_available", lambda: None)
+
+
+def test_import_indexes_pages_as_long_term_memories(tmp_path: Path, ungoverned: None) -> None:
     _write_wiki(tmp_path)
     svc = _service()
     report = WikiImporter(svc, tmp_path).import_pages()
+    assert report.governed is False and report.import_error is None
     assert report.imported == ["decisions/use-postgres.md", "playbooks/restart-db.md"]
     assert set(report.skipped) == {"index.md", "notes.md"}
     memories = {m.source: m for m in svc.list_memories(tier=MemoryTier.LONG_TERM)}
@@ -208,7 +217,7 @@ def test_import_indexes_pages_as_long_term_memories(tmp_path: Path) -> None:
     assert svc.recall("postgres concurrent writes", touch=False)[0].ref_id == decision.ref_id
 
 
-def test_import_is_idempotent_and_supersedes_changed_pages(tmp_path: Path) -> None:
+def test_import_is_idempotent_and_supersedes_changed_pages(tmp_path: Path, ungoverned: None) -> None:
     _write_wiki(tmp_path)
     svc = _service()
     WikiImporter(svc, tmp_path).import_pages()
@@ -224,7 +233,32 @@ def test_import_is_idempotent_and_supersedes_changed_pages(tmp_path: Path) -> No
     assert newest is not None and "JSONB" in newest.content and newest.supersedes is not None
 
 
-def test_export_then_import_round_trip_does_not_duplicate(tmp_path: Path) -> None:
+def test_two_pages_with_the_same_slug_keep_separate_memories(tmp_path: Path, ungoverned: None) -> None:
+    """Pages are matched by path, never slug (memkernel-0-6 FR-012). wiki-studio's lint refuses duplicate slugs, so
+    such a pair exists only in a wiki written without it, which the ungoverned import reads."""
+
+    def page(directory: str, page_type: str, body: str) -> None:
+        (tmp_path / directory).mkdir(exist_ok=True)
+        (tmp_path / directory / "retry.md").write_text(
+            f"---\npage_type: {page_type}\nslug: retry\ntitle: Retry\nstatus: stable\n"
+            f"last_reviewed: 2026-10-27\n---\n\n# Retry\n\n{body}\n"
+        )
+
+    page("decisions", "decision", "Retries back off exponentially.")
+    page("playbooks", "playbook", "Retry a failed deploy once by hand.")
+    svc = _service()
+    assert WikiImporter(svc, tmp_path).import_pages().imported == ["decisions/retry.md", "playbooks/retry.md"]
+    page("playbooks", "playbook", "Retry a failed deploy twice by hand.")
+
+    WikiImporter(svc, tmp_path).import_pages()
+
+    live = {m.source: m for m in svc.list_memories(tier=MemoryTier.LONG_TERM)}
+    assert set(live) == {"decisions/retry.md", "playbooks/retry.md"}  # the decision was not superseded
+    assert "back off exponentially" in live["decisions/retry.md"].content
+    assert "twice" in live["playbooks/retry.md"].content
+
+
+def test_export_then_import_round_trip_does_not_duplicate(tmp_path: Path, ungoverned: None) -> None:
     svc = _service()
     svc.retain("Prefer composition over inheritance", MemoryType.CONVENTION)
     WikiExporter(svc, tmp_path).export()
@@ -303,3 +337,43 @@ def test_memkernel_schema_constants_match_wiki_studio_schema() -> None:
         assert tuple(sections) == tuple(PAGE_TYPES[page_type].required_sections), page_type
         assert PAGE_TYPES[page_type].promotable, page_type
     assert set(IMPORT_MAP) <= set(VALID_PAGE_TYPES)
+
+
+# ── the corrects grammar (memkernel-0-6 FR-014) ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("value", "tokens"),
+    [
+        ("mem-3f9c2a1b, mem-77d0e4c2, mem-a1b2c3d4", ["mem-3f9c2a1b", "mem-77d0e4c2", "mem-a1b2c3d4"]),  # wiki-studio's
+        # tests/fixtures/corrects/multi-corrections.md at v0.7.0
+        ("54c73ae3-5887-43fb-a57b-e46a2167913c", ["54c73ae3-5887-43fb-a57b-e46a2167913c"]),  # a memkernel ref_id
+        ("a,b", ["a", "b"]),
+        ("  a ,\tb  ", ["a", "b"]),
+        ("snake_case_1", ["snake_case_1"]),
+    ],
+)
+def test_corrects_parses_comma_separated_tokens(value: str, tokens: list[str]) -> None:
+    from memkernel.wiki.sync import parse_corrects
+
+    assert parse_corrects(value) == tokens
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        ("", "empty"),
+        ("   ", "empty"),
+        ("a,,b", "an empty token"),
+        ("a,", "an empty token"),
+        ("a;b", "a character other than"),
+        ('"a"', "a character other than"),
+        ("a b", "a character other than"),
+        ("a\nb", "one line"),
+    ],
+)
+def test_corrects_refuses_anything_else(value: str, reason: str) -> None:
+    from memkernel.wiki.sync import parse_corrects
+
+    with pytest.raises(ValueError, match=reason):
+        parse_corrects(value)
