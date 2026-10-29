@@ -93,12 +93,12 @@ def test_pre_compact_retains_checkpoint_and_reports() -> None:
     assert memory.content.startswith("SESSION CHECKPOINT — ") and memory.content.endswith("\n\nDone: X\nNext: Y")
 
 
-def test_pre_compact_without_summary_uses_placeholder() -> None:
+def test_pre_compact_without_summary_retains_nothing() -> None:
+    """D1 (memkernel-0-6-compaction-hooks FR-001): no placeholder, so no fake newest checkpoint."""
     lifecycle, svc = _lifecycle()
-    status = lifecycle.on_pre_compact("")
-    ref_id = status.split("ref_id=")[1].split(";")[0]
-    memory = svc.get(ref_id, touch=False)
-    assert memory is not None and memory.content.endswith("Compaction triggered — no summary provided.")
+    status = lifecycle.on_pre_compact("  ")
+    assert status.startswith("MemKernel: no summary given; nothing retained; purged=0 expired")
+    assert svc.recall("checkpoint", checkpoint_only=True, touch=False) == []
 
 
 def test_post_compact_on_empty_store() -> None:
@@ -146,3 +146,129 @@ def test_settings_default_to_environment_when_omitted() -> None:
     settings = _settings()
     svc = build_service(settings, embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient())
     assert isinstance(MemoryLifecycle(svc)._settings, MemKernelSettings)  # noqa: SLF001
+
+
+# ── memkernel-0-6-compaction-hooks (#68): source branching and compact_summary ─
+
+
+def _spy(monkeypatch: pytest.MonkeyPatch, svc: Any, *names: str) -> dict[str, int]:
+    calls = dict.fromkeys(names, 0)
+    for name in names:
+        real = getattr(svc, name)
+
+        def counted(*args: Any, _name: str = name, _real: Any = real, **kwargs: Any) -> Any:
+            calls[_name] += 1
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(svc, name, counted)
+    return calls
+
+
+def test_an_agent_checkpoint_survives_a_compaction_without_a_summary() -> None:
+    """SC-1: the next start still shows the agent's own checkpoint."""
+    lifecycle, svc = _lifecycle()
+    svc.retain("SESSION CHECKPOINT agent\n\nNext: wire the store", MemoryType.EPISODE, checkpoint=True)
+    lifecycle.on_pre_compact("")
+
+    assert "Next: wire the store" in lifecycle.on_session_start("startup")
+
+
+def test_capture_compact_summary_retains_a_tagged_checkpoint_shown_at_the_next_start() -> None:
+    """SC-2: Claude Code's summary becomes the newest checkpoint, tagged, for the next session."""
+    lifecycle, svc = _lifecycle()
+    svc.retain("SESSION CHECKPOINT agent\n\nNext: older", MemoryType.EPISODE, checkpoint=True)
+    status = lifecycle.capture_compact_summary("Summary: the store lock landed", session_id="s-1", trigger="auto")
+
+    assert status.startswith("MemKernel: compaction summary (auto) retained as a checkpoint — ref_id=")
+    memory = svc.get(status.split("ref_id=")[1], touch=False)
+    assert memory is not None and memory.checkpoint and memory.type == MemoryType.EPISODE
+    assert memory.tags == ["checkpoint", "compact-summary", "session:s-1"]
+    assert "Summary: the store lock landed" in lifecycle.on_session_start("startup")
+    assert lifecycle.capture_compact_summary("") == "MemKernel: the compaction carried no summary; nothing retained"
+
+
+@pytest.mark.parametrize("source", ["resume", "fork"])
+def test_resume_and_fork_print_nothing_and_touch_nothing(monkeypatch: pytest.MonkeyPatch, source: str) -> None:
+    """SC-3: the context already holds what memkernel would add."""
+    lifecycle, svc = _lifecycle()
+    calls = _spy(monkeypatch, svc, "consolidate", "recall")
+
+    assert lifecycle.on_session_start(source) == ""
+    assert calls == {"consolidate": 0, "recall": 0}
+
+
+@pytest.mark.parametrize("post_compact_first", [True, False])
+def test_the_compact_block_shows_the_agents_checkpoint_never_the_summary_in_either_hook_order(
+    monkeypatch: pytest.MonkeyPatch, post_compact_first: bool
+) -> None:
+    """SC-4: the same block whichever of PostCompact and SessionStart(compact) runs first; no consolidation."""
+    lifecycle, svc = _lifecycle()
+    svc.retain("Use Postgres", MemoryType.DECISION)
+    svc.retain("SESSION CHECKPOINT agent\n\nNext: wire the store", MemoryType.EPISODE, checkpoint=True)
+    if post_compact_first:
+        lifecycle.capture_compact_summary("Summary: CLAUDE-SUMMARY-TEXT", session_id="s-1")
+    calls = _spy(monkeypatch, svc, "consolidate")
+
+    text = lifecycle.on_session_start("compact")
+
+    if not post_compact_first:
+        lifecycle.capture_compact_summary("Summary: CLAUDE-SUMMARY-TEXT", session_id="s-1")
+    assert text.splitlines()[0] == HEADING_POST_COMPACT
+    assert "Next: wire the store" in text and "CLAUDE-SUMMARY-TEXT" not in text
+    assert "- [decision] Use Postgres" in text and HEADING_CANDIDATES not in text
+    assert "it may predate this session's work." in text
+    assert calls == {"consolidate": 0}
+    assert text == lifecycle.on_session_start("compact")  # the summary captured since changes nothing
+
+
+def test_the_compact_block_shows_the_checkpoints_age(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-4: a checkpoint saved earlier is labelled with its age and UTC time (FR-004)."""
+    from datetime import UTC, datetime, timedelta
+
+    from memkernel import lifecycle as module
+
+    lifecycle, svc = _lifecycle()
+    ref = svc.retain("SESSION CHECKPOINT agent\n\nNext: x", MemoryType.EPISODE, checkpoint=True)
+    memory = svc.get(ref, touch=False)
+    assert memory is not None
+    saved = memory.timestamp.astimezone(UTC)
+
+    class ThreeHoursLater(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> Any:
+            return saved + timedelta(hours=3, minutes=5)
+
+    monkeypatch.setattr(module, "datetime", ThreeHoursLater)
+    text = lifecycle.on_session_start("compact")
+
+    assert f"Saved 3 hours ago ({saved.strftime('%Y-%m-%d %H:%M UTC')}); it may predate this session's work." in text
+
+
+@pytest.mark.parametrize(
+    ("minutes", "expected"),
+    [(0, "0 minutes"), (1, "1 minute"), (59, "59 minutes"), (60, "1 hour"), (47 * 60, "47 hours"), (48 * 60, "2 days")],
+)
+def test_age_units(minutes: int, expected: str) -> None:
+    from datetime import timedelta
+
+    from memkernel.lifecycle import _age
+
+    assert _age(timedelta(minutes=minutes)) == expected
+
+
+def test_compact_without_any_own_checkpoint_says_so() -> None:
+    lifecycle, _ = _lifecycle()
+    lifecycle.capture_compact_summary("Summary: only Claude's", session_id="s-1")
+
+    text = lifecycle.on_session_start("compact")
+
+    assert f"{HEADING_CHECKPOINT}\nNo checkpoint found." in text and "only Claude's" not in text
+
+
+@pytest.mark.parametrize("source", [None, "startup", "clear", "something-new"])
+def test_startup_clear_no_source_and_unknown_values_give_the_full_block(source: str | None) -> None:
+    """SC-5: today's block and headings; clear is intended to get it (FR-003)."""
+    lifecycle, _ = _lifecycle()
+    text = lifecycle.on_session_start(source)
+    assert text.splitlines()[0] == HEADING_SESSION_START
+    assert text.endswith("---\nPurged 0 expired short-term memories. Use recall() / get(ref_id) for details.")

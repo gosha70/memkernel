@@ -116,9 +116,11 @@ Copy the hook scripts from [`templates/hooks/`](templates/hooks/) to `.claude/ho
 
 | Hook | Claude Code event | What it does |
 |------|-------------------|--------------|
-| `session-start.py` | `SessionStart` | Consolidates, recovers the latest checkpoint and long-term context, lists promotion candidates |
-| `pre-compact.py` | `PreCompact` | Retains a checkpoint episode, runs a consolidation pass |
-| `post-compact.py` | `PostCompact` | Re-injects the checkpoint, long-term context and promotion candidates |
+| `session-start.py` | `SessionStart` | By `source`: on `startup` and `clear`, consolidates, recovers the latest checkpoint and long-term context, lists promotion candidates; on `compact`, the recovery after a compaction (the latest checkpoint the agent saved, with its age, and long-term context; no consolidation); on `resume` and `fork`, nothing |
+| `pre-compact.py` | `PreCompact` | Runs a consolidation pass (Claude Code passes no summary here, so no checkpoint is retained) |
+| `post-compact.py` | `PostCompact` | Retains Claude Code's compaction summary (`compact_summary`) as a checkpoint for the next session; prints nothing for the model |
+
+Register `SessionStart` without a matcher, so it runs for every `source`. Claude Code adds only `SessionStart`'s output to the model's context, not `PreCompact`'s or `PostCompact`'s, so the recovery after a compaction comes from `SessionStart` with `source: "compact"`. After upgrading memkernel, copy the three scripts again.
 
 See the Prerequisites section inside each script for the Python environment requirement. Each script is a thin wrapper over [`MemoryLifecycle`](#embedding-memkernel-in-your-own-harness), so an in-process harness gets the same behaviour without the scripts.
 
@@ -170,9 +172,9 @@ Retention: `ttl = base_ttl × (1 + access_boost × access_count)`, measured from
 
 ### Session protocol
 
-1. **Session start** — `recall(tier="long_term", query=<task>)`, plus the latest checkpoint (`checkpoint_only=true`). The `session-start.py` hook does this and prints promotion candidates.
+1. **Session start** — `recall(tier="long_term", query=<task>)`, plus the latest checkpoint (`checkpoint_only=true`). The `session-start.py` hook does this and prints promotion candidates; after a compaction it prints a shorter recovery block instead.
 2. **While working** — `retain(type="task")` when the plan changes; `retain(type="observation")` for findings; durable knowledge as `decision` / `convention` / `fact` / `procedure`.
-3. **Before compaction** — `retain(type="episode", checkpoint=true)` (the `pre-compact.py` hook) and `consolidate()`.
+3. **Before compaction** — `retain(type="episode", checkpoint=true)` with your own summary of where the work stands; the `pre-compact.py` hook runs `consolidate()`, and the `post-compact.py` hook keeps Claude Code's compaction summary as a checkpoint.
 4. **After compaction / end of phase** — `promote(ref_id, type, content)` for the candidates worth keeping.
 5. **Large artefacts** — `retain(type="document", content=<body>, source=<name>)` then `ask(ref_id, question)`; never `get` a document to read it.
 7. **Code snapshots** — `retain(type="code", content=<file>, source=<path>)`; retain the file again after editing it (the new snapshot supersedes the old one). The session-start hook revalidates snapshots against their files and lists the ones that need re-retaining.
