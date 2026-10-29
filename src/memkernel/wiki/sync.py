@@ -446,6 +446,7 @@ class WikiImporter:
             importance=0.9 if page.status == "stable" else 0.7,
             tags=tags,
             supersedes=supersedes,
+            dedup_source=True,  # FR-012: one memory per page, never merged with identical text from elsewhere
         )
         report.imported.append(rel)
         return ref_id
@@ -461,17 +462,25 @@ class WikiImporter:
         """The page's live memory: by page key, else by its wiki-relative path (never by slug).
 
         The path fallback also covers a page whose key changed (a curator added a ``page_id``) and an edit read
-        without wiki-studio after a governed import, so a page never ends up with two live memories.
+        without wiki-studio after a governed import, so a page never ends up with two live memories. A record
+        carrying several page keys (two pages merged by the unscoped dedup before FR-012's amendment) belongs to
+        the page whose path is its ``source``; for any other page it is never the previous memory, so that page
+        gets its own record and never supersedes the shared one.
         """
         if review is not None:
             key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
             for memory in live:
-                if key_tag in memory.tags:
+                if key_tag in memory.tags and (memory.source == rel or not _shared(memory)):
                     return memory
         for memory in live:
             if memory.source == rel:
                 return memory
         return None
+
+
+def _shared(memory: Memory) -> bool:
+    """Whether ``memory`` carries more than one page key: two pages merged into one record before FR-012's fix."""
+    return sum(tag.startswith(PAGE_KEY_TAG) for tag in memory.tags) > 1
 
 
 def _tag_safe(value: str) -> str:

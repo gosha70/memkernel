@@ -619,3 +619,14 @@ def test_supersede_refuses_a_record_of_another_project() -> None:
 
     with pytest.raises(ValueError, match="not a memory in this store"):
         svc.supersede(elsewhere, mine)
+
+
+def test_dedup_source_scopes_a_dedup_hit_to_the_same_source() -> None:
+    """FR-012: with dedup_source, identical text under another source is a new record; under the same, a dedup hit.
+    Without it, retain dedups by content and type as before."""
+    svc, _, _ = _make_service()
+    a = svc.retain("Use Postgres", MemoryType.DECISION, source="decisions/a.md", dedup_source=True)
+
+    assert svc.retain("Use Postgres", MemoryType.DECISION, source="decisions/b.md", dedup_source=True) != a
+    assert svc.retain("Use Postgres", MemoryType.DECISION, source="decisions/a.md", dedup_source=True) == a
+    assert svc.retain("Use Postgres", MemoryType.DECISION, source="elsewhere") == a

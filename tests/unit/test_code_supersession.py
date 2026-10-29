@@ -536,3 +536,18 @@ def test_supersede_marks_the_chunks_before_the_record_and_a_retry_repairs_a_part
     real(_chunks_of(store, old)[0].ref_id, {"superseded_by": ""})  # the earlier version's partial state
     assert svc.supersede(old, new) is False
     assert all(c.superseded_by == new for c in _chunks_of(store, old))
+
+
+def test_the_chunk_repair_marks_only_chunks_without_a_marker() -> None:
+    """An existing marker is never overwritten, on a chunk as on a record (FR-017)."""
+    svc, store, _ = _build()
+    old = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    new = svc.retain("Use V2 of a.py", MemoryType.DECISION)
+    other = svc.retain("Another replacement", MemoryType.DECISION)
+    first, *rest = _chunks_of(store, old)
+    store.update_metadata(first.ref_id, {"superseded_by": other})
+
+    assert svc.supersede(old, new) is True
+
+    marks = {c.ref_id: c.superseded_by for c in _chunks_of(store, old)}
+    assert marks[first.ref_id] == other and all(marks[c.ref_id] == new for c in rest)

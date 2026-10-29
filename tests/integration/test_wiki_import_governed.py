@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from memkernel.core.models import MemoryTier, MemoryType
+from memkernel.wiki.pages import parse_page
 from memkernel.wiki.sync import DEFAULT_PROPOSALS_SUBDIR, WikiExporter, WikiImporter
 from tests.unit.test_wiki import NO_EXTRA_ENV, _service
 
@@ -442,3 +443,150 @@ def test_an_invalid_corrects_value_imports_the_page_and_applies_nothing(
     (entry,) = report.invalid_corrects
     assert entry["page"] == rel and reason in entry["reason"]
     assert any(WRONG in m.content for m in w.svc.list_memories())  # nothing was superseded
+
+
+# ── FR-012 (amended 2026-10-29): one memory per page ──────────────────────────
+
+
+def _twin(w: Wiki, rel: str) -> str:
+    """Create and approve a second page with ``rel``'s title and body under another path and slug."""
+    text = api.read_page(rel, w.paths).text
+    old_slug = rel.rsplit("/", 1)[1].removesuffix(".md")
+    twin = rel.replace(old_slug, f"{old_slug}-twin")
+    edits = [
+        PageEdit(twin, "create", text.replace(f"slug: {old_slug}", f"slug: {old_slug}-twin", 1), "twin"),
+        PageEdit("index.md", "append-index", f"- [Twin]({twin}) — the same decision under another path.", "twin"),
+    ]
+    w._count += 1
+    api.promote(api.propose(edits, w.paths, name=f"twin-{w._count}"), w.paths, by="curator")
+    w.approve(twin)
+    return twin
+
+
+def _import_with_the_unscoped_dedup(w: Wiki, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The import as it ran before FR-012's amendment: retain deduplicated by content and type only."""
+    real = w.svc.retain
+
+    def unscoped(*args: Any, **kwargs: Any) -> str:
+        kwargs.pop("dedup_source", None)
+        return real(*args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(w.svc, "retain", unscoped)
+        return w.import_pages()
+
+
+def _live_of(w: Wiki, rel: str) -> list[Any]:
+    return [m for m in w.wiki_memories() if m.source == rel]
+
+
+def test_two_pages_with_identical_content_keep_one_memory_each(tmp_path: Path) -> None:
+    w = Wiki(tmp_path)
+    a, _ = w.publish(DECISION)
+    b = _twin(w, a)
+
+    first = w.import_pages()
+
+    assert sorted(first.imported) == sorted([a, b])
+    (memory_a,), (memory_b,) = _live_of(w, a), _live_of(w, b)
+    assert memory_a.ref_id != memory_b.ref_id and memory_a.content == memory_b.content
+    w.update(a, lambda text: text.replace("concurrent writes", "concurrent writes and row locks"))
+    w.approve(a)
+
+    second = w.import_pages()
+
+    assert second.imported == [a] and second.unchanged == [b]
+    assert [m.ref_id for m in _live_of(w, b)] == [memory_b.ref_id]  # editing A leaves B's memory live
+
+
+def test_a_page_never_merges_into_an_agents_memory_with_the_same_text(tmp_path: Path) -> None:
+    w = Wiki(tmp_path)
+    a, _ = w.publish(DECISION)
+    page = parse_page(api.read_page(a, w.paths).text)
+    assert page is not None
+    agent = w.svc.retain(f"{page.title}\n\n{page.body}".strip(), MemoryType.DECISION, source="agent-session")
+
+    assert w.import_pages().imported == [a]
+
+    (page_memory,) = _live_of(w, a)
+    assert page_memory.ref_id != agent
+    agents = w.svc.get(agent, touch=False)
+    assert agents is not None and "wiki" not in agents.tags  # the agent's record took no page tags
+
+
+def _shared_record(w: Wiki, monkeypatch: pytest.MonkeyPatch, a: str, b: str) -> tuple[Any, str, str]:
+    """Import A and B through the unscoped dedup: one record carries both page keys. Return it, its source page
+    and the other page."""
+    assert sorted(_import_with_the_unscoped_dedup(w, monkeypatch).imported) == sorted([a, b])
+    (shared,) = w.wiki_memories()
+    assert sum(tag.startswith("page_key:") for tag in shared.tags) == 2
+    owner = shared.source
+    return shared, owner, b if owner == a else a
+
+
+def _edit(w: Wiki, rel: str) -> None:
+    w.update(rel, lambda text: text.replace("concurrent writes", "concurrent writes and row locks"))
+    w.approve(rel)
+
+
+def test_a_shared_record_is_not_superseded_when_the_other_page_is_edited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = Wiki(tmp_path)
+    a, _ = w.publish(DECISION)
+    shared, owner, other = _shared_record(w, monkeypatch, a, _twin(w, a))
+    _edit(w, other)
+
+    report = w.import_pages()
+
+    assert report.imported == [other] and report.unchanged == [owner]
+    assert [m.ref_id for m in _live_of(w, owner)] == [shared.ref_id]  # still the source page's live memory
+    (own,) = _live_of(w, other)
+    assert own.ref_id != shared.ref_id and "row locks" in own.content and own.supersedes is None
+    assert sorted(w.import_pages().unchanged) == sorted([owner, other])  # stable from here on
+
+
+def test_a_shared_record_is_superseded_only_by_its_source_pages_new_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = Wiki(tmp_path)
+    a, _ = w.publish(DECISION)
+    shared, owner, other = _shared_record(w, monkeypatch, a, _twin(w, a))
+    _edit(w, owner)
+
+    report = w.import_pages()
+
+    assert sorted(report.imported) == sorted([owner, other])
+    (owners,), (others,) = _live_of(w, owner), _live_of(w, other)
+    assert "row locks" in owners.content and owners.supersedes == shared.ref_id
+    assert others.ref_id not in (shared.ref_id, owners.ref_id) and others.supersedes is None
+    stored = w.svc.get(shared.ref_id, touch=False)
+    assert stored is not None and stored.superseded_by == owners.ref_id
+
+
+def test_a_correction_made_while_two_pages_shared_a_record_stays_in_effect_after_the_source_page_is_edited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Page B corrects a memory while B shares source page A's record; then A is edited. The corrected memory stays
+    superseded (by the shared record, which carries B's key), nothing is unresolved, and the marker is never moved:
+    supersede never overwrites one (FR-017)."""
+    w = Wiki(tmp_path)
+    page_b, _ = w.publish(DECISION)
+    wrong = w.svc.retain(WRONG, MemoryType.CONVENTION)  # an agent's memory, never exported here
+    page_a = _twin(w, page_b)  # sorts first, so the old import makes it the shared record's source
+    w.update(page_b, lambda text: text.replace("status: stable", f"status: stable\ncorrects: {wrong}", 1))
+    w.approve(page_b)
+    shared, owner, other = _shared_record(w, monkeypatch, page_b, page_a)
+    assert (owner, other) == (page_a, page_b)
+    corrected = w.svc.get(wrong, touch=False)
+    assert corrected is not None and corrected.superseded_by == shared.ref_id
+    _edit(w, page_a)
+
+    report = w.import_pages()
+
+    assert sorted(report.imported) == sorted([page_a, page_b]) and report.unresolved == []
+    (own_b,) = _live_of(w, page_b)
+    assert own_b.ref_id != shared.ref_id and own_b.supersedes is None
+    corrected = w.svc.get(wrong, touch=False)
+    assert corrected is not None and corrected.superseded_by == shared.ref_id  # not moved to B's own record
+    assert wrong not in {m.ref_id for m in w.svc.list_memories()}  # still not a current answer

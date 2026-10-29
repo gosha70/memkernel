@@ -89,7 +89,7 @@ retrieval ranks by a combination of axes rather than cosine alone.
 | Mechanism | Source | Implementation |
 |---|---|---|
 | Tiered types with per-tier persistence | CoALA; Roynard 2026 | `core/models.py` (`MemoryTier`, `TYPE_TIER`, `DEFAULT_IMPORTANCE`) |
-| Supersession instead of deletion for facts | Zep/Graphiti bi-temporal edges | `retain(supersedes=...)`; `_filter_live` hides superseded records; wiki import supersedes changed pages; an approved wiki page's `corrects` supersedes the raw memories it names through `MemoryService.supersede` (sets only `superseded_by`, idempotent, refuses instead of overwriting another supersession) |
+| Supersession instead of deletion for facts | Zep/Graphiti bi-temporal edges | `retain(supersedes=...)`; `_filter_live` hides superseded records; wiki import supersedes changed pages; an approved wiki page's `corrects` supersedes the raw memories it names through `MemoryService.supersede` (sets only `superseded_by`, owned chunks first and the record last, idempotent and completing a partial mark, refuses instead of overwriting another supersession) |
 | Ebbinghaus retention strengthened by recall | MemoryBank (Zhong et al. 2023) | `memory/lifecycle.py::effective_ttl_days` (`base × (1 + access_boost × access_count)`), `_touch` on `recall`/`get` |
 | Recency decays from last *access*, not creation | Generative Agents (Park et al. 2023) | `recency_score` uses `last_accessed`; per-tier half-life |
 | relevance + recency + importance scoring | Generative Agents | `retrieval/search.py::rescore`; weights in settings |
@@ -153,7 +153,7 @@ extra, never a requirement.
 
 | Tool | Tier | Purpose |
 |---|---|---|
-| `retain(content, type, …, importance, tags, supersedes)` | any | store; idempotent on content+type (`code`: on source+content, supersedes by path) |
+| `retain(content, type, …, importance, tags, supersedes, *, dedup_source)` | any | store; idempotent on content+type (`code`: on source+content, supersedes by path; `dedup_source=True`: on source+content+type, so the wiki import keeps one memory per page) |
 | `recall(query, type, tier, session_id, checkpoint_only, top_k, include_needs_review)` | any | ranked references; records access |
 | `get(ref_id)` | any | full content; records access |
 | `forget(ref_id)` | any | delete |

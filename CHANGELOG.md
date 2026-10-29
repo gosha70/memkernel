@@ -78,6 +78,17 @@ All notable changes to this project are documented here. The format follows
 - `wiki_import` matched a page's previous memory by slug, so two pages with the
   same slug in different directories superseded each other's memory; it now
   matches by the page's path.
+- `wiki_import` merged two pages with identical title and body into one memory
+  (and a page into an agent's memory with the same text), so editing one page
+  left the other without a live memory. Each page now keeps its own memory:
+  the import deduplicates only within the page's path, through `retain`'s new
+  keyword-only `dedup_source`. A memory two pages already share stays with the
+  page whose path is its `source`; the other page gets its own on its next
+  import.
+- `MemoryService.supersede` and `retain(supersedes=...)` marked a record before
+  its owned chunks, so a failure part-way left chunks unmarked that no retry
+  repaired. Chunks are now marked first and the record last, and a repeated
+  call marks any chunk still without a marker.
 
 ## [0.5.0] - 2026-10-28
 
