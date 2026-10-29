@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import chromadb
@@ -23,13 +26,49 @@ from memkernel.core.models import (
     tier_of,
 )
 
+try:
+    import fcntl
+except ImportError:  # not POSIX (e.g. Windows): a store opens unlocked, as before (store-open-race FR-003)
+    fcntl = None  # type: ignore[assignment]
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from chromadb.api import ClientAPI
     from chromadb.api.models.Collection import Collection
 
     from memkernel.config import MemKernelSettings
+
+
+logger = logging.getLogger(__name__)
+
+# Held while a persisted store is opened, so two processes never create a new store's tables at once (#69).
+OPEN_LOCK_FILE = ".memkernel-open.lock"
+_unlocked_logged = False
+
+
+@contextmanager
+def _store_open_lock(persist_path: str) -> Iterator[None]:
+    """Hold an exclusive advisory lock on ``persist_path``'s open-lock file; released on every path.
+
+    ``flock`` is released when the file is closed and by the operating system when a process dies, so it cannot
+    be left stale. Without ``fcntl`` the store opens unlocked and that is logged once at debug level.
+    """
+    global _unlocked_logged
+    if fcntl is None:
+        if not _unlocked_logged:
+            logger.debug("fcntl is not available: ChromaDB stores open without the open lock")
+            _unlocked_logged = True
+        yield
+        return
+    directory = Path(persist_path)
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / OPEN_LOCK_FILE).open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 _REQUIRED_METADATA_KEYS: frozenset[str] = frozenset(
@@ -119,20 +158,21 @@ class ChromaVectorStore:
         settings: MemKernelSettings,
         client: ClientAPI | None = None,
     ) -> None:
-        if client is not None:
-            self._client: ClientAPI = client
-        else:
-            persist_path = settings.chroma_persist_path.strip()
-            if persist_path:
-                self._client = chromadb.PersistentClient(path=persist_path)
-            else:
-                self._client = chromadb.EphemeralClient()
-
         collection_name = f"{settings.chroma_collection_prefix}_{settings.project_id}"
-        self._collection: Collection = self._client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        persist_path = settings.chroma_persist_path.strip()
+        self._client: ClientAPI
+        self._collection: Collection
+        if client is None and persist_path:
+            # Every memkernel process opens a persisted store here (#69): the lock serialises a new store's creation.
+            with _store_open_lock(persist_path):
+                self._client = chromadb.PersistentClient(path=persist_path)
+                self._collection = self._open_collection(collection_name)
+        else:
+            self._client = client if client is not None else chromadb.EphemeralClient()
+            self._collection = self._open_collection(collection_name)
+
+    def _open_collection(self, name: str) -> Collection:
+        return self._client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
     # ------------------------------------------------------------------
     # VectorStorePort methods

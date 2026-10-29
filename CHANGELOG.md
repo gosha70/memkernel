@@ -75,6 +75,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Two memkernel processes opening a new store at the same moment (in a
+  project's first session, the MCP server and the `SessionStart` hook) no
+  longer fail with `table collections already exists` (#69). Opening a
+  persisted store now takes an exclusive lock on `.memkernel-open.lock` in the
+  persist directory (`fcntl`; without it, the store opens unlocked as before).
+  It protects every process that opens the store through `build_service`: the
+  MCP server, the three hooks, the admin API and library callers.
 - `wiki_import` matched a page's previous memory by slug, so two pages with the
   same slug in different directories superseded each other's memory; it now
   matches by the page's path.
