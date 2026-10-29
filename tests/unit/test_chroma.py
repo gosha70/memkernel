@@ -387,3 +387,117 @@ def test_list_all_without_content_and_defaults_for_missing_keys(store: ChromaVec
         True,
         "changed",
     )
+
+
+# ── memkernel-0-6-store-open-race: the open lock (#69) ────────────────────────
+
+_HOLD_THEN_RELEASE = """
+import fcntl, sys, time
+from pathlib import Path
+lock, marker = Path(sys.argv[1]), Path(sys.argv[2])
+lock.parent.mkdir(parents=True, exist_ok=True)
+with lock.open("a") as handle:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    print("locked", flush=True)
+    time.sleep(0.5)
+    marker.write_text("created")  # the tables exist now: written before the lock is released
+    fcntl.flock(handle, fcntl.LOCK_UN)
+"""
+
+_TRY_LOCK = """
+import fcntl, sys
+with open(sys.argv[1], "a") as handle:
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("held")
+    else:
+        print("free")
+"""
+
+
+def _fcntl_only() -> None:
+    from memkernel.storage import chroma
+
+    if chroma.fcntl is None:
+        pytest.skip("the open lock needs fcntl (FR-003)")
+
+
+def test_a_store_open_waits_for_another_process_creating_the_tables(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SC-1: another process holds the open lock while it creates the tables. A real open during that window
+    fails with "table collections already exists"; the fake below raises exactly that until the marker exists.
+    With the lock the open waits and succeeds; without it the fake is called at once and fails."""
+    import subprocess
+    import sys
+
+    from chromadb.errors import InternalError
+
+    from memkernel.storage.chroma import OPEN_LOCK_FILE
+
+    _fcntl_only()
+    store_dir = tmp_path / "chroma"
+    marker = tmp_path / "created"
+
+    def racing_client(path: str) -> Any:
+        if not marker.exists():
+            raise InternalError("error returned from database: (code: 1) table collections already exists")
+        return chromadb.EphemeralClient()
+
+    monkeypatch.setattr(chromadb, "PersistentClient", racing_client)
+    holder = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", "-c", _HOLD_THEN_RELEASE, str(store_dir / OPEN_LOCK_FILE), str(marker)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "locked"
+        store = ChromaVectorStore(_make_settings(chroma_persist_path=str(store_dir)))
+    finally:
+        holder.wait(timeout=10)
+
+    assert marker.exists() and store.count() == 0
+
+
+def test_an_open_that_fails_releases_the_lock_and_raises_unchanged(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SC-2: any other error propagates as it is, the lock is released, and the next open succeeds."""
+    import subprocess
+    import sys
+
+    from memkernel.storage.chroma import OPEN_LOCK_FILE
+
+    _fcntl_only()
+    store_dir = tmp_path / "chroma"
+    settings = _make_settings(chroma_persist_path=str(store_dir))
+    real = chromadb.PersistentClient
+
+    def broken(path: str) -> Any:
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(chromadb, "PersistentClient", broken)
+    with pytest.raises(PermissionError, match="Permission denied"):
+        ChromaVectorStore(settings)
+    probe = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-c", _TRY_LOCK, str(store_dir / OPEN_LOCK_FILE)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert probe.stdout.strip() == "free"
+    monkeypatch.setattr(chromadb, "PersistentClient", real)
+
+    assert ChromaVectorStore(settings).count() == 0
+    assert (store_dir / OPEN_LOCK_FILE).is_file()
+
+
+def test_without_fcntl_a_store_opens_unlocked(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-003: where fcntl is missing the store opens as before, with no lock file."""
+    from memkernel.storage import chroma
+
+    monkeypatch.setattr(chroma, "fcntl", None)
+    store = ChromaVectorStore(_make_settings(chroma_persist_path=str(tmp_path / "chroma")))
+
+    assert store.count() == 0 and not (tmp_path / "chroma" / chroma.OPEN_LOCK_FILE).exists()
