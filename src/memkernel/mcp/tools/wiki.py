@@ -47,8 +47,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         response adds "proposal", "submission_digest" and "archived_dir" from wiki-studio's receipt.
         If "archived_dir" is null the pages landed but wiki-studio did not finish (no archive, or a
         failure after its commit, checked against its receipt), and "archive_hint" gives the command
-        that tries to finish it (wiki-studio refuses it, writing nothing, if the wiki changed since);
-        "receipt_error" says the receipt could not be read. A rejected export, or an installed
+        that tries to finish it (wiki-studio may refuse it, writing nothing, if the wiki or the proposal
+        changed since);
+        "receipt_error" says the receipt could not be read or used. A rejected export, or an installed
         wiki-studio that is broken or older than 0.6.0, writes no page and reports "gate_error" (a new
         wiki keeps the index.md and log.md init created). If wiki-studio failed during its commit and
         its receipt shows neither a commit nor a rollback, "gate_error" comes with "uncertain_outcome"
