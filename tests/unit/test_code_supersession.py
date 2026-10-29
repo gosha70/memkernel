@@ -502,3 +502,37 @@ def test_dedup_refresh_propagates_importance_and_tags_to_owned_chunks() -> None:
     # recall hits on the chunks rank with the new importance
     hits = [r for r in svc.recall("OLDMARKER-7731", top_k=5) if r.ref_id.startswith(f"{ref}-chunk-")]
     assert hits and all(r.importance == 1.0 for r in hits)
+
+
+def test_supersede_marks_the_chunks_before_the_record_and_a_retry_repairs_a_partial_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FR-017: the record and its owned chunks carry the marker. The record is marked last, so a failure part-way
+    leaves it unmarked and a retry marks everything; a record already marked with unmarked chunks (a failure in
+    an earlier version, which marked the record first) is repaired by the idempotent call."""
+    svc, store, _ = _build()
+    old = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    new = svc.retain("Use V2 of a.py", MemoryType.DECISION)
+    assert len(_chunks_of(store, old)) >= 2
+    real = store.update_metadata
+    calls = [0]
+
+    def fail_the_second_update(ref_id: str, update: dict[str, Any]) -> None:
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError("disk full")
+        real(ref_id, update)
+
+    monkeypatch.setattr(store, "update_metadata", fail_the_second_update)
+    with pytest.raises(OSError):
+        svc.supersede(old, new)
+    monkeypatch.undo()
+
+    record = store.get_by_id(old)
+    assert record is not None and record.superseded_by is None  # the record is the commit point
+    assert svc.supersede(old, new) is True
+    assert all(c.superseded_by == new for c in _chunks_of(store, old))
+
+    real(_chunks_of(store, old)[0].ref_id, {"superseded_by": ""})  # the earlier version's partial state
+    assert svc.supersede(old, new) is False
+    assert all(c.superseded_by == new for c in _chunks_of(store, old))

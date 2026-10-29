@@ -456,7 +456,9 @@ class MemoryService:
         Sets only the durable ``superseded_by`` marker (on ``ref_id`` and its owned
         chunks), as ``retain(supersedes=...)`` does; the record's content and every
         other field stay as they are, so its provenance remains. Returns True when it
-        set the marker, False when ``ref_id`` was already superseded by ``by_ref``.
+        set the marker, False when ``ref_id`` was already superseded by ``by_ref``; that
+        call still marks any owned chunk left without the marker, so a retry completes
+        a partial mark.
         Raises ``ValueError`` and changes nothing when either record is not in this
         store (unknown, or another project's), when they are the same record, or when
         ``ref_id`` is already superseded by a different record: an existing marker is
@@ -470,6 +472,7 @@ class MemoryService:
         if self._vector_store.get_by_id(by_ref) is None:
             raise ValueError(f"{by_ref} is not a memory in this store")
         if target.superseded_by == by_ref:
+            self._mark_superseded(ref_id, by_ref)  # idempotent: repairs chunks a failed earlier mark left
             return False
         if target.superseded_by:
             raise ValueError(f"{ref_id} is already superseded by {target.superseded_by}")
@@ -477,12 +480,17 @@ class MemoryService:
         return True
 
     def _mark_superseded(self, target_ref: str, by_ref: str) -> None:
-        """Set the durable ``superseded_by`` marker on ``target_ref`` and its owned chunks."""
+        """Set the durable ``superseded_by`` marker on ``target_ref``'s owned chunks, then on ``target_ref``.
+
+        The record is marked last: it is what ``supersede`` checks, so a failure part-way leaves it unmarked and
+        a retry marks everything. Chunks that already carry the marker are not rewritten.
+        """
         if target_ref == by_ref or self._vector_store.get_by_id(target_ref) is None:
             return
-        self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
         for chunk in self._owned_chunks(target_ref):
-            self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
+            if chunk.superseded_by != by_ref:
+                self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
+        self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
 
     def _delete_owned_chunks(self, canonical: Memory) -> None:
         """Delete a canonical's owned chunk records; legacy shared chunk_refs only when nothing else references them."""

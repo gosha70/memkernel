@@ -397,7 +397,10 @@ class WikiImporter:
             elif WIKI_TAG in target.tags:
                 reason = "a memory imported from the wiki: correct the page instead"
             elif target.superseded_by and self._is_this_pages(target.superseded_by, rel, review):
-                continue  # corrected by an earlier revision of this page: still in effect
+                # Corrected by this page (this or an earlier revision): still in effect. The idempotent call
+                # completes a mark an earlier import left partial (owned chunks without the marker).
+                self._service.supersede(token, target.superseded_by)
+                continue
             else:
                 try:
                     if self._service.supersede(token, ref_id):

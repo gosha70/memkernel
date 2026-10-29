@@ -333,6 +333,64 @@ def test_an_unchanged_page_retries_a_correction_that_could_not_be_applied(
     assert not any(m.content == WRONG for m in w.svc.list_memories())
 
 
+def test_a_correction_already_in_effect_is_passed_to_the_idempotent_supersede_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-017: a re-import calls supersede for a correction already in effect, so a partial mark (owned chunks
+    without the marker) left by an interrupted import is completed; the call reports nothing new."""
+    w = Wiki(tmp_path)
+    w.svc.retain(WRONG, MemoryType.CONVENTION)
+    (rel,) = w.export()
+    (wrong,) = [m.ref_id for m in w.svc.list_memories() if m.content == WRONG]
+    w.update(rel, lambda text: _correct(text, wrong).replace(WRONG, RIGHT))
+    w.approve(rel)
+    w.import_pages()
+    (page_memory,) = w.wiki_memories()
+    real = w.svc.supersede
+    calls: list[tuple[str, str]] = []
+
+    def spy(ref_id: str, by_ref: str) -> bool:
+        calls.append((ref_id, by_ref))
+        return real(ref_id, by_ref)
+
+    monkeypatch.setattr(w.svc, "supersede", spy)
+    again = w.import_pages()
+
+    assert calls == [(wrong, page_memory.ref_id)]
+    assert again.unchanged == [rel] and again.corrections == [] and again.unresolved == []
+
+
+def test_a_page_on_its_second_revision_re_calls_supersede_with_the_earlier_revisions_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The corrected memory is superseded by the page's first revision; the re-call must keep that marker (never the
+    new revision's ref_id, which supersede refuses as "already superseded by another"), so nothing is unresolved."""
+    w = Wiki(tmp_path)
+    w.svc.retain(WRONG, MemoryType.CONVENTION)
+    (rel,) = w.export()
+    (wrong,) = [m.ref_id for m in w.svc.list_memories() if m.content == WRONG]
+    w.update(rel, lambda text: _correct(text, wrong).replace(WRONG, RIGHT))
+    w.approve(rel)
+    w.import_pages()
+    (first_revision,) = w.wiki_memories()
+    w.update(rel, lambda text: text.replace(RIGHT, RIGHT + " Freeze on release weeks."))
+    w.approve(rel)
+    real = w.svc.supersede
+    calls: list[tuple[str, str]] = []
+
+    def spy(ref_id: str, by_ref: str) -> bool:
+        calls.append((ref_id, by_ref))
+        return real(ref_id, by_ref)
+
+    monkeypatch.setattr(w.svc, "supersede", spy)
+    second = w.import_pages()
+    third = w.import_pages()
+
+    assert second.imported == [rel] and third.unchanged == [rel]
+    assert calls == [(wrong, first_revision.ref_id), (wrong, first_revision.ref_id)]
+    assert second.unresolved == [] and third.unresolved == [] and second.corrections == third.corrections == []
+
+
 def test_unknown_and_other_project_references_are_reported_not_dropped(tmp_path: Path) -> None:
     other_project = _service()
     foreign = other_project.retain("a memory of another project", MemoryType.FACT)
