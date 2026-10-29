@@ -30,20 +30,29 @@ are at `main` `3bd2675`.
     today's headings;
   - `compact`: the recovery block of FR-004;
   - `resume` and `fork`: an empty string, with no consolidation or recall.
+  `clear` giving the full block is intended: `/clear` empties the conversation, so the next turn starts with no
+  context, like a new session.
   `session-start.py` reads `source` from its stdin JSON (an empty or unparsable stdin means no `source`) and
   prints the result only when it is not empty.
 - **FR-004 (the `compact` recovery block, D2):** headed `## Recovered from MemKernel (post-compaction)`. It holds
   the latest checkpoint that is **not** tagged `compact-summary` (Claude Code's summary is already in the context
   the block is added to) or "No checkpoint found.", the long-term context (`POST_COMPACT_CONTEXT_TOP_K` items, as
-  `on_post_compact` recalls today), and the footer pointing to `recall()` / `get(ref_id)`. It runs no
+  `on_post_compact` recalls today), and the footer pointing to `recall()` / `get(ref_id)`. **A stale checkpoint is
+  shown with its age, not hidden** (amended 2026-10-29): the newest such checkpoint may predate this session, for
+  example one saved in an earlier session when no checkpoint was saved since. The block therefore precedes it with
+  one line, `Saved <age> ago (<UTC timestamp>); it may predate this session's work.`, where `<age>` is the time
+  since the checkpoint's timestamp in minutes, hours or days. It is not bound to the current session: the hooks
+  have no reliable record of when a session began, and an older checkpoint labelled with its age is still useful. It runs no
   consolidation, revalidation, purge or candidate listing. Because compact-summary checkpoints are left out, the
   block is the same whether PostCompact runs before or after SessionStart(`compact`); the reference does not say
   which comes first.
 - **FR-005 (library compatibility):** `on_post_compact()` and `on_session_end(summary)` keep their behaviour and
   output, for in-process harnesses that re-inject after their own compaction. Every method keeps returning
   markdown and doing no I/O beyond the service.
-- **FR-006 (hook scripts):** each script reads its stdin JSON once and passes the confirmed fields through. A
-  missing field or an unparsable stdin is treated as absent, never as an error. An error from memkernel itself is
+- **FR-006 (hook scripts):** each script reads its stdin JSON once and passes the confirmed fields through. When
+  stdin is a terminal (`sys.stdin.isatty()`, a script run by hand), it does not read stdin and treats every field
+  as absent, so it never waits for input. A missing field or an unparsable stdin is treated as absent, never as an
+  error. An error from memkernel itself is
   not swallowed. Scripts still exit 0 on success.
 - **FR-007 (stdout contract):** this amends memkernel-0-3 FR-012 ("their stdout format MUST stay backward
   compatible (same section headings)"). The headings stay the same, but `session-start.py` prints nothing for
@@ -90,9 +99,10 @@ are at `main` `3bd2675`.
 - **SC-4 (D2, D4):**
   - `compact` prints the recovery block with the agent's checkpoint and never the compact-summary text.
   - The block is the same when PostCompact runs before SessionStart(`compact`) and when it runs after.
+  - A checkpoint saved before the current time shows the age line with the right age and timestamp.
   - It calls no `consolidate`.
 - **SC-5:** `startup`, `clear`, no `source` and an unknown value print today's block, with its headings. An
-  empty or invalid stdin behaves like no `source`.
+  empty or invalid stdin, or a terminal on stdin (not read), behaves like no `source`.
 - **SC-6 (FR-005):** `on_post_compact()` and `on_session_end()` outputs are unchanged; the existing tests stay,
   except the placeholder test, which now asserts that nothing is retained.
 - **SC-7:** the hook scripts are tested by running their `main()` with the payload on stdin and a test service
