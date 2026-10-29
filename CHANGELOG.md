@@ -6,8 +6,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-<!-- memkernel 0.6, the Release B wiki bridge parts 1 and 2a (memkernel #48); the 0.5 entries below move to [0.5.0] at the tag. -->
-
 ### Changed
 
 - **`wiki_import` is governed when the extra is installed** (wiki-studio 0.7.0
@@ -52,18 +50,27 @@ All notable changes to this project are documented here. The format follows
   be imported), `not_approved`, `corrections`, `unresolved`, `invalid_corrects`
   and `import_error`. The same
   fields are on `ImportReport`; `WikiImporter` takes an optional `project_root`.
-
 - `wiki_export` response keys for a gated export, from wiki-studio's receipt:
   `proposal` (the proposal name), `submission_digest`, and `archived_dir`
   (where wiki-studio archived the proposal; `null` when it committed the pages
   but could not archive it, or failed after committing them: memkernel checks
-  each page against the receipt's post-write sha256, or its bytes when the
-  receipt is unreadable, and reports such an export as written, not as a
-  `gate_error`). `archive_hint` appears only when `archived_dir` is
-  `null`, with the `promote` command that finishes the archive and applies
-  nothing twice (run through the interpreter memkernel uses). `receipt_error`
-  appears when the receipt could not be read; the export still succeeds. The
-  same fields are on `ExportReport`.
+  the receipt's planned writes against their post-write sha256, every write,
+  index and log included, while the receipt still says `committing`; it
+  compares the pages' bytes only when the receipt or its planned writes are
+  unusable, and reports such an export as written, not as a `gate_error`).
+  `archive_hint` appears only when `archived_dir` is `null`, with the
+  `promote` command that tries to finish (run through the interpreter
+  memkernel uses): it applies nothing twice, but if the wiki or the proposal
+  changed since, it may refuse (`uncertain_outcome` or `payload_changed`)
+  and write nothing, and the wiki must be compared with the receipt by hand.
+  `receipt_error` appears when the receipt could not be read or used; the
+  export still succeeds.
+  `uncertain_outcome` (with `gate_error` and `proposal`) appears when
+  wiki-studio failed during its commit and its receipt shows neither a commit
+  nor a rollback, for example the page written but the `index.md` write failed
+  and the page's rollback failed: the pages may be on disk, `written` is empty,
+  and the message names the pages and the `receipt.json` to compare the wiki
+  with by hand. The same fields are on `ExportReport`.
 - README: ignore wiki-studio's lock file next to the wiki directory.
 
 ### Fixed
@@ -72,8 +79,16 @@ All notable changes to this project are documented here. The format follows
   same slug in different directories superseded each other's memory; it now
   matches by the page's path.
 
+## [0.5.0] - 2026-10-28
+
 ### Added
 
+- The 0.5 lifecycle evaluation (#17): `eval/lifecycle-suite/report-0.5.0.md`, a
+  maintainer-run supplemental evaluation, preregistered before the run, with
+  its committed receipts, report parameters and disclosures under
+  `eval/lifecycle-suite/results/measured-20261027T002737Z/`. No gain is
+  claimed: against `claude_md` "no detectable difference" (memkernel ahead on
+  6 tasks, behind on none, tied on 14), against `fs_grep` "equivalent".
 - `memkernel[wiki]` extra (ADR-010): wiki-studio as an optional dependency,
   imported lazily and silent when absent. With it installed, `wiki_export`
   returns wiki-studio's lint and health findings for the wiki under `lint`

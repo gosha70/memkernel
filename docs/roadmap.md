@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-11. Ordered by dependency, not by date.
+Updated 2026-10-28. Ordered by dependency, not by date.
 
 ## 0.2 — tiered memory (this branch)
 
@@ -83,23 +83,27 @@ is blocked on it.
 - [x] wiki-studio 0.1.0: CCT's `knowledge/wiki/schema`, linter and
       `scripts/wiki_ingest` extracted into a stdlib-only package; memkernel
       CI lints `WikiExporter` output with it (0.4.1)
-- [ ] `memkernel[wiki]` extra (ADR-010, specs/memkernel-0-5): lint and
+- [x] `memkernel[wiki]` extra (ADR-010, specs/memkernel-0-5): lint and
       health via wiki-studio on `wiki_export`; the promote gate and a schema
       drift test on wiki-studio 0.3.1 (gosha70/wiki-studio#7, #17); no `wiki query`
-      tool (its backends shell out to a copilot CLI)
+      tool (its backends shell out to a copilot CLI) (0.5.0)
 - [ ] New `ragkit` rebuilt from `document-assistant/src/rag/` (langchain-free);
       memkernel contributes `ASTChunker` and n-list `rrf_fuse`, then depends
       on it
 - [ ] CCT: hooks on the factory, skill text for tiers, feature id tags,
       `MEMKERNEL_WIKI_DIR=knowledge/wiki`
 - [ ] haa: `harness/tools/memory.py`, lifecycle hooks, project id derivation
-- [ ] Agent-level evidence (#17): enter `agent-memory-bench` (public,
-      preregistered, execution-graded, no LLM judge, own control arms incl.
-      files-only) through a reviewable memkernel adapter; add a supplemental
-      suite in its task format for what it does not measure (retain across
-      sessions, compaction recovery, revalidation after a repository change,
-      wiki sharing); one preregistered run on a Claude model published per
-      minor release, nulls and discarded cells included
+- [x] Agent-level evidence (#17), supplemental: the lifecycle suite
+      (`eval/lifecycle-suite/`: retain across sessions, compaction recovery,
+      revalidation after a repository change, wiki sharing) and one
+      preregistered run on a Claude model, published with nulls and
+      deviations in the 0.5.0 report
+      (`eval/lifecycle-suite/report-0.5.0.md`; no gain claimed)
+- [ ] Agent-level evidence (#17), public benchmark: enter `agent-memory-bench`
+      (public, preregistered, execution-graded, no LLM judge, own control arms
+      incl. files-only) through a reviewable memkernel adapter; one
+      preregistered run per minor release; the integration questions are in
+      GiulioDER/agent-memory-bench#121
 
 ## Later / research
 

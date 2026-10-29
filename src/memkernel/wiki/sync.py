@@ -31,6 +31,7 @@ from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
 from memkernel.wiki.studio import (
     GatedPage,
     GateError,
+    GateUncertainError,
     LintError,
     LintSummary,
     PageReview,
@@ -107,13 +108,14 @@ class ExportReport:
     lint: LintSummary | None = None
     lint_error: str | None = None
     gated: bool = False  # the pages went through wiki-studio's promote gate
-    gate_error: str | None = None  # the gate rejected the export; no page was written
+    gate_error: str | None = None  # the gate rejected the export; no page was written, unless uncertain_outcome is set
     # From wiki-studio's receipt for a gated export (FR-005); None for the direct writer.
     proposal: str | None = None
     submission_digest: str | None = None
     archived_dir: str | None = None  # None on a promoted export means committed but not archived: archive_hint
     archive_hint: str | None = None
     receipt_error: str | None = None
+    uncertain_outcome: str | None = None  # FR-009: pages may be on disk; compare the wiki with the receipt by hand
 
 
 @dataclass
@@ -244,6 +246,13 @@ class WikiExporter:
         name = f"memkernel-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
         try:
             result = propose_and_promote(api, pages, self._wiki_dir, self._project_root, self._proposals_dir, name)
+        except GateUncertainError as exc:  # neither committed nor rolled back: never reported as written
+            report.gate_error = str(exc)
+            report.skipped += len(pages)
+            report.proposal = exc.proposal
+            report.uncertain_outcome = exc.uncertain_outcome
+            report.receipt_error = exc.receipt_error
+            return
         except GateError as exc:  # wiki-studio rolled back its own writes; nothing here to restore
             report.gate_error = str(exc)
             report.skipped += len(pages)

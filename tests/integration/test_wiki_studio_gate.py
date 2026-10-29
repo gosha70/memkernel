@@ -9,6 +9,7 @@ memkernel export between its propose and its promote.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import subprocess
@@ -19,6 +20,17 @@ import pytest
 
 from memkernel.core.models import MemoryType
 from memkernel.wiki.pages import render_page
+from memkernel.wiki.studio import (
+    _NOT_COMMITTED,
+    _UNCERTAIN,
+    RECEIPT_COMMITTED,
+    RECEIPT_COMMITTING,
+    RECEIPT_FILE,
+    GatedPage,
+    _classify,
+    _live_sha256,
+    _planned_writes,
+)
 from memkernel.wiki.sync import DEFAULT_PROPOSALS_SUBDIR, WikiExporter
 from tests.unit.test_wiki import NO_EXTRA_ENV, _service
 
@@ -194,6 +206,7 @@ def test_a_forced_failure_changes_no_file_another_writer_committed(
 
     assert report.gate_error is not None and "No space left on device" in report.gate_error
     assert report.written == [] and report.gated is False and report.proposal is None
+    assert report.uncertain_outcome is None  # rolled back: a gate_error, not an uncertain outcome
     assert _files(wiki) == before  # the other writer's page, index.md and log.md byte for byte; no new page
 
 
@@ -304,7 +317,7 @@ def test_an_unarchived_export_reports_the_command_that_finishes_it(tmp_path: Pat
     assert report.archive_hint is not None and str(proposal_dir) in report.archive_hint
 
     pages = _files(tmp_path / "wiki")
-    command = shlex.split(report.archive_hint.split("to finish, run: ", 1)[1].split(" (it finishes", 1)[0])
+    command = shlex.split(report.archive_hint.split("to finish, run: ", 1)[1].split(" (a recovery attempt", 1)[0])
     finished = subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
 
     assert finished.returncode == 0, finished.stderr
@@ -331,7 +344,7 @@ def test_the_archive_hint_works_from_any_directory_with_relative_settings(
         applied.chmod(0o700)
 
     assert report.archived_dir is None and report.archive_hint is not None
-    command = shlex.split(report.archive_hint.split("to finish, run: ", 1)[1].split(" (it finishes", 1)[0])
+    command = shlex.split(report.archive_hint.split("to finish, run: ", 1)[1].split(" (a recovery attempt", 1)[0])
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     finished = subprocess.run(command, capture_output=True, text=True, check=False, cwd=elsewhere)  # noqa: S603
@@ -386,7 +399,7 @@ def _fail_the_committed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _run_hint(hint: str) -> subprocess.CompletedProcess[str]:
-    command = shlex.split(hint.split("to finish, run: ", 1)[1].split(" (it finishes", 1)[0])
+    command = shlex.split(hint.split("to finish, run: ", 1)[1].split(" (a recovery attempt", 1)[0])
     return subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
 
 
@@ -430,13 +443,14 @@ def test_a_refusal_before_any_receipt_is_a_gate_error_even_with_identical_bytes_
 
     assert first[0].gated is True and first[0].written == [DECISION_PAGE]
     assert report.gate_error is not None and "already exists" in report.gate_error
+    assert report.uncertain_outcome is None
     assert report.gated is False and report.written == [] and report.archive_hint is None
 
 
-def test_a_receipt_that_does_not_record_a_commit_is_a_gate_error(
+def test_a_receipt_in_an_unknown_state_is_unusable_and_the_pages_bytes_decide(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The receipt's state is part of wiki-studio's record: one that is neither committing nor committed decides."""
+    """wiki-studio calls a state other than committing or committed a corrupt receipt, not "not committed"."""
     import json
 
     _fail_the_committed_receipt(monkeypatch)
@@ -451,7 +465,9 @@ def test_a_receipt_that_does_not_record_a_commit_is_a_gate_error(
     monkeypatch.setattr(Path, "read_text", read_text)
     report = _exporter(tmp_path, DECISION).export()
 
-    assert report.gate_error is not None and report.written == [] and report.gated is False
+    assert report.gated is True and report.written == [DECISION_PAGE] and report.gate_error is None
+    assert report.receipt_error is not None and "unknown state 'planned'" in report.receipt_error
+    assert report.uncertain_outcome is None
 
 
 def test_without_a_usable_receipt_the_pages_bytes_decide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -488,3 +504,165 @@ def test_an_unreadable_receipt_is_reported_and_never_fails_the_export(
     assert report.gated is True and report.written == [DECISION_PAGE] and report.gate_error is None
     assert report.submission_digest is None and report.archived_dir is not None
     assert report.receipt_error is not None and "Input/output error" in report.receipt_error
+
+
+def test_a_committing_receipt_with_the_page_at_post_and_the_index_not_is_an_uncertain_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The page write succeeds, the index write fails and the page's rollback fails: the page is on disk at its
+    post_sha256, the index is not. wiki-studio's classifier calls that uncertain, and so does the report: neither
+    written nor "no page was written"."""
+    original_write, original_unlink = Path.write_bytes, Path.unlink
+
+    def write_bytes(self: Path, data: Any) -> int:
+        if self.name == "index.md" and "wiki" in self.parts and self.exists():
+            raise OSError(28, "No space left on device")
+        return original_write(self, data)
+
+    def unlink(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self.name == Path(DECISION_PAGE).name:
+            raise OSError(1, "Operation not permitted")
+        original_unlink(self, *args, **kwargs)
+
+    exporter = _exporter(tmp_path, DECISION)
+    monkeypatch.setattr(Path, "write_bytes", write_bytes)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    report = exporter.export()
+    monkeypatch.undo()
+
+    assert (tmp_path / "wiki" / DECISION_PAGE).is_file()  # the failed rollback left the page
+    assert DECISION_PAGE not in (tmp_path / "wiki" / "index.md").read_text(encoding="utf-8")
+    assert report.gated is False and report.written == [] and report.skipped == 1
+    assert report.gate_error is not None and report.archive_hint is None and report.proposal is not None
+    receipt = tmp_path / DEFAULT_PROPOSALS_SUBDIR / report.proposal / RECEIPT_FILE
+    assert report.uncertain_outcome is not None
+    assert DECISION_PAGE in report.uncertain_outcome and str(receipt) in report.uncertain_outcome
+
+
+def test_without_a_usable_receipt_a_page_with_other_bytes_is_an_uncertain_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_the_committed_receipt(monkeypatch)
+    original = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == RECEIPT_FILE:
+            raise OSError(5, "Input/output error")
+        return original(self, *args, **kwargs)
+
+    exporter = _exporter(tmp_path, DECISION)
+    real = api.promote
+
+    def promote_then_change_the_page(proposal: Path, paths: Any, **kwargs: Any) -> Any:
+        try:
+            return real(proposal, paths, **kwargs)
+        finally:
+            (tmp_path / "wiki" / DECISION_PAGE).write_text("changed by someone else\n", encoding="utf-8")
+
+    monkeypatch.setattr(api, "promote", promote_then_change_the_page)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    report = exporter.export()
+
+    assert report.written == [] and report.gate_error is not None and report.uncertain_outcome is not None
+    assert report.receipt_error is not None and "Input/output error" in report.receipt_error
+
+
+@pytest.mark.parametrize(
+    "planned_writes",
+    [
+        [],
+        {},
+        [7],
+        [{"path": DECISION_PAGE, "post_sha256": "not a sha"}],
+        [{"path": "index.md", "post_sha256": "0" * 64}],
+    ],
+)
+def test_unusable_planned_writes_fall_back_to_the_pages_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, planned_writes: Any
+) -> None:
+    import json
+
+    _fail_the_committed_receipt(monkeypatch)
+    original = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        text = original(self, *args, **kwargs)
+        if self.name == RECEIPT_FILE:
+            return json.dumps({**json.loads(text), "planned_writes": planned_writes})
+        return text
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    report = _exporter(tmp_path, DECISION).export()
+
+    assert report.gated is True and report.written == [DECISION_PAGE] and report.gate_error is None
+    assert report.receipt_error is not None and "planned_writes" in report.receipt_error
+    assert report.submission_digest is not None and report.archive_hint is not None
+
+
+def test_the_hint_is_a_recovery_attempt_that_refuses_once_the_wiki_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Committed, then the receipt rewrite failed; another writer then appends to the index. The hint's command is
+    refused with uncertain_outcome (exit 10) and writes nothing, as the hint says it may."""
+    _fail_the_committed_receipt(monkeypatch)
+    svc = _service()
+    svc.retain(DECISION, MemoryType.DECISION)
+    report = WikiExporter(svc, tmp_path / "wiki", project_root=tmp_path).export()
+    monkeypatch.undo()
+    assert report.gated is True and report.archive_hint is not None
+    assert "recovery attempt" in report.archive_hint and "uncertain_outcome" in report.archive_hint
+
+    _another_writer(svc, tmp_path, OTHER, "another")
+    pages = _files(tmp_path / "wiki")
+    finished = _run_hint(report.archive_hint)
+
+    assert finished.returncode == 10 and "uncertain_outcome" in finished.stdout + finished.stderr
+    assert _files(tmp_path / "wiki") == pages
+
+
+def test_a_committed_receipt_whose_page_is_not_at_post_is_uncertain(tmp_path: Path) -> None:
+    page = GatedPage(path=DECISION_PAGE, content="x\n", index_line=None, log_line=None)
+    (tmp_path / "decisions").mkdir()
+    (tmp_path / DECISION_PAGE).write_text("other\n", encoding="utf-8")
+    writes: dict[str, tuple[str | None, str]] = {DECISION_PAGE: (None, "0" * 64)}
+
+    assert _classify(RECEIPT_COMMITTED, writes, [page], tmp_path) == _UNCERTAIN
+    assert _classify(RECEIPT_COMMITTING, writes, [page], tmp_path / "empty") == _NOT_COMMITTED
+
+
+def test_a_symlinked_page_at_its_post_sha256_is_uncertain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """wiki-studio's contain() refuses a symlink in any part of a path; so memkernel matches it to neither state."""
+    _fail_the_committed_receipt(monkeypatch)
+    real = api.promote
+
+    def promote_then_swap_in_a_symlink(proposal: Path, paths: Any, **kwargs: Any) -> Any:
+        try:
+            return real(proposal, paths, **kwargs)
+        finally:
+            page = tmp_path / "wiki" / DECISION_PAGE
+            moved = tmp_path / "wiki" / "moved.md"
+            page.rename(moved)
+            page.symlink_to(moved)  # same bytes, reached through a symlink
+
+    exporter = _exporter(tmp_path, DECISION)
+    monkeypatch.setattr(api, "promote", promote_then_swap_in_a_symlink)
+    report = exporter.export()
+
+    assert report.written == [] and report.gate_error is not None and report.uncertain_outcome is not None
+
+
+@pytest.mark.parametrize("rel", ["../outside.md", "/abs.md", "./index.md", "decisions"])
+def test_a_planned_path_that_is_not_a_plain_file_in_the_wiki_matches_neither_state(tmp_path: Path, rel: str) -> None:
+    (tmp_path / "decisions").mkdir()
+    (tmp_path / "index.md").write_text("x\n", encoding="utf-8")
+    (tmp_path.parent / "outside.md").write_text("x\n", encoding="utf-8")
+
+    assert _live_sha256(tmp_path, rel) not in (None, hashlib.sha256(b"x\n").hexdigest())
+
+
+def test_a_planned_path_listed_twice_makes_the_receipt_unusable() -> None:
+    page = GatedPage(path=DECISION_PAGE, content="x\n", index_line=None, log_line=None)
+    write = {"path": DECISION_PAGE, "pre_sha256": None, "post_sha256": "0" * 64}
+
+    with pytest.raises(ValueError, match="duplicate"):
+        _planned_writes({"planned_writes": [write, {**write, "post_sha256": "1" * 64}]}, [page])
