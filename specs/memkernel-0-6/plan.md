@@ -17,6 +17,7 @@ origin:
     - specs/memkernel-0-6/origin/2026-10-27-committed-then-failed.md
     - specs/memkernel-0-6/origin/2026-10-27-part-2a.md
     - specs/memkernel-0-6/origin/2026-10-28-uncertain-outcome.md
+    - specs/memkernel-0-6/origin/2026-10-29-page-identity.md
   origin_claim: |
     Close the memkernel side of wiki-studio's Release B (memkernel #48): remove the
     bridge's whole-wiki snapshot and rollback and scaffold through wiki-studio's
