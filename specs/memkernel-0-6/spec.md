@@ -144,6 +144,17 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   its `source`, the wiki-relative path, which is unique; never by `page:<slug>`, because slugs repeat across
   directories (`decisions/retry.md` and `workflows/retry.md`), which also fixes today's importer superseding
   one such page's memory with the other's.
+
+  **One memory per page (amended 2026-10-29).** `retain` deduplicates by content and type, so two approved pages
+  with identical title and body became one record carrying both pages' `page_key:` and `page_sha:` tags, and an
+  edit to one page then left the other without a live memory. The importer MUST therefore deduplicate a page's
+  memory only against records with the same `source` (the page's wiki-relative path), through a new keyword-only
+  `retain(..., dedup_source=True)` (FR-017): two pages with identical content get one memory each, and a page never
+  merges into a memory that did not come from it (an agent's memory with the same text). A record that already
+  carries more than one `page_key:` tag (written by an import before this amendment) belongs to the page whose
+  wiki-relative path is its `source`: it is that page's previous memory, and only that page's new revision may
+  supersede it. Any other page whose `page_key:` tag it carries never matches it as its previous memory and gets
+  its own record on its next import, never superseding the shared one.
 - **FR-013 (stale and other non-approved states):** a page that is `stale`, `policy-changed`, `unapproved` or
   `superseded` is not imported, and its existing memory is left as it is (withdrawal is part 2b): an edited
   page keeps its last approved memory until it is approved again.
@@ -180,7 +191,14 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   `ref_id` was already superseded by `by_ref` (idempotent). It raises `ValueError` naming the reason, and changes
   nothing, when `ref_id` or `by_ref` is not a record in this store (an unknown or another project's reference),
   when they are equal, or when `ref_id` is already superseded by a different memory (never overwritten). The
-  importer maps each refusal to `ImportReport.unresolved`. `docs/architecture/memory-tiers.md` is read before
+  importer maps each refusal to `ImportReport.unresolved`. The marker is written on the owned chunks first and on
+  `ref_id` last (amended 2026-10-29), so a failure part-way leaves `ref_id` unmarked and a retry marks everything;
+  a call that finds `ref_id` already superseded by `by_ref` still marks any owned chunk left without the marker
+  (a partial mark from an earlier failure) and returns `False`. The importer passes a correction already in effect
+  to `supersede` again with the existing marker (the page's earlier revision), so a re-import completes a partial
+  mark. The second core change is `retain`'s keyword-only `dedup_source` (default `False`, today's behaviour; FR-012):
+  with `True`, a dedup hit also requires the same `source`, through the store's existing
+  `find_by_hash(..., source=)`; no port changes. `docs/architecture/memory-tiers.md` is read before
   the change and updated: its supersession row (line 92) and API table (line 156) gain `supersede` and the
   `corrects` route.
 
@@ -188,7 +206,8 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
 - No held-lock route (owner decision 1: snapshot removal chosen). No change to wiki-studio.
 - Nothing of part 2 (review state, `corrects`, withdrawal, governed mode) in part 1.
 - No merge to `main` before the `v0.5.0` tag; no new runtime dependency (wiki-studio stays an optional extra).
-  `core/` is unchanged in part 1; part 2a adds only `MemoryService.supersede` (FR-017).
+  `core/` is unchanged in part 1; part 2a adds only `MemoryService.supersede` and `retain`'s `dedup_source`
+  (FR-017, FR-012).
 - Part 2a builds nothing of 2b or 2c: no withdrawal, no sync ledger, no governed mode, no curation debt, no
   `page_id` assignment (`assign_page_ids` stays off), no approval by memkernel.
 
@@ -242,6 +261,11 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   extra the import is ungoverned and says so; below the floor it imports nothing and reports `import_error`; an
   import over a store written before 0.6 (wiki memories without `page_key`/`page_sha`) matches them by `source`
   and supersedes rather than duplicates them, and two pages with the same slug in different directories keep
-  separate memories; `supersede`'s refusals (unknown, another project,
-  self, already superseded by another) and its idempotence.
+  separate memories; two approved pages with identical content keep separate memories, and editing one leaves the
+  other's memory live; for a record shared by two pages (built through the earlier, unscoped dedup), editing the
+  other page gives that page its own record and leaves the shared record live for its source page, and editing the
+  source page supersedes the shared record with the source page's new revision while the other page gets its own
+  record; `supersede`'s refusals (unknown, another
+  project, self, already superseded by another), its idempotence, and a retry completing a mark that failed on an
+  owned chunk; a page on its second revision keeps its correction with nothing unresolved.
 
