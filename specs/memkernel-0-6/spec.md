@@ -28,8 +28,9 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   as skipped, and writes nothing itself. `_WikiSnapshot` is removed. A failure after FR-002's `api.init` (for
   example in `propose`) leaves the new `index.md` and `log.md` in place: a valid, empty scaffold, not removed.
   memkernel 0.5 left a fresh wiki with no files after a rejected export; the CHANGELOG says so, and the
-  `gate_error` field's comment ("nothing was written") is corrected to "no page was written". The one exception,
-  where wiki-studio fails after it has committed the pages, is FR-009.
+  `gate_error` field's comment ("nothing was written") is corrected to "no page was written". The exceptions are
+  FR-009's, where wiki-studio fails after its commit began: a commit reported as written, and an uncertain outcome
+  (`uncertain_outcome`), where pages may be on disk.
 - **FR-002 (scaffold through wiki-studio):** before proposing, the gated path MUST create a missing `index.md`
   and `log.md` with `api.init` (never overwrites; exclusive create), not with memkernel's own scaffold. The direct
   writer (no wiki-studio) keeps memkernel's scaffold. memkernel-0-5 SC-2's byte-identity therefore covers pages
@@ -51,10 +52,15 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   - `archived_dir`: `PromoteResult.archived_dir`, or `None` when wiki-studio committed the edits but its archive
     step failed (0.6.0 treats step 4 as housekeeping: `_archive_and_cleanup` catches `OSError` and returns
     `None`). memkernel then reports the export as promoted, not archived, and does not finish the archive itself;
-    promoting the proposal directory again finishes it and applies nothing twice;
+    promoting the proposal directory again tries to finish it (amended 2026-10-28): wiki-studio applies nothing
+    twice, but if the wiki or the proposal changed since, for example another writer appended to `index.md`, it
+    refuses with `uncertain_outcome` (exit 10) or `payload_changed` and writes nothing;
   - `archive_hint`: set only in that case, and also logged as a warning. It says how to clear the state: the
     promote command, with the actual proposal directory and the `--root`, `--wiki-dir` and `--proposals-dir`
-    memkernel used, all absolute (as wiki-studio's `WikiPaths` holds them), so it works from any directory, finishes the archive and applies nothing twice. The command runs through the interpreter
+    memkernel used, all absolute (as wiki-studio's `WikiPaths` holds them), so it works from any directory. The
+    hint presents the command as a recovery attempt, not a guaranteed finish: it says that wiki-studio applies
+    nothing twice, that it refuses and writes nothing if the wiki or the proposal changed since, and that the wiki
+    is then compared with the proposal's `receipt.json` by hand. The command runs through the interpreter
     memkernel runs on (`<sys.executable> -m wiki_studio promote …`), not a `wiki-studio` found on `PATH`, so it
     reaches the same wiki-studio the export used even when that is installed only in memkernel's environment.
 
@@ -68,26 +74,51 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   edits; it never passes `allow_unguarded_updates`. (Recorded so a later change that adds updates must read the
   page and pass `base_sha256`.)
 - **FR-008 (`wiki_export` response):** the MCP tool's JSON response MUST carry `proposal`, `submission_digest`
-  and `archived_dir` for a gated export, `archive_hint` when `archived_dir` is null, and `receipt_error` when the
-  receipt was unreadable; keys absent otherwise, as `gate_error` is today. The tool's description is updated (it
+  and `archived_dir` for a gated export, `archive_hint` when `archived_dir` is null, `receipt_error` when the
+  receipt was unreadable, and `uncertain_outcome` (FR-009) when the outcome is uncertain; keys absent otherwise, as `gate_error` is today. The tool's description is updated (it
   still says "wiki-studio >= 0.3" and that a rejected export "writes nothing"), and the CHANGELOG lists each
   added response key, as 0.5 did for `lint`, `lint_hint`, `lint_error` and `gate_error`. The tool count is
   unchanged.
 
-- **FR-009 (committed, then failed):** wiki-studio can commit the pages and then raise, for example when it
-  cannot rewrite its receipt as committed ("the edits were committed to the wiki … Promote the directory again to
-  finish"). When the gate raises after `propose` returned a proposal directory, memkernel MUST check whether the
-  commit happened, using wiki-studio's own record: the receipt left in that directory (state `committing` or
-  `committed`) and, for every page memkernel created, that the page's on-disk sha256 equals the receipt's
-  `post_sha256` for that path. wiki-studio writes that receipt before any wiki write, so a missing receipt means
-  nothing was committed (a refusal such as a create of an existing page) and is a `gate_error`, even when a page
-  with identical bytes is on disk. Only if the receipt exists but cannot be read or has no usable
-  `planned_writes`, it falls back to comparing each page's bytes on disk with the content memkernel proposed. If the check holds, the export is
-  reported as written and gated: the pages in `written`, `proposal`, `submission_digest` from the receipt when
-  readable, `archived_dir` null, no `gate_error`, and `archive_hint` with the promote command (FR-005) that
-  finishes it, preceded by wiki-studio's message; the hint is also logged as a warning. If the check does not
-  hold (validation refused, or wiki-studio rolled back), it is a `gate_error` as in FR-001. memkernel never runs
-  the promote again itself: that is the user's step, as the hint says.
+- **FR-009 (committed, then failed; amended 2026-10-28):** wiki-studio can commit the pages and then raise, for
+  example when it cannot rewrite its receipt as committed ("the edits were committed to the wiki … Promote the
+  directory again to finish"). When the gate raises after `propose` returned a proposal directory, memkernel MUST
+  classify the outcome from wiki-studio's own record, the receipt left in that directory, by the rule wiki-studio's
+  own classifier applies to a `committing` receipt (0.6.0 `promoter._classify_committing`):
+  - **No receipt:** not committed. wiki-studio writes the receipt before any wiki write, so a missing receipt is a
+    `gate_error` (a refusal such as a create of an existing page), even when a page with identical bytes is on disk.
+  - **A usable receipt:** readable, state `committing` or `committed`, and `planned_writes` a non-empty list in
+    which every entry has a string `path`, a sha256 `post_sha256` and a null or sha256 `pre_sha256`, and which
+    records every page memkernel created. Then:
+    - *committed* when the state is `committing` and every planned write (the pages, `index.md` and `log.md`) is
+      on disk at its `post_sha256`, or when the state is `committed` (wiki-studio writes it only after every write
+      succeeded) and every page memkernel created is at its `post_sha256`;
+    - *not committed* when the state is `committing` and every planned write is at its `pre_sha256` (absent when
+      that is null): wiki-studio rolled back. A `gate_error`;
+    - *uncertain* in every other case: for example a `committing` receipt whose pages are at their `post_sha256`
+      while another planned write is not (the `index.md` write failed and the page's rollback failed too), a
+      `committed` receipt whose pages are not all at their `post_sha256`, or a planned path outside the wiki
+      directory or not a regular file.
+  - **A receipt that cannot be used:** unreadable, or with `planned_writes` empty, malformed or missing one of
+    memkernel's pages. `receipt_error` says why, and each page's bytes on disk are compared with the content
+    memkernel proposed: all equal is *committed*, all absent is *not committed* (a `gate_error`), anything else is
+    *uncertain*.
+  - **A readable receipt in any other state:** not committed, a `gate_error`.
+
+  *Committed* is reported as written and gated: the pages in `written`, `proposal`, `submission_digest` from the
+  receipt when readable, `archived_dir` null, no `gate_error`, and `archive_hint` with the promote command (FR-005)
+  that tries to finish it, preceded by wiki-studio's message; the hint is also logged as a warning.
+
+  *Uncertain* MUST be reported neither as written nor as "no page was written": `written` is empty, the pages
+  count as skipped, `gated` is false, `gate_error` carries wiki-studio's message, `proposal` is set, and a new
+  optional `uncertain_outcome` (on `ExportReport` and in the `wiki_export` response) says that the outcome is
+  uncertain, that memkernel's pages may be on disk (naming them), and that the wiki must be compared with the
+  receipt by hand, giving the absolute path of the proposal's `receipt.json`, before exporting again. It is also
+  logged as a warning. There is no `archive_hint`: wiki-studio would refuse that promote with
+  `uncertain_outcome`. The `gate_error` field's comment becomes "no page was written, unless `uncertain_outcome` is
+  set".
+
+  memkernel never runs the promote again itself: that is the user's step.
 
 ### Part 2a (US3–US4)
 - **FR-010 (governed import):** with wiki-studio ≥ 0.7.0 installed, `WikiImporter.import_pages()` MUST import a
@@ -161,7 +192,7 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   `page_id` assignment (`assign_page_ids` stays off), no approval by memkernel.
 
 ## Key Entities
-- `ExportReport` (existing): gains `proposal`, `submission_digest`, `archived_dir`, `archive_hint` and `receipt_error` (optional).
+- `ExportReport` (existing): gains `proposal`, `submission_digest`, `archived_dir`, `archive_hint`, `receipt_error` and `uncertain_outcome` (optional).
 - `ImportReport` (existing): gains `governed`, `not_approved`, `corrections`, `unresolved`, `invalid_corrects`
   and `import_error` (part 2a).
 - Imported wiki memory: tags `page_key:<page_key>` and `page_sha:<approved_sha256>` (part 2a).
@@ -186,11 +217,17 @@ which also becomes the floor for both parts (FR-003 as amended 2026-10-27). Part
   `archive_hint` naming that directory, and no `gate_error`. Running the hint's command exactly as given (through
   `sys.executable -m wiki_studio`) then archives the proposal and changes no wiki page. The `wiki_export` response
   carries the same keys (FR-008).
-- SC-7: With wiki-studio forced to fail after its commit (the receipt rewrite as committed), the export reports
-  the page as written and gated, `archived_dir = None`, no `gate_error`, and an `archive_hint` whose command,
-  run as given, finishes the promotion without changing the page. With the receipt present but unreadable, the
-  content check reports the page as written. A refusal before any receipt (another export created the same page
-  with identical bytes), a receipt whose state records no commit, and a rolled-back failure report `gate_error`.
+- SC-7 (amended 2026-10-28): With wiki-studio forced to fail after its commit (the receipt rewrite as
+  committed), the export reports the page as written and gated, `archived_dir = None`, no `gate_error`, and an
+  `archive_hint` whose command, run as given, finishes the promotion without changing the page; if another writer
+  appends to `index.md` first, the same command is refused with `uncertain_outcome` (exit 10) and changes no file,
+  and the hint says it may be. With the receipt present but unreadable, or with `planned_writes` empty, not a
+  list, holding a malformed entry or missing the page, the content check reports the page as written and
+  `receipt_error` is set. With the page written, the `index.md` write failed and the page's rollback failed (a
+  `committing` receipt, page at `post_sha256`, index not), the export reports `uncertain_outcome` naming the page
+  and the `receipt.json` path, `written = []`, `gate_error` set and no `archive_hint`. A refusal before any
+  receipt (another export created the same page with identical bytes), a receipt whose state records no commit,
+  and a rolled-back failure report `gate_error` without `uncertain_outcome`.
 - SC-8 (part 2a): wiki-studio's `tests/integration/test_release_b_loop.py` passes against this memkernel, run
   from a named wiki-studio commit: the first commit on wiki-studio `main` that resolves wiki-studio#53 (test 4's
   use of `ref_id` and `include_superseded=True`); until then, v0.7.0's file for tests 1–3 and the two retry
