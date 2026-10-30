@@ -558,3 +558,33 @@ def test_an_in_memory_store_keeps_no_spool(tmp_path: Path, monkeypatch: pytest.M
     session_spool.append(lifecycle._settings, session_spool.EVENT_STARTED, "s1", datetime.now(UTC))
 
     assert lifecycle.on_session_start("startup", session_id="s1") and not (tmp_path / ".memkernel").exists()
+
+
+def test_a_checkpoint_counts_for_its_session_even_if_since_expired_superseded_or_withdrawn(tmp_path: Path) -> None:
+    """Review of #79: any checkpoint saved in the window counts, not only a live one."""
+    from datetime import UTC, datetime, timedelta
+
+    from memkernel.core.models import WITHDRAWN_DELETED
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    long_ago = datetime.now(UTC) - timedelta(days=settings.episode_ttl_days + 10)
+    windows = {
+        "s-expired": long_ago,
+        "s-superseded": long_ago + timedelta(hours=2),
+        "s-withdrawn": long_ago + timedelta(hours=4),
+    }
+    refs = {}
+    for session, start in windows.items():
+        spool.append(settings, spool.EVENT_STARTED, session, start)
+        spool.append(settings, spool.EVENT_ENDED, session, start + timedelta(hours=1), reason="other")
+        refs[session] = svc.retain(f"SESSION CHECKPOINT {session}", MemoryType.EPISODE, checkpoint=True)
+        _at(svc, refs[session], start + timedelta(minutes=30))  # all three are past the episode TTL: expired
+    replacement = svc.retain("SESSION CHECKPOINT replacement", MemoryType.EPISODE, checkpoint=True)
+    svc.supersede(refs["s-superseded"], replacement)
+    svc.withdraw(refs["s-withdrawn"], WITHDRAWN_DELETED)
+    assert svc.checkpoints_newest_first()[0].ref_id == replacement  # none of the three is live
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS not in text

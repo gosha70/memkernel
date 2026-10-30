@@ -239,7 +239,12 @@ class MemoryLifecycle:
         return _cap("\n".join(lines))
 
     def _drain_spool(self, session_id: str | None) -> list[SessionWindow]:
-        """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009)."""
+        """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009).
+
+        Any checkpoint saved in the window counts, live or not: one since expired, superseded or withdrawn was
+        still saved during that session. ``list_memories(include_superseded=True)`` returns retired records and
+        applies no expiry filter, and the drain runs before startup's consolidation purges expired records.
+        """
         checkpoints = [m for m in self._service.list_memories(include_superseded=True) if m.checkpoint]
 
         def checkpointed(window: SessionWindow) -> bool:
