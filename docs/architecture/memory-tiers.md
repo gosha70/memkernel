@@ -165,6 +165,10 @@ extra, never a requirement.
 
 `MemoryService.supersede(ref_id, by_ref)` is a library method, not an MCP tool: the governed wiki import uses it
 to apply a page's `corrects` (memkernel-0-6 FR-017).
+`MemoryService.checkpoints_newest_first()` is a library method, not an MCP tool: every live checkpoint by
+`recall`'s rules, without code-chunk and document-part records, newest first (ties by `ref_id`), without content
+and without touching. The session-start, compact and post-compact blocks take "the latest checkpoint" from it,
+never from a relevance-ranked `recall` window (memkernel-0-6-compaction-hooks FR-011).
 
 ## 6. Session protocol (what the harness should do)
 

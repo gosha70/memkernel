@@ -630,3 +630,27 @@ def test_dedup_source_scopes_a_dedup_hit_to_the_same_source() -> None:
     assert svc.retain("Use Postgres", MemoryType.DECISION, source="decisions/b.md", dedup_source=True) != a
     assert svc.retain("Use Postgres", MemoryType.DECISION, source="decisions/a.md", dedup_source=True) == a
     assert svc.retain("Use Postgres", MemoryType.DECISION, source="elsewhere") == a
+
+
+def test_checkpoints_newest_first_lists_live_checkpoints_by_time_without_content() -> None:
+    """Every live checkpoint, newest first, ties broken by ref_id, no content; superseded ones and non-checkpoints
+    are left out (memkernel-0-6-compaction-hooks, review of #73)."""
+    from datetime import timedelta
+
+    svc, store, _ = _make_service()
+    old = svc.retain("SESSION CHECKPOINT old", MemoryType.EPISODE, checkpoint=True)
+    a = svc.retain("SESSION CHECKPOINT a", MemoryType.EPISODE, checkpoint=True)
+    b = svc.retain("SESSION CHECKPOINT b", MemoryType.EPISODE, checkpoint=True)
+    gone = svc.retain("SESSION CHECKPOINT superseded", MemoryType.EPISODE, checkpoint=True)
+    svc.supersede(gone, b)
+    svc.retain("an ordinary episode", MemoryType.EPISODE)
+    tie = datetime.now(UTC).isoformat()
+    store.update_metadata(a, {"timestamp": tie})
+    store.update_metadata(b, {"timestamp": tie})
+    store.update_metadata(old, {"timestamp": (datetime.now(UTC) - timedelta(hours=1)).isoformat()})
+
+    listed = svc.checkpoints_newest_first()
+
+    assert [m.ref_id for m in listed] == [*sorted([a, b], reverse=True), old]
+    assert all(m.content == "" for m in listed)
+    assert svc.checkpoints_newest_first() == listed  # deterministic

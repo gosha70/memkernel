@@ -34,7 +34,7 @@ from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
 
 if TYPE_CHECKING:
-    from memkernel.core.models import ArtifactRef, Memory
+    from memkernel.core.models import ArtifactRef
     from memkernel.core.services import MemoryService
 
 # Section headings are part of the hooks' stdout contract (FR-012): keep them stable.
@@ -58,9 +58,6 @@ SOURCE_COMPACT = "compact"
 SOURCES_ALREADY_IN_CONTEXT = frozenset({"resume", "fork"})
 CHECKPOINT_IMPORTANCE = 0.8
 CANDIDATE_LIMIT = 5
-# Checkpoints are relevance-ranked by recall; fetch many so the timestamp
-# sort below sees every real-world checkpoint.
-CHECKPOINT_FETCH = 200
 SESSION_START_CONTEXT_TOP_K = 6
 POST_COMPACT_CONTEXT_TOP_K = 5
 
@@ -93,7 +90,7 @@ class MemoryLifecycle:
         if source == SOURCE_COMPACT:
             return self._compact_recovery()
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
-        latest = self._latest_checkpoint("session checkpoint next steps", touch=False)
+        latest = self._latest_checkpoint()
         context = self._service.recall(
             "decisions conventions active work", tier=MemoryTier.LONG_TERM, top_k=SESSION_START_CONTEXT_TOP_K
         )
@@ -157,7 +154,7 @@ class MemoryLifecycle:
 
     def on_post_compact(self) -> str:
         """Return the latest checkpoint, long-term context and promotion candidates for re-injection."""
-        latest = self._latest_checkpoint("session checkpoint decisions conventions next steps", touch=True)
+        latest = self._latest_checkpoint()
         context = self._service.recall(
             "decisions conventions architecture", tier=MemoryTier.LONG_TERM, top_k=POST_COMPACT_CONTEXT_TOP_K
         )
@@ -208,7 +205,8 @@ class MemoryLifecycle:
     def _compact_recovery(self) -> str:
         """After a compaction: the latest checkpoint not captured from the compaction summary, with its age, and the
         long-term context. No consolidation, revalidation, purge or candidates; the same whichever hook ran first."""
-        checkpoint = self._latest_own_checkpoint("session checkpoint decisions conventions next steps")
+        chosen = next((m for m in self._service.checkpoints_newest_first() if COMPACT_SUMMARY_TAG not in m.tags), None)
+        checkpoint = self._service.get(chosen.ref_id, touch=False) if chosen is not None else None
         context = self._service.recall(
             "decisions conventions architecture", tier=MemoryTier.LONG_TERM, top_k=POST_COMPACT_CONTEXT_TOP_K
         )
@@ -226,21 +224,16 @@ class MemoryLifecycle:
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         return "\n".join(lines)
 
-    def _latest_own_checkpoint(self, query: str) -> Memory | None:
-        """The newest checkpoint not tagged ``compact-summary``, without touching anything."""
-        refs = self._service.recall(query, checkpoint_only=True, top_k=CHECKPOINT_FETCH, touch=False)
-        for ref in sorted(refs, key=lambda r: r.timestamp, reverse=True):
-            memory = self._service.get(ref.ref_id, touch=False)
-            if memory is not None and COMPACT_SUMMARY_TAG not in memory.tags:
-                return memory
-        return None
+    def _latest_checkpoint(self) -> str | None:
+        """The newest live checkpoint's content (by time over every live checkpoint, never a relevance window).
 
-    def _latest_checkpoint(self, query: str, touch: bool) -> str | None:
-        refs = self._service.recall(query, checkpoint_only=True, top_k=CHECKPOINT_FETCH, touch=touch)
-        if not refs:
+        Reading it counts as one access, on that checkpoint only; before 0.6 ``on_post_compact`` also touched every
+        checkpoint its recall returned.
+        """
+        checkpoints = self._service.checkpoints_newest_first()
+        if not checkpoints:
             return None
-        newest = max(refs, key=lambda r: r.timestamp)
-        memory = self._service.get(newest.ref_id)
+        memory = self._service.get(checkpoints[0].ref_id)
         return memory.content if memory is not None else None
 
 

@@ -272,3 +272,90 @@ def test_startup_clear_no_source_and_unknown_values_give_the_full_block(source: 
     text = lifecycle.on_session_start(source)
     assert text.splitlines()[0] == HEADING_SESSION_START
     assert text.endswith("---\nPurged 0 expired short-term memories. Use recall() / get(ref_id) for details.")
+
+
+OLD_RECALL_WINDOW = 200  # checkpoints were once picked from this many relevance-ranked recall hits
+
+
+def _many_matching_checkpoints(svc: Any, count: int, tags: list[str] | None = None) -> None:
+    for i in range(count):
+        svc.retain(
+            f"SESSION CHECKPOINT {i}\n\nsession checkpoint decisions conventions next steps {i}",
+            MemoryType.EPISODE,
+            checkpoint=True,
+            tags=tags,
+        )
+
+
+@pytest.mark.parametrize("source", ["compact", "startup"])
+def test_the_newest_checkpoint_is_found_beyond_the_relevance_window(source: str) -> None:
+    """Review of #73: more older checkpoints than the old recall window (200) match its query better than the newest;
+    the newest is still the one shown (FR-004 for compact; the startup block has the same rule)."""
+    lifecycle, svc = _lifecycle()
+    _many_matching_checkpoints(svc, OLD_RECALL_WINDOW + 5)
+    svc.retain("zz NEWEST-UNRELATED", MemoryType.EPISODE, checkpoint=True)
+
+    assert "NEWEST-UNRELATED" in lifecycle.on_session_start(source)
+
+
+def test_an_agent_checkpoint_behind_many_compact_summaries_is_still_found() -> None:
+    """Review of #73: a recall window filled with compact-summary checkpoints must not hide the agent's own."""
+    from memkernel.lifecycle import COMPACT_SUMMARY_TAG
+
+    lifecycle, svc = _lifecycle()
+    svc.retain("zz AGENT-OWN", MemoryType.EPISODE, checkpoint=True)
+    _many_matching_checkpoints(svc, OLD_RECALL_WINDOW + 5, tags=["checkpoint", COMPACT_SUMMARY_TAG])
+
+    text = lifecycle.on_session_start("compact")
+
+    assert "AGENT-OWN" in text and "No checkpoint found." not in text
+
+
+@pytest.mark.parametrize("source", ["compact", "startup"])
+def test_an_expired_checkpoint_is_not_shown(source: str) -> None:
+    """Live as recall defined it: an episode past its retention window is not the latest checkpoint."""
+    from datetime import UTC, datetime, timedelta
+
+    lifecycle, svc = _lifecycle(episode_ttl_days=30)
+    ref = svc.retain("SESSION CHECKPOINT long ago\n\nNext: EXPIRED-ONE", MemoryType.EPISODE, checkpoint=True)
+    svc._vector_store.update_metadata(ref, {"timestamp": (datetime.now(UTC) - timedelta(days=60)).isoformat()})
+
+    text = lifecycle.on_session_start(source)
+
+    assert "EXPIRED-ONE" not in text and "No checkpoint found" in text
+
+
+@pytest.mark.parametrize("call", ["startup", "compact", "post_compact"])
+def test_the_checkpoint_is_chosen_without_a_relevance_window(monkeypatch: pytest.MonkeyPatch, call: str) -> None:
+    """Review of #73: no path picks "the latest checkpoint" through recall(checkpoint_only=True), whose top_k
+    window is ranked by relevance; every path shows the newest live checkpoint."""
+    lifecycle, svc = _lifecycle()
+    svc.retain("SESSION CHECKPOINT older\n\nNext: OLDER", MemoryType.EPISODE, checkpoint=True)
+    svc.retain("SESSION CHECKPOINT newer\n\nNext: NEWER", MemoryType.EPISODE, checkpoint=True)
+    real = svc.recall
+
+    def recall(*args: Any, **kwargs: Any) -> Any:
+        assert not kwargs.get("checkpoint_only"), "checkpoint chosen from a relevance-ranked recall window"
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(svc, "recall", recall)
+    text = lifecycle.on_post_compact() if call == "post_compact" else lifecycle.on_session_start(call)
+
+    assert "NEWER" in text and "OLDER" not in text
+
+
+@pytest.mark.parametrize("call", ["compact", "post_compact"])
+def test_expiry_is_judged_with_the_services_settings(call: str) -> None:
+    """Review of #73: a harness passing settings only to build_service; the lifecycle's default TTL (30 days) must
+    not hide a checkpoint the service (90 days) still keeps."""
+    from datetime import UTC, datetime, timedelta
+
+    settings = _settings(episode_ttl_days=90)
+    svc = build_service(settings, embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient())
+    lifecycle = MemoryLifecycle(svc)
+    ref = svc.retain("SESSION CHECKPOINT\n\nNext: FORTY-FIVE-DAYS", MemoryType.EPISODE, checkpoint=True)
+    svc._vector_store.update_metadata(ref, {"timestamp": (datetime.now(UTC) - timedelta(days=45)).isoformat()})
+
+    text = lifecycle.on_post_compact() if call == "post_compact" else lifecycle.on_session_start(call)
+
+    assert "FORTY-FIVE-DAYS" in text

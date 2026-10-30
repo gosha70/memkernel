@@ -93,6 +93,13 @@ All notable changes to this project are documented here. The format follows
   library callers; `on_session_start()` takes an optional `source`.
 - The recovery after a compaction comes from `SessionStart` with `source:
   "compact"`; the README had said `post-compact.py` re-injects it (#68, D2).
+- The latest checkpoint shown at session start, after a compaction and by
+  `on_post_compact()` is now the newest by time over every live checkpoint.
+  Since 0.3 it was picked from the 200 checkpoints a search ranked most
+  relevant, so with many checkpoints a newer one could be missed. Only the
+  checkpoint shown counts as accessed; `on_post_compact()` used to touch every
+  checkpoint the search returned. New `MemoryService.checkpoints_newest_first()`
+  lists live checkpoints by time, without content.
 
 - Two memkernel processes opening a new store at the same moment (in a
   project's first session, the MCP server and the `SessionStart` hook) no

@@ -824,6 +824,25 @@ class MemoryService:
             memories = [m for m in memories if m.tier == tier]
         return memories
 
+    def checkpoints_newest_first(self) -> list[Memory]:
+        """Every live checkpoint record, newest first (ties by ``ref_id``), without content and without touching.
+
+        Selected by metadata, so the newest is found however many older checkpoints a query would rank higher.
+        Live as for :meth:`recall`, judged with this service's settings: not superseded, not flagged for review,
+        not expired. Code-chunk and document-part records are left out: they are parts of a checkpoint, not one.
+        Read the chosen record with :meth:`get`.
+        """
+        live = [
+            m
+            for m in self._vector_store.list_all({"checkpoint": True}, include_content=False)
+            if m.superseded_by is None
+            and not m.needs_review
+            and m.parent_ref is None
+            and not _is_document_part(m)
+            and not memory_is_expired(m, self._settings)
+        ]
+        return sorted(live, key=lambda m: (m.timestamp, m.ref_id), reverse=True)
+
     @property
     def project_id(self) -> str:
         """Return the project_id for this service instance."""

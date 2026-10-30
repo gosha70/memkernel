@@ -17,3 +17,9 @@
 |---|-----|------|---------|-------|------|
 | 5 | | README hooks table (119-121), session protocol (173-176), setup (`SessionStart` without a matcher); memory-tiers.md hooks row (FR-008) | `README.md`, `docs/architecture/memory-tiers.md` | build | [x] |
 | 6 | | CHANGELOG `[Unreleased]`: Fixed D1–D3, Changed D4 and `post-compact.py`'s stdout, re-copy note (FR-009) | `CHANGELOG.md` | build | [x] |
+
+## US3: The latest checkpoint (FR-011, from the review of #73)
+
+| # | [P] | Task | File(s) | Owner | Done |
+|---|-----|------|---------|-------|------|
+| 7 | | `MemoryService.checkpoints_newest_first()` (recall's liveness with the service's settings, no code-chunk or document-part records, ties by `ref_id`, no content, no touch); the startup block, the `compact` block and `on_post_compact()` use it and touch only the checkpoint shown; memory-tiers.md; CHANGELOG Fixed; tests SC-9 (FR-011) | `src/memkernel/core/services.py`, `src/memkernel/lifecycle.py`, `docs/architecture/memory-tiers.md`, `CHANGELOG.md`, `tests/unit/test_lifecycle_component.py`, `tests/unit/test_services.py` | build | [x] |
