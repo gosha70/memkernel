@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """post-compact.py — MemKernel PostCompact hook.
 
-Called by Claude Code after context compaction.  Retrieves the most recent
-checkpoint and a broader slice of long-term context, then writes recovered
-content to stdout so Claude Code can inject it into the new session.
+Called by Claude Code after context compaction, with ``compact_summary`` (the
+summary the compaction produced), ``session_id`` and ``trigger`` in its stdin
+JSON. It retains the summary as a checkpoint, so the next session starts from
+it, and prints a status line to stderr. It prints nothing to stdout: Claude
+Code does not add PostCompact output to the model's context. The recovery
+after a compaction comes from session-start.py with ``source: "compact"``.
 
 The whole protocol lives in ``memkernel.lifecycle.MemoryLifecycle``; this
-script only builds the service and prints ``on_post_compact()``.
+script only reads its payload, builds the service and calls
+``capture_compact_summary()``.
 
 Prerequisites:
     `memkernel` (and its dependencies: chromadb, sentence-transformers, etc.) must
@@ -50,6 +54,7 @@ Environment variables (all optional — defaults match server defaults):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -68,8 +73,28 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 os.environ.setdefault("MEMKERNEL_PROJECT_ROOT", os.getcwd())
 
 
+def _payload() -> dict[str, object]:
+    """The hook's stdin JSON; empty when stdin is a terminal (run by hand), empty or not a JSON object."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _text(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    return value if isinstance(value, str) else ""
+
+
 def main() -> None:
-    print(MemoryLifecycle(build_service()).on_post_compact())
+    payload = _payload()
+    status = MemoryLifecycle(build_service()).capture_compact_summary(
+        _text(payload, "compact_summary"), session_id=_text(payload, "session_id"), trigger=_text(payload, "trigger")
+    )
+    print(status, file=sys.stderr)
 
 
 if __name__ == "__main__":

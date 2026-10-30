@@ -97,7 +97,7 @@ retrieval ranks by a combination of axes rather than cosine alone.
 | Consolidation as a pass that ranks what the agent kept using | Letta sleep-time compute; LangMem background manager | `MemoryService.consolidate` (ranks by `importance × (1 + access_count)`, purges expired) |
 | Agent-driven promotion with provenance | Reflexion / ReasoningBank distillation | `MemoryService.promote` (new record, `promoted_from` link) |
 | Procedural memory as a first-class type | Voyager skill library; Agent Workflow Memory | `MemoryType.PROCEDURE` → wiki `workflow` pages |
-| Compaction and session start as consolidation triggers | Claude Code auto-memory & compaction behaviour | `templates/hooks/{pre-compact,post-compact,session-start}.py` |
+| Compaction and session start as consolidation triggers | Claude Code auto-memory & compaction behaviour | `templates/hooks/{pre-compact,post-compact,session-start}.py`: PreCompact consolidates; PostCompact keeps Claude Code's `compact_summary` as a checkpoint; SessionStart branches on `source` (full block on startup and clear, a recovery block on compact, nothing on resume and fork) |
 | Human-readable compiled knowledge with an index | Karpathy LLM Wiki; Claude Code `MEMORY.md` index | `memkernel.wiki` (ADR-008) |
 | Backward compatibility with 0.1.x stores | — | adapter derives tier/importance when metadata is absent |
 | Revalidation of code snapshots against their source | Roynard 2026 (facts refreshed against drifting sources) | `MemoryService.revalidate()` (whole-file hash, `needs_review`, hidden from recall), `consolidate(revalidate=True)`, session start |
@@ -165,6 +165,10 @@ extra, never a requirement.
 
 `MemoryService.supersede(ref_id, by_ref)` is a library method, not an MCP tool: the governed wiki import uses it
 to apply a page's `corrects` (memkernel-0-6 FR-017).
+`MemoryService.checkpoints_newest_first()` is a library method, not an MCP tool: every live checkpoint by
+`recall`'s rules, without code-chunk and document-part records, newest first (ties by `ref_id`), without content
+and without touching. The session-start, compact and post-compact blocks take "the latest checkpoint" from it,
+never from a relevance-ranked `recall` window (memkernel-0-6-compaction-hooks FR-011).
 
 ## 6. Session protocol (what the harness should do)
 

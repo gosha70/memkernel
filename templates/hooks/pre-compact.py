@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """pre-compact.py — MemKernel PreCompact hook.
 
-Called by Claude Code before context compaction.  Reads the compaction event
-from stdin (JSON), then stores a structured checkpoint in MemKernel so that
-post-compaction recovery can restore session state.
+Called by Claude Code before context compaction. Its payload carries
+``trigger`` and ``custom_instructions`` but no summary, so it retains no
+checkpoint (the summary arrives in PostCompact); it runs a consolidation pass
+and prints a status line to stderr. Its output never reaches the model.
 
 The whole protocol lives in ``memkernel.lifecycle.MemoryLifecycle``; this
-script only parses stdin, builds the service and prints ``on_pre_compact()``.
+script only builds the service and calls ``on_pre_compact("")``.
 
 Prerequisites:
     `memkernel` (and its dependencies: chromadb, sentence-transformers, etc.) must
@@ -54,7 +55,6 @@ Environment variables (all optional — defaults match server defaults):
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -74,11 +74,8 @@ os.environ.setdefault("MEMKERNEL_PROJECT_ROOT", os.getcwd())
 
 
 def main() -> None:
-    # Claude Code passes the compaction event as JSON on stdin.
-    raw = sys.stdin.read().strip()
-    event: dict[str, object] = json.loads(raw) if raw else {}
-    summary = str(event.get("summary", ""))
-    print(MemoryLifecycle(build_service()).on_pre_compact(summary), file=sys.stderr)
+    # The PreCompact payload has no summary field (Claude Code hooks reference): nothing to read from stdin.
+    print(MemoryLifecycle(build_service()).on_pre_compact(""), file=sys.stderr)
 
 
 if __name__ == "__main__":

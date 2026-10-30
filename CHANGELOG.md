@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The Claude Code hooks follow the events as Claude Code sends them** (#68).
+  `session-start.py` branches on its payload's `source`: the full block on
+  `startup` and `clear` as before; on `compact`, a short recovery block (the
+  latest checkpoint the agent saved, with its age, and long-term context),
+  with no consolidation; on `resume` and `fork`, nothing. `post-compact.py`
+  prints nothing to stdout, since Claude Code never adds PostCompact output to
+  the model's context. **Copy the three scripts from `templates/hooks/` again**
+  and register `SessionStart` without a matcher.
+
 - **`wiki_import` is governed when the extra is installed** (wiki-studio 0.7.0
   review state): only pages wiki-studio reports approved are imported, and only
   when their bytes are still the approved revision. A draft, a page that
@@ -74,6 +83,23 @@ All notable changes to this project are documented here. The format follows
 - README: ignore wiki-studio's lock file next to the wiki directory.
 
 ### Fixed
+
+- `pre-compact.py` no longer stores a "no summary provided" placeholder at
+  every compaction; as the newest checkpoint it hid the one the agent saved
+  (#68, D1). Claude Code's PreCompact payload carries no summary.
+- Claude Code's own compaction summary (PostCompact's `compact_summary`) is now
+  kept as a checkpoint, tagged `compact-summary`, so the next session starts
+  from it (#68, D3). `MemoryLifecycle.capture_compact_summary()` does this for
+  library callers; `on_session_start()` takes an optional `source`.
+- The recovery after a compaction comes from `SessionStart` with `source:
+  "compact"`; the README had said `post-compact.py` re-injects it (#68, D2).
+- The latest checkpoint shown at session start, after a compaction and by
+  `on_post_compact()` is now the newest by time over every live checkpoint.
+  Since 0.3 it was picked from the 200 checkpoints a search ranked most
+  relevant, so with many checkpoints a newer one could be missed. Only the
+  checkpoint shown counts as accessed; `on_post_compact()` used to touch every
+  checkpoint the search returned. New `MemoryService.checkpoints_newest_first()`
+  lists live checkpoints by time, without content.
 
 - Two memkernel processes opening a new store at the same moment (in a
   project's first session, the MCP server and the `SessionStart` hook) no

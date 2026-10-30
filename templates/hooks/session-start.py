@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """session-start.py — MemKernel SessionStart hook.
 
-Called by Claude Code when a session starts. Recovers the latest checkpoint
-plus the most relevant long-term context and prints it to stdout so Claude
-Code injects it into the new session. Also runs a consolidation pass so that
-expired short-term memories are purged at the session boundary.
+Called by Claude Code when a session starts, with ``source`` in its stdin
+JSON. Claude Code adds this hook's stdout to the model's context:
+- ``startup`` and ``clear``: the latest checkpoint, the most relevant long-term
+  context and promotion candidates, after a consolidation pass;
+- ``compact``: the recovery after a compaction (the latest checkpoint the agent
+  saved, with its age, and long-term context; no consolidation);
+- ``resume`` and ``fork``: nothing.
+Register it without a matcher, so it runs for every ``source``.
 
 The whole protocol lives in ``memkernel.lifecycle.MemoryLifecycle``; this
-script only builds the service and prints ``on_session_start()``.
+script only reads ``source``, builds the service and prints
+``on_session_start(source)`` when it is not empty.
 
 Prerequisites and installation are identical to pre-compact.py / post-compact.py
 (the `memkernel` package must be importable by the interpreter running this
@@ -30,6 +35,7 @@ Environment variables (all optional — defaults match server defaults):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -49,9 +55,28 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 os.environ.setdefault("MEMKERNEL_PROJECT_ROOT", os.getcwd())
 
 
+def _payload() -> dict[str, object]:
+    """The hook's stdin JSON; empty when stdin is a terminal (run by hand), empty or not a JSON object."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _text(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    return value if isinstance(value, str) else ""
+
+
 def main() -> None:
+    source = _text(_payload(), "source") or None
     settings = MemKernelSettings()
-    print(MemoryLifecycle(build_service(settings), settings).on_session_start())
+    text = MemoryLifecycle(build_service(settings), settings).on_session_start(source)
+    if text:
+        print(text)
 
 
 if __name__ == "__main__":
