@@ -65,7 +65,10 @@ def studio_api() -> Any:
 
 
 def _service(**overrides: Any) -> MemoryService:
-    base: dict[str, Any] = {"project_id": f"wiki-{uuid.uuid4().hex[:8]}"}
+    base: dict[str, Any] = {
+        "project_id": f"wiki-{uuid.uuid4().hex[:8]}",
+        "chroma_persist_path": "",
+    }  # in-memory, ledger too
     base.update(overrides)
     settings = MemKernelSettings(**base)
     store = ChromaVectorStore(settings, client=chromadb.EphemeralClient())

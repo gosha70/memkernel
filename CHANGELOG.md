@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Withdrawal in the governed `wiki_import`** (#48, Release B part 2b;
+  specs/memkernel-0-7). A page's memory leaves the current answers, its record
+  kept, when the page is deleted (only memories the new sync ledger recorded
+  as imported; legacy memories never), deprecated (once that revision is
+  approved) or superseded (`superseded_by`): then the successor page's memory
+  replaces it, or, until the successor has one, it is withdrawn and reported
+  `pending`. New response keys: `withdrawn`, `superseded`, `pending`,
+  `sync_failed` and `ledger_error`. The ungoverned import is unchanged.
+- `MemoryService.withdraw(ref_id, reason)` and the durable `withdrawn_reason`
+  and `withdrawn_at` markers; `Memory.retired()` is the one liveness rule
+  (superseded or withdrawn). Stores written before 0.7 load unchanged.
+- The wiki sync ledger: one JSON file per project and wiki in the new
+  `MEMKERNEL_STATE_DIR` (default `.memkernel/state`, resolved like the Chroma
+  persist path; keep it out of git), with `pending` / `applied` / `failed`
+  entries and a retry path; held under a lock for the whole import run.
+- `MemoryService.settings`, the settings a service was built with.
+
 ## [0.6.0] - 2026-10-30
 
 The Release B wiki bridge (#48, parts 1 and 2a, with wiki-studio 0.7.0) and the

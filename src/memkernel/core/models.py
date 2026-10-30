@@ -102,6 +102,14 @@ CODE_CHUNK_KEY = "code_chunk"  # boolean metadata so adapters can skip chunk rec
 PARENT_REF_KEY = "parent_ref"
 # Durable liveness marker (0.4): set on a record that another record replaced.
 SUPERSEDED_BY_KEY = "superseded_by"
+# Durable liveness marker (0.7, memkernel-0-7 D1): set on a record taken out of the current answers with no
+# replacing record (a deleted, deprecated or superseded wiki page); the reason and the time it happened.
+WITHDRAWN_REASON_KEY = "withdrawn_reason"
+WITHDRAWN_AT_KEY = "withdrawn_at"
+WITHDRAWN_DELETED = "deleted"
+WITHDRAWN_DEPRECATED = "deprecated"
+WITHDRAWN_SUPERSEDED = "superseded"
+WITHDRAWN_REASONS = frozenset({WITHDRAWN_DELETED, WITHDRAWN_DEPRECATED, WITHDRAWN_SUPERSEDED})
 # Revalidation flags (0.4).
 NEEDS_REVIEW_KEY = "needs_review"
 REVIEW_REASON_KEY = "review_reason"
@@ -169,6 +177,13 @@ class Memory(BaseModel):
     parent_ref: str | None = None
     needs_review: bool = False
     review_reason: str = ""
+    # 0.7: withdrawn without a replacement (memkernel-0-7 FR-001); absent, so live, in older stores.
+    withdrawn_reason: str | None = None
+    withdrawn_at: datetime | None = None
+
+    def retired(self) -> bool:
+        """True for history: superseded by another record or withdrawn (memkernel-0-7 FR-002)."""
+        return self.superseded_by is not None or self.withdrawn_reason is not None
 
 
 class HealthItem(BaseModel):

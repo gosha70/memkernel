@@ -265,6 +265,9 @@ def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str
     env = {
         "MEMKERNEL_PROJECT_ID": f"lc_{sha256_text(chain_id + '/' + dirs.namespace)[:16]}",
         "MEMKERNEL_CHROMA_PERSIST_PATH": str(dirs.store),
+        # memkernel 0.7's sync ledger: beside the store and carried with it, outside Chroma's directory, and never
+        # in the workspace (a relative default would land in the agent's working directory).
+        "MEMKERNEL_STATE_DIR": str(dirs.store.with_name(f"{dirs.store.name}.state")),
         "MEMKERNEL_PROJECT_ROOT": str(dirs.workspace),
         "MEMKERNEL_WIKI_DIR": str(dirs.workspace / WIKI_DIR),
         "HOME": str(dirs.home),
