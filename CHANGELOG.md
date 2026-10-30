@@ -17,6 +17,14 @@ until that is fixed, this is memkernel-0-6 SC-8's interim result.
 
 ### Changed
 
+- The agent instructions' Wiki and hook sections
+  (`templates/claude-memory-instructions.md`) and the Kiro steering file add the
+  approval step before `wiki_import` and say that, with the hooks installed,
+  `SessionStart` recovers after a compaction; the README documents
+  `on_session_start(source)`, `capture_compact_summary()` and the store's
+  `.memkernel-open.lock`. The minimal CLAUDE.md block is unchanged (the 0.5
+  lifecycle suite's arms carry it byte for byte). Copy the templates again.
+
 - **The Claude Code hooks follow the events as Claude Code sends them** (#68).
   `session-start.py` branches on its payload's `source`: the full block on
   `startup` and `clear` as before; on `compact`, a short recovery block (the

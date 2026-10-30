@@ -105,6 +105,25 @@ is blocked on it.
       preregistered run per minor release; the integration questions are in
       GiulioDER/agent-memory-bench#121
 
+## 0.6 — Release B wiki bridge, hook fixes
+
+- [x] Release B part 1 (#48): `wiki_export` through wiki-studio's scoped
+      commit, no whole-wiki snapshot; receipt fields; a commit that failed
+      afterwards reported as written or as an uncertain outcome
+      (specs/memkernel-0-6) (0.6.0)
+- [x] Release B part 2a (#48): governed `wiki_import` (approved revisions
+      only, wiki-studio 0.7.0 review state), `corrects`, one memory per page,
+      `MemoryService.supersede` (0.6.0); wiki-studio's Release B loop test 5 of
+      6, test 4 waiting on gosha70/wiki-studio#53
+- [x] Store-open race between the MCP server and a hook (#69) (0.6.0)
+- [x] Compaction hooks D1–D4 (#68): no placeholder checkpoint, Claude Code's
+      `compact_summary` kept, `SessionStart` branches on `source`, the latest
+      checkpoint by time (0.6.0)
+- [ ] Release B part 2b: withdrawal on supersession, deprecation and
+      deletion, with a per-page sync state (#48)
+- [ ] Release B part 2c: governed mode and curation debt at session start (#48)
+- [ ] Hook follow-ups D5–D9 and the capture phases (#59)
+
 ## Later / research
 
 - [ ] Optional background summariser (`SummarizerPort`) for sleep-time

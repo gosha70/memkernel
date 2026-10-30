@@ -222,7 +222,7 @@ setting is logged as a warning at startup.
 |----------|---------|-------------|
 | `MEMKERNEL_PROJECT_ID` | `default` | Project namespace — memories are isolated per project |
 | `MEMKERNEL_DEFAULT_SESSION_ID` | `default` | Session tag applied when `session_id` is omitted from `retain` |
-| `MEMKERNEL_CHROMA_PERSIST_PATH` | `.memkernel/chroma` | ChromaDB data directory. Empty string = in-memory (ephemeral) |
+| `MEMKERNEL_CHROMA_PERSIST_PATH` | `.memkernel/chroma` | ChromaDB data directory. Empty string = in-memory (ephemeral). Opening it takes a short lock on `.memkernel-open.lock` inside it, so the MCP server and a hook opening a new store at once do not collide |
 | `MEMKERNEL_CHROMA_COLLECTION_PREFIX` | `memkernel` | Prefix for ChromaDB collection names (`{prefix}_{project_id}`) |
 | `MEMKERNEL_EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model name |
 | `MEMKERNEL_EMBEDDING_DIMENSION` | `384` | Output dimension of the embedding model |
@@ -303,9 +303,13 @@ from memkernel.lifecycle import MemoryLifecycle
 memory = MemoryLifecycle(build_service())
 system_context = memory.on_session_start()       # checkpoint, long-term context, promotion candidates, wiki pointer
 ...
-memory.on_pre_compact(summary)                   # checkpoint episode + consolidation, before the context is compacted
-recovered = memory.on_post_compact()             # what to re-inject after compaction
+memory.on_pre_compact(summary)                   # checkpoint episode (only if summary is not blank) + consolidation
+recovered = memory.on_post_compact()             # what to re-inject after your own compaction
 memory.on_session_end(summary)                   # final checkpoint + consolidation
+
+# Driving it from Claude Code's hook events instead (what templates/hooks/ do):
+memory.on_session_start(source)                  # source "startup"/"clear": full block; "compact": recovery block; "resume"/"fork": ""
+memory.capture_compact_summary(compact_summary, session_id=..., trigger=...)  # keep Claude Code's own summary as a checkpoint
 ```
 
 ### Documents and `ask`
