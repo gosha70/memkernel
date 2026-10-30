@@ -37,6 +37,9 @@ from memkernel.core.models import (
     REVIEW_REASON_KEY,
     REVIEW_REASON_MISSING,
     SUPERSEDED_BY_KEY,
+    WITHDRAWN_AT_KEY,
+    WITHDRAWN_REASON_KEY,
+    WITHDRAWN_REASONS,
     Answer,
     ArtifactRef,
     HealthItem,
@@ -373,7 +376,7 @@ class MemoryService:
         records = self._code_records(source)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
         canonicals = [m for m in records if m.ref_id != ref_id and not _is_code_chunk(m, referenced)]
-        others = [m for m in canonicals if m.superseded_by is None]
+        others = [m for m in canonicals if not m.retired()]
         # Snapshots an earlier, interrupted attempt already marked as replaced by
         # this one may still own chunk records: they are cleanup targets too.
         marked_before = [m for m in canonicals if m.superseded_by == ref_id]
@@ -398,7 +401,7 @@ class MemoryService:
         """Live (not superseded) canonical `code` records for ``source``, chunk records excluded."""
         records = self._code_records(source)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
-        return [m for m in records if m.superseded_by is None and not _is_code_chunk(m, referenced)]
+        return [m for m in records if not m.retired() and not _is_code_chunk(m, referenced)]
 
     def _index_code_chunks(
         self,
@@ -496,6 +499,38 @@ class MemoryService:
             if not chunk.superseded_by:
                 self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
         self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
+
+    def withdraw(self, ref_id: str, reason: str) -> bool:
+        """Take the existing record ``ref_id`` out of the current answers, with no replacing record (memkernel-0-7).
+
+        Sets only the durable ``withdrawn_reason`` and ``withdrawn_at`` markers, on the owned chunks first and on
+        the record last, as :meth:`supersede` does; content and every other field stay, so provenance remains.
+        Returns True when it set the marker. Returns False and changes nothing else when the record is already
+        withdrawn for ``reason`` (the call still marks any owned chunk left without the marker, so a retry
+        completes a partial mark), is withdrawn for a different reason, or is superseded: an existing marker is
+        never cleared or overwritten, and a superseded record is already history. Raises ``ValueError`` and
+        changes nothing for an unknown reason or a record not in this store (unknown, or another project's).
+        """
+        if reason not in WITHDRAWN_REASONS:
+            raise ValueError(f"unknown withdrawal reason {reason!r}; expected one of {sorted(WITHDRAWN_REASONS)}")
+        target = self._vector_store.get_by_id(ref_id)
+        if target is None:
+            raise ValueError(f"{ref_id} is not a memory in this store")
+        if target.withdrawn_reason == reason:
+            self._mark_withdrawn(ref_id, reason, target.withdrawn_at or datetime.now(UTC))  # repairs chunks
+            return False
+        if target.retired():
+            return False
+        self._mark_withdrawn(ref_id, reason, datetime.now(UTC))
+        return True
+
+    def _mark_withdrawn(self, target_ref: str, reason: str, when: datetime) -> None:
+        """Set the withdrawal marker on ``target_ref``'s owned chunks without one, then on ``target_ref``."""
+        update = {WITHDRAWN_REASON_KEY: reason, WITHDRAWN_AT_KEY: when.isoformat()}
+        for chunk in self._owned_chunks(target_ref):
+            if not chunk.withdrawn_reason:
+                self._vector_store.update_metadata(chunk.ref_id, update)
+        self._vector_store.update_metadata(target_ref, update)
 
     def _delete_owned_chunks(self, canonical: Memory) -> None:
         """Delete a canonical's owned chunk records; legacy shared chunk_refs only when nothing else references them."""
@@ -713,8 +748,8 @@ class MemoryService:
     ) -> list[ArtifactRef]:
         """Drop expired and superseded memories; resolve document chunk hits to their summary.
 
-        Superseded means ``superseded_by`` is set (durable, independent of the
-        result window); the result-window check on ``supersedes`` links stays
+        Superseded means ``superseded_by`` is set, withdrawn means ``withdrawn_reason`` is (both durable,
+        independent of the result window); the result-window check on ``supersedes`` links stays
         as a fallback for legacy links without the marker. The needs-review
         exclusion is applied here, in Python, never as a store filter, so a
         record without the key is simply live.
@@ -739,7 +774,7 @@ class MemoryService:
         seen: set[str] = set()
         for ref in results:
             memory = memories.get(ref.ref_id)
-            if memory is None or memory.superseded_by:
+            if memory is None or memory.retired():
                 continue
             if memory.needs_review and not include_needs_review:
                 continue
@@ -749,7 +784,7 @@ class MemoryService:
                 if memory.parent_ref not in owners:
                     owners[memory.parent_ref] = self._vector_store.get_by_id(memory.parent_ref)
                 owner = owners[memory.parent_ref]
-                if owner is None or owner.superseded_by or (owner.needs_review and not include_needs_review):
+                if owner is None or owner.retired() or (owner.needs_review and not include_needs_review):
                     continue
                 if not _matches_query(owner, query):
                     continue  # the query's filters apply to the owner the chunk stands for
@@ -776,7 +811,7 @@ class MemoryService:
         chunk, not on the owner it stands for.
         """
         for owner in self._document_owners(document_id):
-            if owner.superseded_by is None and _matches_query(owner, query):
+            if not owner.retired() and _matches_query(owner, query):
                 return owner
         return None
 
@@ -805,7 +840,7 @@ class MemoryService:
 
         ``tier`` is filtered in Python because records written before tiers
         existed carry no ``tier`` metadata; the adapter derives it from the type.
-        Records with ``superseded_by`` set are left out unless ``include_superseded``.
+        Retired records (``superseded_by`` or ``withdrawn_reason`` set) are left out unless ``include_superseded``.
         """
         conditions: list[dict[str, Any]] = []
         if type is not None:
@@ -819,7 +854,7 @@ class MemoryService:
             where = {"$and": conditions}
         memories = [m for m in self._vector_store.list_all(where) if not _is_document_part(m)]
         if not include_superseded:
-            memories = [m for m in memories if m.superseded_by is None]
+            memories = [m for m in memories if not m.retired()]
         if tier is not None:
             memories = [m for m in memories if m.tier == tier]
         return memories
@@ -835,7 +870,7 @@ class MemoryService:
         live = [
             m
             for m in self._vector_store.list_all({"checkpoint": True}, include_content=False)
-            if m.superseded_by is None
+            if not m.retired()
             and not m.needs_review
             and m.parent_ref is None
             and not _is_document_part(m)
@@ -847,6 +882,11 @@ class MemoryService:
     def project_id(self) -> str:
         """Return the project_id for this service instance."""
         return self._settings.project_id
+
+    @property
+    def settings(self) -> MemKernelSettings:
+        """The settings this service was built with (read-only by convention)."""
+        return self._settings
 
     def stats(self) -> dict[str, object]:
         """Return total count, per-type breakdown, memory growth, and last recall timing.
@@ -1021,7 +1061,7 @@ class MemoryService:
             if m.tier != MemoryTier.LONG_TERM
             and m.ref_id not in promoted_sources
             and not m.checkpoint
-            and m.superseded_by is None
+            and not m.retired()
         ]
         candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
         top = candidates[:limit]
@@ -1094,11 +1134,11 @@ class MemoryService:
             if m.supersedes and m.supersedes in by_id and by_id[m.supersedes].superseded_by is None:
                 add(HEALTH_UNMARKED_SUPERSESSIONS, m.supersedes, f"superseded by {m.ref_id} without superseded_by")
             is_chunk = _is_code_chunk(m, referenced)
-            if m.type == MemoryType.CODE and m.source and not is_chunk and m.superseded_by is None:
+            if m.type == MemoryType.CODE and m.source and not is_chunk and not m.retired():
                 path = self._resolve_source(m.source)
                 if path is not None and not path.is_file():
                     add(HEALTH_STALE_SOURCES, m.ref_id, f"{m.source} does not exist")
-            if m.needs_review and m.superseded_by is None and not is_chunk and not _is_document_part(m):
+            if m.needs_review and not m.retired() and not is_chunk and not _is_document_part(m):
                 # live records only: a replaced snapshot keeps its flag as history, not as an action item
                 add(HEALTH_NEEDS_REVIEW, m.ref_id, f"{m.source or m.type.value}: {m.review_reason}")
             if m.tier != MemoryTier.LONG_TERM and memory_is_expired(m, self._settings):
@@ -1130,7 +1170,7 @@ class MemoryService:
             m
             for m in records
             if m.tier == MemoryTier.LONG_TERM
-            and m.superseded_by is None
+            and not m.retired()
             and not _is_document_part(m)
             and not _is_code_chunk(m, referenced)
             and m.content
@@ -1196,7 +1236,7 @@ class MemoryService:
         records = self._vector_store.list_all({"type": MemoryType.CODE.value}, include_content=False)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
         for memory in records:
-            if memory.superseded_by or not memory.source or _is_code_chunk(memory, referenced):
+            if memory.retired() or not memory.source or _is_code_chunk(memory, referenced):
                 continue
             report["checked"] += 1
             path = self._resolve_source(memory.source)

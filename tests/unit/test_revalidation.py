@@ -233,3 +233,17 @@ def test_admin_revalidate_endpoint(tmp_path: Path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["missing"] == 1 and body["flagged"][0]["ref_id"] == ref
+
+
+def test_a_withdrawn_code_snapshot_is_not_revalidated(tmp_path: Path) -> None:
+    """memkernel-0-7 SC-5: revalidation and health skip withdrawn records, as they skip superseded ones."""
+    from memkernel.core.models import WITHDRAWN_DELETED
+
+    svc, _, _ = _build(tmp_path)
+    path = _write(tmp_path, "src/app.py", V1)
+    ref = svc.retain(V1, MemoryType.CODE, source="src/app.py")
+    svc.withdraw(ref, WITHDRAWN_DELETED)
+    path.write_text(V2, encoding="utf-8")
+
+    assert svc.consolidate(revalidate=True)["revalidated"]["flagged"] == []
+    assert svc.health().stale_sources == []

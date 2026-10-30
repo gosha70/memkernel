@@ -551,3 +551,33 @@ def test_the_chunk_repair_marks_only_chunks_without_a_marker() -> None:
 
     marks = {c.ref_id: c.superseded_by for c in _chunks_of(store, old)}
     assert marks[first.ref_id] == other and all(marks[c.ref_id] == new for c in rest)
+
+
+def test_withdraw_marks_chunks_first_and_a_retry_repairs_a_partial_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """memkernel-0-7 FR-003: chunks first, the record last; a repeated call completes a partial mark."""
+    from memkernel.core.models import WITHDRAWN_DELETED
+
+    svc, store, _ = _build()
+    ref = svc.retain(V1, MemoryType.CODE, source="src/a.py")
+    assert len(_chunks_of(store, ref)) >= 2
+    real = store.update_metadata
+    calls = [0]
+
+    def fail_the_second_update(ref_id: str, update: dict[str, Any]) -> None:
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError("disk full")
+        real(ref_id, update)
+
+    monkeypatch.setattr(store, "update_metadata", fail_the_second_update)
+    with pytest.raises(OSError):
+        svc.withdraw(ref, WITHDRAWN_DELETED)
+    monkeypatch.undo()
+
+    record = store.get_by_id(ref)
+    assert record is not None and record.withdrawn_reason is None  # the record is the commit point
+    assert svc.withdraw(ref, WITHDRAWN_DELETED) is True
+    assert all(c.withdrawn_reason == WITHDRAWN_DELETED for c in _chunks_of(store, ref))
+    real(_chunks_of(store, ref)[0].ref_id, {"withdrawn_reason": ""})  # a partial mark from an earlier failure
+    assert svc.withdraw(ref, WITHDRAWN_DELETED) is False
+    assert all(c.withdrawn_reason == WITHDRAWN_DELETED for c in _chunks_of(store, ref))

@@ -19,6 +19,8 @@ from memkernel.core.models import (
     PARENT_REF_KEY,
     REVIEW_REASON_KEY,
     SUPERSEDED_BY_KEY,
+    WITHDRAWN_AT_KEY,
+    WITHDRAWN_REASON_KEY,
     Memory,
     MemoryTier,
     MemoryType,
@@ -133,6 +135,8 @@ def _memory_from_chroma(
         parent_ref=str(meta[PARENT_REF_KEY]) if meta.get(PARENT_REF_KEY) else None,
         needs_review=bool(meta.get(NEEDS_REVIEW_KEY, False)),
         review_reason=str(meta.get(REVIEW_REASON_KEY) or ""),
+        withdrawn_reason=str(meta[WITHDRAWN_REASON_KEY]) if meta.get(WITHDRAWN_REASON_KEY) else None,
+        withdrawn_at=datetime.fromisoformat(str(meta[WITHDRAWN_AT_KEY])) if meta.get(WITHDRAWN_AT_KEY) else None,
     )
 
 
@@ -275,7 +279,7 @@ class ChromaVectorStore:
 
         Code chunk records (``code_chunk: true``) are skipped so that a file
         whose single chunk equals the whole file cannot shadow its canonical;
-        superseded records (``superseded_by`` set) are history, not dedup hits,
+        superseded and withdrawn records (``superseded_by`` or ``withdrawn_reason`` set) are history, not dedup hits,
         so re-retaining reverted content creates a new live record.
         """
         conditions: list[dict[str, Any]] = [{"hash": content_hash}, {"type": memory_type}]
@@ -289,8 +293,8 @@ class ChromaVectorStore:
         metadatas: list[Mapping[str, Any]] = list(raw_metas) if raw_metas is not None else []
 
         for index, meta in enumerate(metadatas):
-            if meta.get(CODE_CHUNK_KEY) is True or meta.get(SUPERSEDED_BY_KEY):
-                continue  # chunk records and superseded (historical) records are never dedup hits
+            if meta.get(CODE_CHUNK_KEY) is True or meta.get(SUPERSEDED_BY_KEY) or meta.get(WITHDRAWN_REASON_KEY):
+                continue  # chunk records and retired (superseded or withdrawn) records are never dedup hits
             return _memory_from_chroma(ids, documents, metadatas, index)
         return None
 

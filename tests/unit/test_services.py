@@ -654,3 +654,82 @@ def test_checkpoints_newest_first_lists_live_checkpoints_by_time_without_content
     assert [m.ref_id for m in listed] == [*sorted([a, b], reverse=True), old]
     assert all(m.content == "" for m in listed)
     assert svc.checkpoints_newest_first() == listed  # deterministic
+
+
+# ── memkernel-0-7: withdrawal (FR-001 to FR-003, SC-5) ────────────────────────
+
+
+def test_withdraw_takes_a_memory_out_of_every_live_path_and_keeps_its_record() -> None:
+    from memkernel.core.models import WITHDRAWN_DELETED
+
+    svc, _, _ = _make_service()
+    gone = svc.retain("Deploys happen on Fridays", MemoryType.CONVENTION, tags=["ops"])
+    kept = svc.retain("Deploys need a green CI run", MemoryType.CONVENTION)
+    checkpoint = svc.retain("SESSION CHECKPOINT", MemoryType.EPISODE, checkpoint=True)
+    obs = svc.retain("flaky deploy on Fridays", MemoryType.OBSERVATION)
+    svc.get(obs)  # a promotion candidate
+
+    assert svc.withdraw(gone, WITHDRAWN_DELETED) is True
+    assert svc.withdraw(checkpoint, WITHDRAWN_DELETED) is True
+    assert svc.withdraw(obs, WITHDRAWN_DELETED) is True
+
+    record = svc.get(gone, touch=False)
+    assert record is not None and record.withdrawn_reason == WITHDRAWN_DELETED and record.withdrawn_at is not None
+    assert record.content == "Deploys happen on Fridays" and record.tags == ["ops"] and record.superseded_by is None
+    assert gone not in {r.ref_id for r in svc.recall("deploys Fridays", touch=False)}
+    assert {m.ref_id for m in svc.list_memories()} == {kept}
+    assert {m.ref_id for m in svc.list_memories(include_superseded=True)} == {gone, kept, checkpoint, obs}
+    assert svc.checkpoints_newest_first() == []
+    assert svc.consolidate(purge=False)["candidates"] == []
+    again = svc.retain("Deploys happen on Fridays", MemoryType.CONVENTION)  # withdrawn is history, not a dedup hit
+    assert again != gone
+
+
+def test_withdraw_is_idempotent_never_overwrites_and_refuses_unknown_records() -> None:
+    from memkernel.core.models import WITHDRAWN_DELETED, WITHDRAWN_DEPRECATED
+
+    svc, _, _ = _make_service()
+    ref = svc.retain("Use Postgres", MemoryType.DECISION)
+    replaced = svc.retain("Use MySQL", MemoryType.DECISION)
+    successor = svc.retain("Use SQLite", MemoryType.DECISION)
+    svc.supersede(replaced, successor)
+
+    assert svc.withdraw(ref, WITHDRAWN_DEPRECATED) is True
+    first = svc.get(ref, touch=False)
+    assert svc.withdraw(ref, WITHDRAWN_DEPRECATED) is False  # same reason: no change
+    assert svc.withdraw(ref, WITHDRAWN_DELETED) is False  # a different reason never overwrites
+    assert svc.withdraw(replaced, WITHDRAWN_DELETED) is False  # a superseded record is already history
+    after = svc.get(ref, touch=False)
+    assert first is not None and after is not None
+    assert (after.withdrawn_reason, after.withdrawn_at) == (WITHDRAWN_DEPRECATED, first.withdrawn_at)
+    still = svc.get(replaced, touch=False)
+    assert still is not None and still.withdrawn_reason is None and still.superseded_by == successor
+    other_project, _, _ = _make_service()
+    foreign = other_project.retain("another project's memory", MemoryType.FACT)
+    for target, reason in (("mem-unknown", WITHDRAWN_DELETED), (foreign, WITHDRAWN_DELETED), (ref, "bored")):
+        with pytest.raises(ValueError):
+            svc.withdraw(target, reason)
+
+
+def test_a_withdrawn_record_can_be_superseded_later_and_keeps_both_markers() -> None:
+    """memkernel-0-7 D1/D4: the late link sets superseded_by and leaves withdrawn_reason as it was."""
+    from memkernel.core.models import WITHDRAWN_SUPERSEDED
+
+    svc, _, _ = _make_service()
+    old = svc.retain("Use Postgres 14", MemoryType.DECISION)
+    svc.withdraw(old, WITHDRAWN_SUPERSEDED)
+    new = svc.retain("Use Postgres 16", MemoryType.DECISION)
+
+    assert svc.supersede(old, new) is True
+    record = svc.get(old, touch=False)
+    assert record is not None and record.superseded_by == new and record.withdrawn_reason == WITHDRAWN_SUPERSEDED
+
+
+def test_records_without_the_withdrawal_keys_load_as_live() -> None:
+    """Stores written by 0.1-0.6 have no withdrawn_* metadata: their records stay live (FR-001)."""
+    svc, store, _ = _make_service()
+    ref = svc.retain("an old fact", MemoryType.FACT)
+    memory = store.get_by_id(ref)
+
+    assert memory is not None and memory.withdrawn_reason is None and memory.withdrawn_at is None
+    assert not memory.retired() and ref in {m.ref_id for m in svc.list_memories()}
