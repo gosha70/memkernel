@@ -14,6 +14,7 @@ origin:
     - https://code.claude.com/docs/en/hooks
   transcripts:
     - specs/memkernel-0-7-hooks/origin/2026-10-30-d5-d9.md
+    - specs/memkernel-0-7-hooks/origin/2026-10-30-review-77.md
   origin_claim: |
     #59 Phase 1, the defects #68 left: D5 injected context lines carry no ref_id while
     the footer says get(ref_id); D6 no absolute relevance floor (min-max makes the top hit
