@@ -46,12 +46,61 @@ def _steps(report: dict[str, Any]) -> dict[str, bool]:
 
 
 @pytest.mark.slow
-def test_the_wiki_bridge_carries_a_fact_into_an_empty_second_namespace() -> None:
-    report = _check_module().run_check(SUITE_DIR, _memkernel(), sys.executable, None)
+def test_the_wiki_bridge_carries_a_fact_into_an_empty_second_namespace_on_both_paths() -> None:
+    """#81 (memkernel-0-7-wiring-spool SC-1): governed (curated and approved) and ungoverned (wiki-studio hidden)."""
+    report = _check_module().run_check(SUITE_DIR, _memkernel(), sys.executable, None, "both")
     assert report["passed"], report
+    assert report["legs"] == ["governed", "ungoverned"]
     steps = _steps(report)
-    assert steps["destination store starts with 0 records"] and steps["recall finds nothing before import"]
-    assert steps["get returns the synthetic sentence verbatim"]
+    for leg in ("governed", "ungoverned"):
+        assert steps[f"{leg}: destination store starts with 0 records"]
+        assert steps[f"{leg}: recall finds nothing before import"]
+        assert steps[f"{leg}: get returns the synthetic sentence verbatim"]
+        assert steps[f"{leg}: wiki_import was {leg}"]
+    assert steps["governed: the exported page was marked stable and approved"]
+
+
+def test_the_stub_makes_memkernel_see_no_wiki_studio(tmp_path: Path) -> None:
+    """SC-3: with the stub first on PYTHONPATH, memkernel's load_studio() treats wiki-studio as absent."""
+    import os
+    import subprocess
+
+    stub = _check_module().write_stub(tmp_path / "hide")
+    probe = "from memkernel.wiki.studio import load_studio; print(load_studio() is None)"
+    env = {**os.environ, "PYTHONPATH": str(stub)}
+    hidden = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=True)
+    visible = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+
+    assert hidden.stdout.strip() == "True"
+    assert visible.stdout.strip() == ("False" if _check_module().studio_version(sys.executable) else "True")
+
+
+def test_auto_follows_the_wiki_studio_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-2: auto is governed with wiki-studio >= 0.7.0, else ungoverned; both runs governed then ungoverned."""
+    check = _check_module()
+    for version, legs in (
+        ("0.7.0", ["governed"]),
+        ("0.8.1", ["governed"]),
+        ("0.6.0", ["ungoverned"]),
+        ("", ["ungoverned"]),
+    ):
+        monkeypatch.setattr(check, "studio_version", lambda python, v=version: v)
+        assert check.resolve_wiki_path("auto", sys.executable) == legs
+    assert check.resolve_wiki_path("both", sys.executable) == ["governed", "ungoverned"]
+    assert check.resolve_wiki_path("ungoverned", sys.executable) == ["ungoverned"]
+
+
+def test_governed_without_wiki_studio_fails_with_a_named_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-2: the governed leg stops at its first step, before any server is started."""
+    check = _check_module()
+    monkeypatch.setattr(check, "studio_version", lambda python: "")
+
+    report = check.run_check(SUITE_DIR, "memkernel-not-started", sys.executable, None, "governed")
+
+    assert report["passed"] is False
+    assert report["steps"] == [
+        {"step": "the server's interpreter has wiki-studio (governed leg)", "passed": False, "version": ""}
+    ]
 
 
 @pytest.mark.slow

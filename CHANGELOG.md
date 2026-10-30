@@ -28,6 +28,14 @@ All notable changes to this project are documented here. The format follows
   `started` line for every `source` and no longer opens the store on `resume` or `fork`. At the next startup,
   a session that saved no checkpoint between its first start and its last end gets one line under
   `### Previous sessions`. Register `session-end.py` under `SessionEnd`; `on_session_end` is unchanged.
+- The session spool drops a session that never recorded an end once its newest line is 7 days old
+  (`SPOOL_UNENDED_MAX_AGE`), never the current one, so the file stays bounded; the next startup says how many,
+  with a hint that `session-end.py` may not be registered.
+- The lc-wiki wiring check (`eval/lifecycle-suite/wiring/wiring_check.py`, task 18a) takes `--wiki-path
+  auto|governed|ungoverned|both` (#81): `governed` marks the exported page stable and approves it with
+  wiki-studio before the import, as a curator would; `ungoverned` hides wiki-studio from the server with a stub
+  package; `auto` (default) keeps a run without the `wiki` extra unchanged. The check now passes where
+  wiki-studio 0.7 is installed. The 0.5 records keep the 0.5 check's sha256.
 - `recall(order="newest")` (MCP tool and `MemoryService.recall`): with `checkpoint_only=true`, the latest
   checkpoints by time instead of by relevance; refused without `checkpoint_only`. The tool count is unchanged.
 
