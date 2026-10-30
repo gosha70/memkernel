@@ -34,7 +34,7 @@ MemKernel gives Claude Code (and any MCP-compatible copilot) persistent memory a
 - **An index of the whole repository.** `code` memories are the snapshots the agent chose to retain, not an automatic scan of every file.
 - **A cross-project knowledge base.** One store per project id. Sharing is deliberate: a second server with a shared id, or the wiki bridge.
 
-**Evidence.** `eval/run_eval.py` measures retrieval (recall@k, precision@k, MRR). The 0.5 lifecycle evaluation, a **maintainer-run supplemental evaluation** (memkernel's own runner, preregistered and announced in [#17](https://github.com/gosha70/memkernel/issues/17) before the run), ran the same agent in seven arms on 20 tasks: [report](eval/lifecycle-suite/report-0.5.0.md). **No gain is claimed.** Against files alone (`claude_md`), memkernel's memory store was ahead on 6 tasks, behind on none and tied on 14 (Holm-adjusted p 0.0625: "no detectable difference"; with so many ties this task set could not have reached significance); against earlier transcripts (`fs_grep`) it was equivalent. Two of the four task groups hit a ceiling, every arm passing every trial. The report's disclosures list its deviations and known defects. Results are published per minor release, including the cases with no gain.
+**Evidence.** `eval/run_eval.py` measures retrieval (recall@k, precision@k, MRR). The 0.5 lifecycle evaluation, a **maintainer-run supplemental evaluation** (memkernel's own runner, preregistered and announced in [#17](https://github.com/gosha70/memkernel/issues/17) before the run), ran the same agent in seven arms on 20 tasks: [report](eval/lifecycle-suite/report-0.5.0.md). **No gain is claimed.** Against files alone (`claude_md`), memkernel's memory store was ahead on 6 tasks, behind on none and tied on 14 (Holm-adjusted p 0.0625: "no detectable difference"; with so many ties this task set could not have reached significance); against earlier transcripts (`fs_grep`) it was equivalent. Two of the four task groups hit a ceiling, every arm passing every trial. The report's disclosures list its deviations and known defects. Results are published with the cases that show no gain; the 0.5 report is the latest evaluation, and 0.6.0 had no new measured run.
 
 ---
 
@@ -222,7 +222,7 @@ setting is logged as a warning at startup.
 |----------|---------|-------------|
 | `MEMKERNEL_PROJECT_ID` | `default` | Project namespace — memories are isolated per project |
 | `MEMKERNEL_DEFAULT_SESSION_ID` | `default` | Session tag applied when `session_id` is omitted from `retain` |
-| `MEMKERNEL_CHROMA_PERSIST_PATH` | `.memkernel/chroma` | ChromaDB data directory. Empty string = in-memory (ephemeral). Opening it takes a short lock on `.memkernel-open.lock` inside it, so the MCP server and a hook opening a new store at once do not collide |
+| `MEMKERNEL_CHROMA_PERSIST_PATH` | `.memkernel/chroma` | ChromaDB data directory. Empty string = in-memory (ephemeral). On POSIX systems (Linux, macOS), opening it takes a short lock on `.memkernel-open.lock` inside it, so the MCP server and a hook opening a new store at once do not collide; where `fcntl` is unavailable (Windows) the store opens without the lock, and two processes creating a new store at the same moment can still fail |
 | `MEMKERNEL_CHROMA_COLLECTION_PREFIX` | `memkernel` | Prefix for ChromaDB collection names (`{prefix}_{project_id}`) |
 | `MEMKERNEL_EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model name |
 | `MEMKERNEL_EMBEDDING_DIMENSION` | `384` | Output dimension of the embedding model |
@@ -294,7 +294,7 @@ report = svc.consolidate()                 # {"purged": n, "candidates": [...]}
 
 ### The session protocol as a component
 
-`MemoryLifecycle` packages what the hook scripts do, so a harness calls four methods instead of re-implementing the protocol. Every method returns markdown ready for injection and does nothing but talk to the service:
+`MemoryLifecycle` packages what the hook scripts do, so a harness calls five methods instead of re-implementing the protocol. Every method returns markdown ready for injection and does nothing but talk to the service:
 
 ```python
 from memkernel.factory import build_service
@@ -380,9 +380,15 @@ CI runs on every push and PR: lint, type check, tests (≥ 80% coverage), securi
 
 Releases are published to PyPI by [`.github/workflows/release.yml`](.github/workflows/release.yml) using trusted publishing (no token in the repo). To cut a release:
 
-1. Set `version` in `pyproject.toml` and move the `[Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under the new version.
+1. Set `version` in `pyproject.toml` and `__version__` in `src/memkernel/__init__.py` to `X.Y.Z`, and move the `[Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under `[X.Y.Z] - <tag date>`.
 2. Merge to `main` with CI green.
-3. Tag and push: `git tag -a v0.4.0 -m "memkernel 0.4.0" && git push origin v0.4.0`.
+3. Tag and push: `git tag -a vX.Y.Z -m "memkernel X.Y.Z" && git push origin vX.Y.Z`.
+4. Create the GitHub Release from the tag, with the version's CHANGELOG section as its notes:
+
+   ```bash
+   awk -v v=X.Y.Z 'index($0, "## [" v "]") == 1 {f=1; next} f && /^## \[/ {exit} f' CHANGELOG.md > release-notes.md
+   gh release create vX.Y.Z --title X.Y.Z --notes-file release-notes.md --verify-tag
+   ```
 
 The workflow refuses a tag that does not match the `pyproject.toml` version, builds the sdist and wheel, smoke-installs the wheel, and uploads through the `pypi` environment.
 
