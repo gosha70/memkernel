@@ -69,9 +69,10 @@ available as a Python component with a small, stable interface, not only
 as MCP tools. Concretely (roadmap 0.3): `build_service()` (done), the
 ports in `core/ports.py` (done; `DocumentStorePort`/`ReasonerPort` to
 come), and a `MemoryLifecycle` component exposing
-`on_session_start() -> str`, `on_pre_compact(summary) -> str`,
-`on_post_compact() -> str`, `on_session_end(summary) -> None`, which is
-what the Claude Code hooks already do in script form. haa then assembles
+`on_session_start(source=None) -> str`, `on_pre_compact(summary) -> str`,
+`on_post_compact() -> str`, `on_session_end(summary) -> str` and
+`capture_compact_summary(summary, session_id, trigger) -> str` (0.6), which
+is what the Claude Code hooks do in script form. haa then assembles
 memory by instantiating `MemoryLifecycle(build_service())` and calling it
 from its loop; a future UI assembles the same objects from configuration.
 

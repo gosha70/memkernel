@@ -6,7 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
+The Release B wiki bridge (#48, parts 1 and 2a, with wiki-studio 0.7.0) and the
+fixes to the Claude Code hooks (#68) and to a new store's first open (#69).
+wiki-studio's Release B loop test (`tests/integration/test_release_b_loop.py` at
+wiki-studio v0.7.0) passes 5 of its 6 tests against this release. Test 4 fails
+on the test's own use of memkernel's API and waits on gosha70/wiki-studio#53;
+until that is fixed, this is memkernel-0-6 SC-8's interim result.
+
 ### Changed
+
+- The agent instructions' Wiki and hook sections
+  (`templates/claude-memory-instructions.md`) and the Kiro steering file add the
+  approval step before `wiki_import` and say that, with the hooks installed,
+  `SessionStart` recovers after a compaction; the README documents
+  `on_session_start(source)`, `capture_compact_summary()` and the store's
+  `.memkernel-open.lock`. The minimal CLAUDE.md block is unchanged (the 0.5
+  lifecycle suite's arms carry it byte for byte). Copy the templates again.
 
 - **The Claude Code hooks follow the events as Claude Code sends them** (#68).
   `session-start.py` branches on its payload's `source`: the full block on
@@ -347,6 +364,11 @@ All notable changes to this project are documented here. The format follows
   tree-sitter AST chunking; episode TTL; dedup by content hash; FastAPI admin
   API; Claude Code hook templates.
 
-[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gosha70/memkernel/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/gosha70/memkernel/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/gosha70/memkernel/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/gosha70/memkernel/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/gosha70/memkernel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gosha70/memkernel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gosha70/memkernel/releases/tag/v0.1.0

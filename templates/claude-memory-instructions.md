@@ -158,17 +158,24 @@ recall(query="<current task or topic>", tier="long_term", top_k=8)
 ```
 
 Then `promote` any consolidation candidate that the recovered context shows was important.
+With the hooks below installed, the `SessionStart` hook already injects this recovery after a
+compaction (`source: "compact"`), with the checkpoint's age; you do not need to recall it again.
 
 ### Wiki
 
 If `MEMKERNEL_WIKI_DIR` is set, the project keeps a markdown LLM wiki of curated knowledge.
 Read its `index.md` before re-deriving project context. `wiki_export()` turns long-term
 memories into draft pages for review; `wiki_import()` indexes the curated pages so `recall`
-returns the reviewed version.
+returns the reviewed version. With wiki-studio installed the import is governed: only pages a
+curator approved (`wiki-studio approve`) are imported, and an approved page's `corrects:` key
+supersedes the memories it names.
 
 ### Hook setup (automated)
 
 See `templates/hooks/` for Python scripts that automate the session-start, pre-compaction
 and post-compaction steps via Claude Code hooks (`SessionStart`, `PreCompact`, `PostCompact`).
-Copy them to `.claude/hooks/` and register in `.claude/settings.json` (see the Prerequisites
-section in each script for the Python environment requirement).
+Copy them to `.claude/hooks/` and register in `.claude/settings.json`, `SessionStart` without a
+matcher (see the Prerequisites section in each script for the Python environment requirement).
+Only `SessionStart`'s output reaches the model: it recovers after a compaction, while
+`PostCompact` keeps Claude Code's compaction summary as a checkpoint. Copy the scripts again
+after upgrading memkernel.
