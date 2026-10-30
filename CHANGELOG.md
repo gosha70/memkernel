@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
+The Release B wiki bridge (#48, parts 1 and 2a, with wiki-studio 0.7.0) and the
+fixes to the Claude Code hooks (#68) and to a new store's first open (#69).
+wiki-studio's Release B loop test (`tests/integration/test_release_b_loop.py` at
+wiki-studio v0.7.0) passes 5 of its 6 tests against this release. Test 4 fails
+on the test's own use of memkernel's API and waits on gosha70/wiki-studio#53;
+until that is fixed, this is memkernel-0-6 SC-8's interim result.
+
 ### Changed
 
 - **The Claude Code hooks follow the events as Claude Code sends them** (#68).
