@@ -12,6 +12,7 @@ origin:
     - https://github.com/gosha70/memkernel/issues/69
   transcripts:
     - specs/memkernel-0-6-store-open-race/origin/2026-10-29-issue-69.md
+    - specs/memkernel-0-6-store-open-race/origin/2026-10-29-sc-1-order.md
   origin_claim: |
     Fix #69: in a project's first session the SessionStart hook and memkernel's MCP
     server open the same new ChromaDB store at once and one fails with "table

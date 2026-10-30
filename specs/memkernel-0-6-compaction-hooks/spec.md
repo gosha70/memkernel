@@ -47,8 +47,8 @@ are at `main` `3bd2675`.
   block is the same whether PostCompact runs before or after SessionStart(`compact`); the reference does not say
   which comes first.
 - **FR-005 (library compatibility):** `on_post_compact()` and `on_session_end(summary)` keep their behaviour and
-  output, for in-process harnesses that re-inject after their own compaction. Every method keeps returning
-  markdown and doing no I/O beyond the service.
+  output, for in-process harnesses that re-inject after their own compaction, apart from FR-011's checkpoint
+  selection and access counting. Every method keeps returning markdown and doing no I/O beyond the service.
 - **FR-006 (hook scripts):** each script reads its stdin JSON once and passes the confirmed fields through. When
   stdin is a terminal (`sys.stdin.isatty()`, a script run by hand), it does not read stdin and treats every field
   as absent, so it never waits for input. A missing field or an unparsable stdin is treated as absent, never as an
@@ -69,6 +69,19 @@ are at `main` `3bd2675`.
   - **Changed:** `SessionStart` branches on `source`, printing nothing on resume or fork and running no
     consolidation after a compaction (D4); `post-compact.py` now prints nothing to stdout.
   - **Upgrade note:** re-copy the three scripts.
+- **FR-011 (the latest checkpoint; amended 2026-10-29 after the review of #73):** "the latest checkpoint" is the
+  newest by time over **every** live checkpoint, never picked from a relevance-ranked `recall` window (the code
+  since 0.3 sorted the 200 checkpoints `recall` ranked most relevant, so a newer, less relevant one was missed, and
+  a window full of compact-summary checkpoints made the `compact` block report none). A new
+  `MemoryService.checkpoints_newest_first()` MUST return every checkpoint record that is live by `recall`'s rules,
+  judged with the service's own settings (not superseded, not flagged for review, not expired), leaving out
+  code-chunk and document-part records (parts of a checkpoint, not one), listed by metadata without content and
+  without touching, sorted newest first with ties broken by `ref_id`. The startup block, the `compact` recovery
+  block (its first record not tagged `compact-summary`, FR-004) and `on_post_compact()` all use it and then read
+  only the chosen record: the startup block and `on_post_compact()` with one access on it, the `compact` block
+  with none. Only the checkpoint shown is touched; `on_post_compact()` no longer touches every checkpoint a
+  `recall` returned. `docs/architecture/memory-tiers.md`'s API table gains `checkpoints_newest_first()`, and the
+  CHANGELOG has a Fixed entry for the 0.3 defect.
 - **FR-010 (the lifecycle suite):** `eval/lifecycle-suite` runs `templates/hooks/*` (`runner.py:56-58, 297`). The
   hooks keep their event names and exit 0, so its FR-015a rule (a failed or missing PreCompact or PostCompact hook
   is an unsuccessful outcome) is unaffected. A future measured run runs these hooks; `report-0.5.0.md` is not
@@ -107,4 +120,9 @@ are at `main` `3bd2675`.
   except the placeholder test, which now asserts that nothing is retained.
 - **SC-7:** the hook scripts are tested by running their `main()` with the payload on stdin and a test service
   (no model download), not only through `MemoryLifecycle`.
+- **SC-9 (FR-011):** with more older checkpoints than the old window (200) ranked above the newest, the startup
+  block, the `compact` block and `on_post_compact()` each show the newest; no path chooses a checkpoint through
+  `recall(checkpoint_only=True)`; an agent checkpoint behind more than 200 compact-summary checkpoints is found;
+  an expired checkpoint is not shown; a lifecycle built without settings judges expiry with the service's TTL;
+  `checkpoints_newest_first()` lists live checkpoints only, newest first, ties by `ref_id`, without content.
 - **SC-8:** fast suite green, coverage ≥ 80 percent, ruff (including `templates/`) and mypy clean.
