@@ -14,6 +14,7 @@ origin:
     - https://code.claude.com/docs/en/hooks
   transcripts:
     - specs/memkernel-0-6-compaction-hooks/origin/2026-10-29-issue-68.md
+    - specs/memkernel-0-6-compaction-hooks/origin/2026-10-29-review-73.md
   origin_claim: |
     Fix #68 (D1–D4 of #59): PreCompact stores a placeholder that hides the real
     checkpoint; PostCompact's output never reaches the model; Claude Code's
