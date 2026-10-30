@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import TYPE_CHECKING
@@ -101,13 +102,17 @@ def test_lc_wiki_shared_artifact_reaches_every_arm_and_the_destination_store_is_
         assert dirs.store is not None and dirs.store.name == "second" and not any(dirs.store.iterdir())
 
 
-def test_memkernel_and_protocol_carry_the_template_block_byte_for_byte() -> None:
-    template = (REPO_ROOT / "templates" / "claude-memory-instructions.md").read_text(encoding="utf-8")
-    match = re.search(r"## Minimal setup \(paste into CLAUDE.md\)\n\n```markdown\n(.*?)\n```\n", template, re.S)
-    assert match is not None
-    block = match.group(1) + "\n"
-    assert runner.load_arm("memkernel").instruction.decode() == block
-    assert runner.load_arm("protocol").instruction.decode() == block
+# The 0.5 measured run's minimal CLAUDE.md block, frozen (memkernel-0-7-hooks H3, FR-006): the template may change,
+# the arms keep exactly what was measured.
+FROZEN_BLOCK_0_5 = REPO_ROOT / "eval" / "lifecycle-suite" / "arms" / "minimal-block-0.5.md"
+FROZEN_BLOCK_0_5_SHA256 = "c9f2d3c9641c05deb7c17c11daaabe310988a580f8aa290b80617e40e842fd5e"
+
+
+def test_memkernel_and_protocol_carry_the_frozen_0_5_block_byte_for_byte() -> None:
+    block = FROZEN_BLOCK_0_5.read_bytes()
+    assert hashlib.sha256(block).hexdigest() == FROZEN_BLOCK_0_5_SHA256
+    assert runner.load_arm("memkernel").instruction == block
+    assert runner.load_arm("protocol").instruction == block
 
 
 def test_placebo_is_length_matched_within_five_percent() -> None:
@@ -150,7 +155,6 @@ def test_wiki_studio_arm_is_wiki_studio_v040_byte_for_byte_plus_three_keys() -> 
 
 def test_the_image_installs_the_arms_own_wiki_studio_pin() -> None:
     """#54: the arm's wiki-studio comes from its own hashed requirements, not memkernel's poetry.lock."""
-    import re
 
     requirements = (SUITE_DIR / "arms" / "wiki_studio" / "requirements.txt").read_text(encoding="utf-8")
     dockerfile = (SUITE_DIR / "calibration" / "Dockerfile").read_text(encoding="utf-8")

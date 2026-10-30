@@ -241,7 +241,8 @@ def test_the_compact_block_shows_the_checkpoints_age(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(module, "datetime", ThreeHoursLater)
     text = lifecycle.on_session_start("compact")
 
-    assert f"Saved 3 hours ago ({saved.strftime('%Y-%m-%d %H:%M UTC')}); it may predate this session's work." in text
+    stamp = saved.strftime("%Y-%m-%d %H:%M UTC")
+    assert f"Saved 3 hours ago ({stamp}, {ref}); it may predate this session's work." in text  # FR-001: the ref_id
 
 
 @pytest.mark.parametrize(
@@ -359,3 +360,106 @@ def test_expiry_is_judged_with_the_services_settings(call: str) -> None:
     text = lifecycle.on_post_compact() if call == "post_compact" else lifecycle.on_session_start(call)
 
     assert "FORTY-FIVE-DAYS" in text
+
+
+# ── memkernel-0-7-hooks phase 1: D5–D8 and the agents' latest checkpoint ──────
+
+
+def _memory_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("- [")]
+
+
+@pytest.mark.parametrize("source", ["startup", "compact"])
+def test_every_injected_memory_line_and_the_checkpoint_carry_a_ref_id(source: str) -> None:
+    """SC-1 (D5)."""
+    lifecycle, svc = _lifecycle()
+    refs = {svc.retain(f"Decision {i}: use tool {i}", MemoryType.DECISION) for i in range(3)}
+    checkpoint = svc.retain("SESSION CHECKPOINT\n\nNext: wire tool 1", MemoryType.EPISODE, checkpoint=True)
+
+    text = lifecycle.on_session_start(source)
+
+    lines = _memory_lines(text)
+    assert lines and all(line.endswith(")") and line.rsplit("(", 1)[1][:-1] in refs for line in lines)
+    assert f", {checkpoint}); it may predate" in text
+    for line in lines:
+        assert svc.get(line.rsplit("(", 1)[1][:-1], touch=False) is not None
+
+
+def test_startup_context_is_chosen_by_type_importance_and_recency_without_touching() -> None:
+    """SC-2 (D6, H1): no query; decisions before conventions before facts; injecting changes no access count."""
+    lifecycle, svc = _lifecycle()
+    fact = svc.retain("The CI runner has 4 cores", MemoryType.FACT)
+    convention = svc.retain("Branch names start with feature/", MemoryType.CONVENTION)
+    decision = svc.retain("Use Postgres for the user DB", MemoryType.DECISION)
+
+    text = lifecycle.on_session_start("startup")
+
+    order = [line.rsplit("(", 1)[1][:-1] for line in _memory_lines(text)]
+    assert order[:3] == [decision, convention, fact]
+    assert all(m.access_count == 0 for m in svc.list_memories() if m.ref_id in {fact, convention, decision})
+
+
+def test_the_compact_block_recalls_context_with_the_checkpoint_text() -> None:
+    """SC-2 (H1): the work in progress is the query."""
+    lifecycle, svc = _lifecycle()
+    for i in range(8):
+        svc.retain(f"Unrelated decision number {i} about logging format", MemoryType.DECISION)
+    target = svc.retain("Use arq for background jobs because it is async-native", MemoryType.DECISION)
+    svc.retain("SESSION CHECKPOINT\n\nCurrent: moving background jobs to arq", MemoryType.EPISODE, checkpoint=True)
+
+    text = lifecycle.on_session_start("compact")
+
+    assert target in text
+    assert svc.get(target, touch=False).access_count == 0  # type: ignore[union-attr]
+
+
+def test_each_block_stays_under_the_budget_and_names_what_to_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-3 (D7): an oversized checkpoint, 50 flagged memories and long candidates still fit under 9,000."""
+    from memkernel import lifecycle as module
+
+    lifecycle, svc = _lifecycle()
+    big = svc.retain(
+        "SESSION CHECKPOINT\n\n" + "\n".join(f"line {i} " + "x" * 80 for i in range(200)),
+        MemoryType.EPISODE,
+        checkpoint=True,
+    )
+    for i in range(30):
+        svc.retain(f"Decision {i}: " + "y" * 300, MemoryType.DECISION)
+    real = svc.consolidate
+
+    def flooded(*args: Any, **kwargs: Any) -> Any:
+        report = real(*args, **kwargs)
+        report["candidates"] = [
+            {"ref_id": f"c{i}", "type": "observation", "access_count": 1, "preview": "z" * 190} for i in range(50)
+        ]
+        report["revalidated"] = {
+            "flagged": [{"source": f"src/f{i}.py", "reason": "changed", "ref_id": f"r{i}"} for i in range(50)]
+        }
+        return report
+
+    monkeypatch.setattr(svc, "consolidate", flooded)
+    for source in ("startup", "compact"):
+        text = lifecycle.on_session_start(source)
+        assert len(text) < module.TOTAL_BUDGET, (source, len(text))
+        assert f"(truncated; get({big}) for the rest)" in text
+    startup = lifecycle.on_session_start("startup")
+    assert "… and 40 more (consolidate(revalidate=true) lists all)" in startup
+
+
+def test_an_item_equal_to_the_checkpoint_or_a_shown_promotions_source_appears_once() -> None:
+    """SC-4 (D8): de-duplication inside one block."""
+    from memkernel.lifecycle import _distinct
+
+    lifecycle, svc = _lifecycle()
+    a = svc.retain("Use Postgres", MemoryType.DECISION)
+    twin = svc.retain("Use Postgres", MemoryType.FACT)  # same content, another record
+    source = svc.retain("Deploys go out on Tuesdays", MemoryType.CONVENTION)
+    promoted = svc.retain("Deploys go out on Tuesdays, never Fridays", MemoryType.CONVENTION, promoted_from=source)
+    memories = [svc.get(r, touch=False) for r in (a, twin, source, promoted)]
+    assert all(m is not None for m in memories)
+
+    kept = _distinct([m for m in memories if m is not None], None, 10)
+
+    assert [m.ref_id for m in kept] == [a, promoted]
+    checkpoint = svc.get(a, touch=False)
+    assert [m.ref_id for m in _distinct([m for m in memories if m is not None], checkpoint, 10)] == [promoted]

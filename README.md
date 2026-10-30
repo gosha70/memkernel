@@ -120,7 +120,7 @@ Copy the hook scripts from [`templates/hooks/`](templates/hooks/) to `.claude/ho
 | `pre-compact.py` | `PreCompact` | Runs a consolidation pass (Claude Code passes no summary here, so no checkpoint is retained) |
 | `post-compact.py` | `PostCompact` | Retains Claude Code's compaction summary (`compact_summary`) as a checkpoint for the next session; prints nothing for the model |
 
-Register `SessionStart` without a matcher, so it runs for every `source`. Claude Code adds only `SessionStart`'s output to the model's context, not `PreCompact`'s or `PostCompact`'s, so the recovery after a compaction comes from `SessionStart` with `source: "compact"`. After upgrading memkernel, copy the three scripts again.
+Each injected memory line ends with its `ref_id`, so `get(ref_id)` returns the full text; a block never exceeds 9,000 characters (Claude Code caps hook output at 10,000), and a cut checkpoint says which `get` holds the rest. At session start the long-term context is the most important decisions, conventions, procedures and facts, not the matches of a fixed query; after a compaction it is recalled with the checkpoint's text. Register `SessionStart` without a matcher, so it runs for every `source`. Claude Code adds only `SessionStart`'s output to the model's context, not `PreCompact`'s or `PostCompact`'s, so the recovery after a compaction comes from `SessionStart` with `source: "compact"`. After upgrading memkernel, copy the three scripts again.
 
 See the Prerequisites section inside each script for the Python environment requirement. Each script is a thin wrapper over [`MemoryLifecycle`](#embedding-memkernel-in-your-own-harness), so an in-process harness gets the same behaviour without the scripts.
 
@@ -145,7 +145,7 @@ Kiro (and the Kiro CLI, formerly Amazon Q Developer CLI) connects to MemKernel a
 | Tool | What it does |
 |------|-------------|
 | `retain(content, type, session_id?, checkpoint?, source?, importance?, tags?, supersedes?)` | Store a memory. Returns `ref_id`. Idempotent — identical content + type returns the same `ref_id`. `supersedes` hides the memory it replaces. |
-| `recall(query, type?, tier?, session_id?, checkpoint_only?, top_k?, include_needs_review?)` | Search by natural language or identifier. Returns lightweight `ArtifactRef` list ranked by relevance + recency + importance. Records an access (reinforces retention). Code memories flagged `needs_review` are hidden unless `include_needs_review=true`. |
+| `recall(query, type?, tier?, session_id?, checkpoint_only?, top_k?, include_needs_review?, order?)` | Search by natural language or identifier. Returns lightweight `ArtifactRef` list ranked by relevance + recency + importance. Records an access (reinforces retention). Code memories flagged `needs_review` are hidden unless `include_needs_review=true`. |
 | `get(ref_id)` | Fetch full content of a specific memory. Records an access. |
 | `forget(ref_id)` | Delete a memory from all indexes. |
 | `promote(ref_id, type, content?, importance?, tags?)` | Turn a short-term/working memory into a long-term one (you supply the distilled text). Keeps provenance via `promoted_from`. |
@@ -172,7 +172,7 @@ Retention: `ttl = base_ttl × (1 + access_boost × access_count)`, measured from
 
 ### Session protocol
 
-1. **Session start** — `recall(tier="long_term", query=<task>)`, plus the latest checkpoint (`checkpoint_only=true`). The `session-start.py` hook does this and prints promotion candidates; after a compaction it prints a shorter recovery block instead.
+1. **Session start** — `recall(tier="long_term", query=<task>)`, plus the latest checkpoint (`checkpoint_only=true, order="newest"`: newest first, not the most relevant). The `session-start.py` hook does this and prints promotion candidates; after a compaction it prints a shorter recovery block instead.
 2. **While working** — `retain(type="task")` when the plan changes; `retain(type="observation")` for findings; durable knowledge as `decision` / `convention` / `fact` / `procedure`.
 3. **Before compaction** — `retain(type="episode", checkpoint=true)` with your own summary of where the work stands; the `pre-compact.py` hook runs `consolidate()`, and the `post-compact.py` hook keeps Claude Code's compaction summary as a checkpoint.
 4. **After compaction / end of phase** — `promote(ref_id, type, content)` for the candidates worth keeping.
@@ -191,7 +191,7 @@ retain(
 
 recall(query="database choice", top_k=5)
 
-recall(query="session checkpoint", checkpoint_only=True)
+recall(query="session checkpoint", checkpoint_only=True, order="newest", top_k=1)  # the latest checkpoint
 
 retain(content="pytest hangs unless MEMKERNEL_PROJECT_ID is set", type="observation", tags=["ci"])
 

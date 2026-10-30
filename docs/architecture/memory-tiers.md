@@ -97,7 +97,7 @@ retrieval ranks by a combination of axes rather than cosine alone.
 | Consolidation as a pass that ranks what the agent kept using | Letta sleep-time compute; LangMem background manager | `MemoryService.consolidate` (ranks by `importance × (1 + access_count)`, purges expired) |
 | Agent-driven promotion with provenance | Reflexion / ReasoningBank distillation | `MemoryService.promote` (new record, `promoted_from` link) |
 | Procedural memory as a first-class type | Voyager skill library; Agent Workflow Memory | `MemoryType.PROCEDURE` → wiki `workflow` pages |
-| Compaction and session start as consolidation triggers | Claude Code auto-memory & compaction behaviour | `templates/hooks/{pre-compact,post-compact,session-start}.py`: PreCompact consolidates; PostCompact keeps Claude Code's `compact_summary` as a checkpoint; SessionStart branches on `source` (full block on startup and clear, a recovery block on compact, nothing on resume and fork) |
+| Compaction and session start as consolidation triggers | Claude Code auto-memory & compaction behaviour | `templates/hooks/{pre-compact,post-compact,session-start}.py`: PreCompact consolidates; PostCompact keeps Claude Code's `compact_summary` as a checkpoint; SessionStart branches on `source` (full block on startup and clear, a recovery block on compact, nothing on resume and fork); injected lines carry `ref_id`s, startup context is chosen by type, importance and recency, compact context by the checkpoint's text, under a 9,000-character budget (memkernel-0-7-hooks) |
 | Human-readable compiled knowledge with an index | Karpathy LLM Wiki; Claude Code `MEMORY.md` index | `memkernel.wiki` (ADR-008) |
 | Backward compatibility with 0.1.x stores | — | adapter derives tier/importance when metadata is absent |
 | Revalidation of code snapshots against their source | Roynard 2026 (facts refreshed against drifting sources) | `MemoryService.revalidate()` (whole-file hash, `needs_review`, hidden from recall), `consolidate(revalidate=True)`, session start |
@@ -154,7 +154,7 @@ extra, never a requirement.
 | Tool | Tier | Purpose |
 |---|---|---|
 | `retain(content, type, …, importance, tags, supersedes, *, dedup_source)` | any | store; idempotent on content+type (`code`: on source+content, supersedes by path; `dedup_source=True`: on source+content+type, so the wiki import keeps one memory per page) |
-| `recall(query, type, tier, session_id, checkpoint_only, top_k, include_needs_review)` | any | ranked references; records access |
+| `recall(query, type, tier, session_id, checkpoint_only, top_k, include_needs_review, order)` | any | ranked references; records access; `order="newest"` with `checkpoint_only` returns the latest checkpoints by time |
 | `get(ref_id)` | any | full content; records access |
 | `forget(ref_id)` | any | delete |
 | `promote(ref_id, type, content, importance, tags)` | short → long | agent-driven consolidation with provenance |

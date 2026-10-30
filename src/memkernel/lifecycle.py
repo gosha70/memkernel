@@ -34,7 +34,7 @@ from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
 
 if TYPE_CHECKING:
-    from memkernel.core.models import ArtifactRef
+    from memkernel.core.models import ArtifactRef, Memory
     from memkernel.core.services import MemoryService
 
 # Section headings are part of the hooks' stdout contract (FR-012): keep them stable.
@@ -60,6 +60,17 @@ CHECKPOINT_IMPORTANCE = 0.8
 CANDIDATE_LIMIT = 5
 SESSION_START_CONTEXT_TOP_K = 6
 POST_COMPACT_CONTEXT_TOP_K = 5
+# Startup context without a query (memkernel-0-7-hooks H1): these types first, in this order, then the rest.
+CONTEXT_TYPE_ORDER = (MemoryType.DECISION, MemoryType.CONVENTION, MemoryType.PROCEDURE, MemoryType.FACT)
+# Output budget (FR-003): Claude Code caps injected hook output at 10,000 characters; each hook's block stays under
+# TOTAL_BUDGET, with these shares. The remainder covers headings, health, the wiki pointer and the footer. Release
+# B part 2c's curation debt must take its share from here, never add to the total.
+TOTAL_BUDGET = 9_000
+CHECKPOINT_BUDGET = 3_500
+CONTEXT_BUDGET = 2_500
+CANDIDATES_BUDGET = 1_200
+NEEDS_REVIEW_BUDGET = 1_000
+NEEDS_REVIEW_MAX_LINES = 10
 
 _CHECKPOINT_PREFIX = "SESSION CHECKPOINT — "
 _PROMOTE_HINT = "Call promote(ref_id, type, content) for anything that should outlive this session."
@@ -90,18 +101,16 @@ class MemoryLifecycle:
         if source == SOURCE_COMPACT:
             return self._compact_recovery()
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
-        latest = self._latest_checkpoint()
-        context = self._service.recall(
-            "decisions conventions active work", tier=MemoryTier.LONG_TERM, top_k=SESSION_START_CONTEXT_TOP_K
-        )
+        latest = self._latest_checkpoint_memory()
+        context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
         lines = [
             HEADING_SESSION_START,
             "",
             HEADING_CHECKPOINT,
-            latest if latest is not None else "No checkpoint found yet.",
+            *(self._checkpoint_lines(latest) if latest is not None else ["No checkpoint found yet."]),
             "",
             HEADING_CONTEXT,
-            *(_context_lines(context) or ["No prior memories found."]),
+            *(self._memory_lines(context) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
         lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
@@ -122,7 +131,7 @@ class MemoryLifecycle:
                 f"Purged {report['purged']} expired short-term memories. Use recall() / get(ref_id) for details.",
             ]
         )
-        return "\n".join(lines)
+        return _cap("\n".join(lines))
 
     def on_pre_compact(self, summary: str) -> str:
         """Retain a non-empty ``summary`` as a checkpoint episode, consolidate, and return a one-line status.
@@ -207,22 +216,48 @@ class MemoryLifecycle:
         long-term context. No consolidation, revalidation, purge or candidates; the same whichever hook ran first."""
         chosen = next((m for m in self._service.checkpoints_newest_first() if COMPACT_SUMMARY_TAG not in m.tags), None)
         checkpoint = self._service.get(chosen.ref_id, touch=False) if chosen is not None else None
-        context = self._service.recall(
-            "decisions conventions architecture", tier=MemoryTier.LONG_TERM, top_k=POST_COMPACT_CONTEXT_TOP_K
-        )
-        lines = [HEADING_POST_COMPACT, "", HEADING_CHECKPOINT]
-        if checkpoint is None:
-            lines.append("No checkpoint found.")
-        else:
-            saved = checkpoint.timestamp.astimezone(UTC)
-            lines.append(
-                f"Saved {_age(datetime.now(UTC) - saved)} ago ({saved.strftime('%Y-%m-%d %H:%M UTC')}); "
-                "it may predate this session's work."
+        if checkpoint is not None:  # H1: the work in progress is the query
+            refs = self._service.recall(
+                checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=2 * POST_COMPACT_CONTEXT_TOP_K, touch=False
             )
-            lines.append(checkpoint.content)
-        lines.extend(["", HEADING_CONTEXT, *(_context_lines(context) or ["No prior memories found."])])
+            found = [self._service.get(r.ref_id, touch=False) for r in refs]
+            candidates = [m for m in found if m is not None]
+        else:
+            candidates = self._startup_context()
+        context = _distinct(candidates, checkpoint, POST_COMPACT_CONTEXT_TOP_K)
+        lines = [HEADING_POST_COMPACT, "", HEADING_CHECKPOINT]
+        lines.extend(self._checkpoint_lines(checkpoint) if checkpoint is not None else ["No checkpoint found."])
+        lines.extend(["", HEADING_CONTEXT, *(self._memory_lines(context) or ["No prior memories found."])])
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
-        return "\n".join(lines)
+        return _cap("\n".join(lines))
+
+    def _startup_context(self) -> list[Memory]:
+        """Live long-term memories without a query: by type (CONTEXT_TYPE_ORDER), importance, recency (H1)."""
+        rank = {t: i for i, t in enumerate(CONTEXT_TYPE_ORDER)}
+        memories = [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if m.parent_ref is None]
+        return sorted(
+            memories,
+            key=lambda m: (rank.get(m.type, len(rank)), -m.importance, -m.timestamp.timestamp(), m.ref_id),
+        )
+
+    def _latest_checkpoint_memory(self) -> Memory | None:
+        """The newest live checkpoint, read with one access (memkernel-0-6-compaction-hooks FR-011)."""
+        checkpoints = self._service.checkpoints_newest_first()
+        return self._service.get(checkpoints[0].ref_id) if checkpoints else None
+
+    def _checkpoint_lines(self, checkpoint: Memory) -> list[str]:
+        """The age line with the checkpoint's ref_id (FR-001), then its text within CHECKPOINT_BUDGET (FR-003)."""
+        saved = checkpoint.timestamp.astimezone(UTC)
+        age = (
+            f"Saved {_age(datetime.now(UTC) - saved)} ago ({saved.strftime('%Y-%m-%d %H:%M UTC')}, "
+            f"{checkpoint.ref_id}); it may predate this session's work."
+        )
+        return [age, _truncate(checkpoint.content, CHECKPOINT_BUDGET, checkpoint.ref_id)]
+
+    def _memory_lines(self, memories: list[Memory]) -> list[str]:
+        preview = self._service.settings.preview_length
+        lines = [f"- [{m.type}] {' '.join(m.content.split())[:preview]} ({m.ref_id})" for m in memories]
+        return _fit(lines, CONTEXT_BUDGET)
 
     def _latest_checkpoint(self) -> str | None:
         """The newest live checkpoint's content (by time over every live checkpoint, never a relevance window).
@@ -230,10 +265,7 @@ class MemoryLifecycle:
         Reading it counts as one access, on that checkpoint only; before 0.6 ``on_post_compact`` also touched every
         checkpoint its recall returned.
         """
-        checkpoints = self._service.checkpoints_newest_first()
-        if not checkpoints:
-            return None
-        memory = self._service.get(checkpoints[0].ref_id)
+        memory = self._latest_checkpoint_memory()
         return memory.content if memory is not None else None
 
 
@@ -250,18 +282,65 @@ def _age(delta: timedelta) -> str:
 
 
 def _context_lines(refs: list[ArtifactRef]) -> list[str]:
-    return [f"- [{r.type}] {r.preview}" for r in refs]
+    return _fit([f"- [{r.type}] {r.preview} ({r.ref_id})" for r in refs], CONTEXT_BUDGET)
+
+
+def _distinct(candidates: list[Memory], checkpoint: Memory | None, limit: int) -> list[Memory]:
+    """FR-004: no item equal to the checkpoint or an earlier item (ref_id or content hash), and no live source of
+    a promoted memory that is also shown; then the first ``limit``."""
+    seen_refs = {checkpoint.ref_id} if checkpoint is not None else set()
+    seen_hashes = {checkpoint.content_hash} if checkpoint is not None and checkpoint.content_hash else set()
+    kept: list[Memory] = []
+    for memory in candidates:
+        if memory.ref_id in seen_refs or (memory.content_hash and memory.content_hash in seen_hashes):
+            continue
+        seen_refs.add(memory.ref_id)
+        if memory.content_hash:
+            seen_hashes.add(memory.content_hash)
+        kept.append(memory)
+    promoted_sources = {m.promoted_from for m in kept if m.promoted_from}
+    return [m for m in kept if m.ref_id not in promoted_sources][:limit]
+
+
+def _fit(lines: list[str], budget: int) -> list[str]:
+    """The leading ``lines`` that fit in ``budget`` characters, then one line saying how many were left out."""
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > budget:
+            return [*kept, f"… and {len(lines) - len(kept)} more (use recall() for the rest)"]
+        kept.append(line)
+        used += len(line) + 1
+    return kept
+
+
+def _truncate(text: str, budget: int, ref_id: str) -> str:
+    """``text`` cut at a line boundary within ``budget`` characters, saying where the rest is (FR-003)."""
+    if len(text) <= budget:
+        return text
+    suffix = f"… (truncated; get({ref_id}) for the rest)"
+    cut = text[: max(0, budget - len(suffix) - 1)]
+    cut = cut[: cut.rfind("\n")] if "\n" in cut else cut
+    return f"{cut}\n{suffix}"
+
+
+def _cap(block: str) -> str:
+    """The whole block under TOTAL_BUDGET: a last guard behind the section shares (FR-003)."""
+    if len(block) <= TOTAL_BUDGET:
+        return block
+    suffix = "… (truncated to stay under Claude Code's hook output limit)"
+    cut = block[: TOTAL_BUDGET - len(suffix) - 1]
+    return f"{cut[: cut.rfind(chr(10))]}\n{suffix}"
 
 
 def _needs_review_block(flagged: list[dict[str, Any]]) -> list[str]:
     if not flagged:
         return []
-    return [
-        "",
-        HEADING_NEEDS_REVIEW,
-        *(f"- {f['source']} — {f['reason']} — {f['ref_id']}" for f in flagged),
-        _REVIEW_HINT,
-    ]
+    shown = flagged[:NEEDS_REVIEW_MAX_LINES]
+    lines = [f"- {f['source']} — {f['reason']} — {f['ref_id']}" for f in shown]
+    if len(flagged) > len(shown):
+        lines.append(f"… and {len(flagged) - len(shown)} more (consolidate(revalidate=true) lists all)")
+    return ["", HEADING_NEEDS_REVIEW, *_fit(lines, NEEDS_REVIEW_BUDGET), _REVIEW_HINT]
 
 
 _HEALTH_LABELS: tuple[tuple[str, str], ...] = (
@@ -286,6 +365,9 @@ def _candidates_block(candidates: list[dict[str, Any]]) -> list[str]:
     return [
         "",
         HEADING_CANDIDATES,
-        *(f"- {c['ref_id']} [{c['type']}, recalled {c['access_count']}x]: {c['preview']}" for c in candidates),
+        *_fit(
+            [f"- {c['ref_id']} [{c['type']}, recalled {c['access_count']}x]: {c['preview']}" for c in candidates],
+            CANDIDATES_BUDGET,
+        ),
         _PROMOTE_HINT,
     ]

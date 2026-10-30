@@ -5,7 +5,7 @@
       "trigger": "SessionStart",
       "action": {
         "type": "agent",
-        "prompt": "Using the memkernel MCP server: call recall(query=\"session checkpoint\", checkpoint_only=true, top_k=3) and recall(query=\"<current task>\", tier=\"long_term\", top_k=8). If the project has a wiki (MEMKERNEL_WIKI_DIR), read its index.md. Summarise what is relevant in three lines, then continue with the user's request."
+        "prompt": "Using the memkernel MCP server: call recall(query=\"session checkpoint\", checkpoint_only=true, order=\"newest\", top_k=1) and recall(query=\"<current task>\", tier=\"long_term\", top_k=8). If the project has a wiki (MEMKERNEL_WIKI_DIR), read its index.md. Summarise what is relevant in three lines, then continue with the user's request."
       }
     },
     {

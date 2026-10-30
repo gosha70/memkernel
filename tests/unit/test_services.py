@@ -733,3 +733,20 @@ def test_records_without_the_withdrawal_keys_load_as_live() -> None:
 
     assert memory is not None and memory.withdrawn_reason is None and memory.withdrawn_at is None
     assert not memory.retired() and ref in {m.ref_id for m in svc.list_memories()}
+
+
+def test_recall_newest_returns_the_latest_checkpoints_by_time_and_only_with_checkpoint_only() -> None:
+    """memkernel-0-7-hooks SC-5 (H2)."""
+    svc, _, _ = _make_service()
+    for i in range(205):
+        svc.retain(f"SESSION CHECKPOINT {i}\n\nsession checkpoint next steps {i}", MemoryType.EPISODE, checkpoint=True)
+    newest = svc.retain("zz unrelated wording", MemoryType.EPISODE, checkpoint=True)
+
+    (first,) = svc.recall("session checkpoint", checkpoint_only=True, order="newest", top_k=1)
+
+    assert first.ref_id == newest
+    with pytest.raises(ValueError, match="only for checkpoint_only"):
+        svc.recall("anything", order="newest")
+    with pytest.raises(ValueError, match="order must be"):
+        svc.recall("anything", checkpoint_only=True, order="oldest")
+    assert svc.recall("session checkpoint", checkpoint_only=True, top_k=1)  # relevance order unchanged

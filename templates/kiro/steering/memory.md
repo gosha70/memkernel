@@ -12,8 +12,9 @@ Memory has three tiers. Pick the type; the tier follows.
 - working (expires in ~24h): task
 
 ### Session start
+(Skip this when the memkernel hooks are installed: the SessionStart hook already injects it.)
   recall(query="<current task>", tier="long_term", top_k=8)
-  recall(query="session checkpoint", checkpoint_only=true, top_k=3)
+  recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
 Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 
 ### While working

@@ -19,8 +19,9 @@ Memory has three tiers. Pick the type; the tier follows.
 - working (expires in ~24h): task
 
 ### Session start
+(Skip this when the memkernel hooks are installed: the SessionStart hook already injects it.)
   recall(query="<current task>", tier="long_term", top_k=8)
-  recall(query="session checkpoint", checkpoint_only=true, top_k=3)
+  recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
 Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 
 ### While working
@@ -84,7 +85,8 @@ retain(content=<text>, type=<type>, session_id=<optional>, source=<optional file
 
 ```
 recall(query=<text>, type=<optional>, tier=<optional working|short_term|long_term>,
-       session_id=<optional>, checkpoint_only=<bool>, top_k=<int>)
+       session_id=<optional>, checkpoint_only=<bool>, top_k=<int>,
+       order=<"relevance" | "newest"; "newest" only with checkpoint_only=true>)
 ```
 
 Returns `ArtifactRef` items (ref_id, preview, score, token_count, type, tier, importance,
@@ -153,7 +155,7 @@ consolidate()
 ### Post-compaction recovery
 
 ```
-recall(query="session checkpoint next steps", checkpoint_only=true, top_k=3)
+recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
 recall(query="<current task or topic>", tier="long_term", top_k=8)
 ```
 
