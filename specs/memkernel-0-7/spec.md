@@ -14,9 +14,9 @@ Origin: #48 (Release B; part 2b), wiki-studio's Release B pitch, and the owner's
   pending and retries what failed. It never applies anything twice and never claims a transaction across the wiki
   and the store.
 
-## Decisions for the owner (recommendations to confirm)
-**D1. How a memory is withdrawn.** `supersede` needs a replacing record, but a deleted or deprecated page has
-none. Three options:
+## Decisions (confirmed 2026-10-30, with the review's changes)
+**D1. How a memory is withdrawn (confirmed: option A).** `supersede` needs a replacing record, but a deleted or
+deprecated page has none. Three options:
 - **A, a new `withdrawn` marker (recommended).** Two new metadata keys, `withdrawn_reason` and `withdrawn_at`,
   both absent by default.
   - Liveness becomes "no `superseded_by` and no `withdrawn_reason`". It is decided by **one** predicate that every
@@ -40,24 +40,44 @@ none. Three options:
 
   Rejected.
 
+  **The two markers together (confirmed):**
+  - A withdrawn record **can** be superseded later. `supersede` sets `superseded_by` when it is empty and leaves
+    `withdrawn_reason` as it is, so the record keeps both: why it left, and what replaced it (D4's late link).
+  - A superseded record is **not** withdrawn: `withdraw` on it returns `False` and changes nothing, because it is
+    already history and its successor says why.
+  - Neither marker is ever cleared or overwritten.
+
 **D2. Where the sync state lives.** Every page needs a state (pending, applied or failed) with a retry path,
 including a page whose first import failed, which has no memory to carry a tag. Two options:
 - **Tags on the page's memory** (`sync:failed`, …). These need no new storage, but they can't represent a page
   with no memory. Tags also merge on dedup, keep no attempt count or last error, and a withdrawn memory would
   carry state the store treats as history. Rejected.
-- **A ledger in memkernel's store directory (recommended).** One JSON file per project and wiki:
-  - Location: `<chroma_persist_path>/wiki-sync/<project_id>.json`. There are several projects per store, one
-    collection each, so it is keyed by project.
+- **A ledger in memkernel's state directory (confirmed).** One JSON file per project **and** wiki:
+  - **Location:** outside Chroma's directory, in a memkernel state directory: a new setting
+    `MEMKERNEL_STATE_DIR`, default `.memkernel/state`, resolved exactly like `MEMKERNEL_CHROMA_PERSIST_PATH`: a
+    relative path against the working directory of the process (the MCP server, a hook, a library caller), so
+    the README's advice to set an absolute persist path applies to it too. It gets a row in the README configuration table, and the README tells users to keep it out of
+    git (`.memkernel/state/`, like `.memkernel/wiki-proposals/`).
+  - **File:** `<state dir>/wiki-sync/<project_id>/<wiki key>.json`. One project may import several wikis, and two
+    projects may share a store.
+  - **Wiki key:** the wiki manifest's `wiki_id` when there is one. It is stable, because it travels with the wiki
+    through moves and renames of its directory. Otherwise the key is the sha256 of the wiki directory's path
+    **relative to the project root** (POSIX form, normalised), so a project moved or cloned elsewhere keeps its
+    ledger. Moving the wiki inside the project without a manifest gives it a new key, and a new, empty ledger.
   - One entry per page key: `path`, `state` (`pending` / `applied` / `failed`), `action` (`import`, `withdraw`,
     `supersede`), the revision sha256, the memory `ref_id`, `attempts`, `last_error` and `updated_at`.
-  - Writing: written whole to a temporary file and moved into place with `os.replace`, under the same POSIX
-    lock idea as #69.
+  - **Writing:** written whole to a temporary file and moved into place with `os.replace`.
+  - **Lock:** a POSIX `fcntl` lock on the ledger's own lock file is held **for the whole import run**, so two
+    imports of one wiki never interleave; the second waits. Without `fcntl`, no lock, as in #69.
   - With an in-memory store (empty `chroma_persist_path`) the ledger is in memory too, for the process's life.
   - It is memkernel's bookkeeping, not the wiki's, so it never goes into the wiki or wiki-studio's audit trail.
 
-**D3. How deletion is detected.** wiki-studio provides no signal. **Recommended rule:** a live wiki memory
-counts as deleted when, in a **complete** governed listing (`api.review_state` with `pages=None`, which
-returned without error):
+**D3. How deletion is detected (changed by the review).** wiki-studio provides no signal. **Only a memory that
+this wiki's ledger recorded as imported (an `applied` import entry naming its `ref_id`) may be withdrawn as
+deleted. A legacy memory, imported before the ledger existed or by the ungoverned import, never is**, even when
+its page is gone. The ledger is the only proof that the memory came from this wiki. Such a memory counts as
+deleted when, in a **complete** governed listing (`api.review_state` with `pages=None`, which returned without
+error):
 - its `page_key:` tag matches no listed page;
 - its `source` path matches no listed page;
 - and the file at that `source` is absent from the wiki directory.
@@ -66,20 +86,27 @@ All three must hold, so a rename that kept its `page_id` is matched by key and i
 lost its `page_id` withdraws the old memory, and the new path is imported once approved, as wiki-studio treats it
 too. A listing error withdraws nothing.
 
-**D4. Supersession.** For a page in state `superseded`, the importer reads `superseded_by` from the page's
-frontmatter:
+**D4. Supersession (confirmed).** For a page in state `superseded`, the importer reads `superseded_by` from the
+page's frontmatter. **What it names:** a wiki-relative page path, as wiki-studio's schema and lint define it. Lint
+requires the target to exist, not to be the page itself, and not to be superseded in turn. The importer resolves
+the path to that page's key through the same complete listing.
 - if the successor page has a live memory from this store (by key or path), the old memory is **superseded** by
   it, through the existing `supersede`;
 - otherwise the old memory is **withdrawn** with reason `superseded`, and the ledger keeps it `pending` until the
   successor's memory exists. Once it does, the importer adds the `superseded_by` link. The withdrawn marker stays
   as history; `superseded_by` is set because it was empty, and nothing is overwritten.
+- **An unknown successor** (a path the listing does not contain, not yet approved, or not imported) **stays
+  `pending` and is reported** under `pending`, with the successor path and why. It is retried at every import
+  and is never resolved by guessing.
 
-**D5. Deprecation.** An approved page with `status: deprecated` is withdrawn with reason `deprecated`. A
+**D5. Deprecation (confirmed).** A page's memory is withdrawn with reason `deprecated` **once the deprecated
+revision is approved**: `review_state` reports it `approved`, and its text has `status: deprecated`. Until then
+the page is `stale`, and its last approved memory stays live (memkernel-0-6 FR-013). A
 deprecated page that comes back to `stable` and is approved again gets a **new** memory: withdrawn records are
 never dedup hits, just like superseded ones.
 
 ## Requirements
-These are written for the recommended options. Any decision the owner changes is amended before build.
+These follow the confirmed decisions.
 - **FR-001 (the marker, D1 A):** `Memory` gains `withdrawn_reason: str | None` and `withdrawn_at: datetime | None`,
   stored as scalar metadata and loaded as `None` when absent. Reasons: `deleted`, `deprecated`, `superseded`.
 - **FR-002 (one liveness predicate):**
@@ -94,7 +121,10 @@ These are written for the recommended options. Any decision the owner changes is
   - It is idempotent: `False` when the record is already withdrawn for that reason.
   - It refuses with `ValueError`, changing nothing, for an unknown record or another project's.
   - It never edits content, and never clears or overwrites `superseded_by` or a different withdrawal reason.
-- **FR-004 (the ledger, D2):** as described in D2.
+- **FR-004 (the ledger, D2):** as described in D2: per project and wiki (the manifest's `wiki_id`, else the
+  project-relative wiki path's sha256), in `MEMKERNEL_STATE_DIR` (resolved like the Chroma persist path), with the
+  lock held for the whole run. The README configuration table gets a `MEMKERNEL_STATE_DIR` row, and the README's
+  git note adds `.memkernel/state/` to what to ignore.
   - An import run first marks each page action `pending`, then `applied` after the store write, or `failed` with
     the error.
   - The next run retries `pending` and `failed` entries before new work.
@@ -135,16 +165,22 @@ These are written for the recommended options. Any decision the owner changes is
 - **SC-1 (US1):**
   - Deleting an approved page, then importing, withdraws its memory with reason `deleted`, and `recall` no longer
     returns it.
+  - A legacy memory (no ledger entry) whose page is deleted is never withdrawn.
   - A rename that kept its `page_id` is not a deletion.
   - A listing error withdraws nothing.
-- **SC-2 (US2):** deprecating an approved page withdraws its memory; approving it again as `stable` creates a new
-  memory.
-- **SC-3 (US3):** a superseded page whose successor has a memory is superseded by it. Without one, it is withdrawn
-  and later linked once the successor is imported, without overwriting anything.
+- **SC-2 (US2):** deprecating an approved page withdraws nothing until the deprecated revision is approved, then
+  withdraws its memory. Approving it again as `stable` creates a new memory.
+- **SC-3 (US3):**
+  - A superseded page whose successor has a memory is superseded by it.
+  - Without one, it is withdrawn and later linked once the successor is imported, without overwriting anything:
+    the record then has both markers.
+  - An unknown successor stays `pending` and is reported.
+  - `withdraw` on a superseded record returns `False` and changes nothing.
 - **SC-4 (US4):**
   - A failure injected in the middle of a run leaves `failed` or `pending` entries.
   - The next run completes them, with the same end state as an uninterrupted run, and nothing is applied twice.
   - A corrupt ledger is reported and rebuilt.
+  - Two imports of one wiki started together run one after the other (the lock).
 - **SC-5 (FR-002):**
   - A withdrawn memory leaves `recall`, `list_memories`, `checkpoints_newest_first`, `consolidate` candidates,
     health's live counts, revalidation and dedup.

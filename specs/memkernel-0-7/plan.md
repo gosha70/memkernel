@@ -14,6 +14,7 @@ origin:
     - https://github.com/gosha70/wiki-studio/blob/main/specs/pitches/38-release-b-governed-curation/pitch.md
   transcripts:
     - specs/memkernel-0-7/origin/2026-10-30-part-2b.md
+    - specs/memkernel-0-7/origin/2026-10-30-review-76.md
   origin_claim: |
     Release B part 2b for #48: "Withdrawal on supersession, deprecation and explicit
     deletion; a pending / applied / failed synchronisation state with a retry path; no
@@ -46,11 +47,14 @@ So memkernel detects deletion itself. 2b needs no new wiki-studio API, and the f
 ## The two choices the owner asked to weigh
 See spec "Decisions for the owner". The recommendations are:
 - **Withdrawal:** a new `withdrawn` marker (option A), not a tombstone record (B) or a sentinel in `superseded_by` (C).
-- **Sync state:** a ledger file in memkernel's store directory, not tags on the page's memory.
+- **Sync state:** a ledger file per project and wiki in a memkernel state directory outside Chroma's, not tags on the page's memory.
+
+Confirmed by the owner on 2026-10-30, with D3 changed: only memories this wiki's ledger recorded may be withdrawn as deleted.
 
 ## Files (for the build, after the spec is approved)
 - `src/memkernel/core/models.py` and `src/memkernel/storage/chroma.py`: the marker, loaded with a default.
 - `src/memkernel/core/services.py`: `withdraw()` and one liveness predicate used at every live-record site.
+- `src/memkernel/config.py`: `MEMKERNEL_STATE_DIR`.
 - `src/memkernel/wiki/sync.py` and a new `src/memkernel/wiki/ledger.py`: withdrawal and the ledger.
 - `src/memkernel/mcp/tools/wiki.py`: the response keys.
 - `docs/architecture/memory-tiers.md`, `README.md`, `CHANGELOG.md`.
