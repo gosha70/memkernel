@@ -106,9 +106,15 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         value that breaks the grammar. Without wiki-studio every page file is imported, drafts
         included ("governed": false). An installed wiki-studio that is broken or older than 0.7.0
         imports nothing and reports "import_error". "skipped" lists pages that cannot be imported
-        (unmapped type, deprecated, unparsable); "unchanged" lists approved pages already current,
-        whose corrects are still reconciled. Idempotent: a changed page supersedes its previous
-        version.
+        (unmapped type, unparsable, or deprecated with nothing to withdraw); "unchanged" lists approved
+        pages already current, whose corrects are still reconciled. Idempotent: a changed page
+        supersedes its previous version. A governed import also takes memories out of the current
+        answers, keeping their records: "withdrawn" lists memories of deleted pages (only those this
+        wiki's sync ledger recorded) and of deprecated pages once that revision is approved;
+        "superseded" lists memories of superseded pages replaced by their successor page's memory;
+        "pending" lists actions waiting (a successor with no memory yet); "sync_failed" lists failed
+        actions, retried at the next import; "ledger_error" says the sync ledger was unreadable and
+        was rebuilt.
         """
         app_ctx = _context(ctx)
         importer = WikiImporter(
@@ -120,7 +126,19 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         payload: dict[str, Any] = {"imported": report.imported, "skipped": report.skipped, "governed": report.governed}
         if report.import_error is not None:
             payload["import_error"] = report.import_error
-        for key in ("unchanged", "not_approved", "corrections", "unresolved", "invalid_corrects"):
+        if report.ledger_error is not None:
+            payload["ledger_error"] = report.ledger_error
+        for key in (
+            "unchanged",
+            "not_approved",
+            "corrections",
+            "unresolved",
+            "invalid_corrects",
+            "withdrawn",
+            "superseded",
+            "pending",
+            "sync_failed",
+        ):
             value = getattr(report, key)
             if value:
                 payload[key] = value

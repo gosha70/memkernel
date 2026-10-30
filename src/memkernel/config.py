@@ -34,6 +34,10 @@ class MemKernelSettings(BaseSettings):
     chroma_persist_path: str = ".memkernel/chroma"
     chroma_collection_prefix: str = "memkernel"
 
+    # memkernel's own state outside Chroma (memkernel-0-7): the wiki sync ledger. Resolved like
+    # chroma_persist_path: a relative path is relative to the working directory of the process.
+    state_dir: str = ".memkernel/state"
+
     # Embedding
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_dimension: int = 384

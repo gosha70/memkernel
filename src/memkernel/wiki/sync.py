@@ -24,11 +24,30 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from memkernel.core.models import MemoryTier, MemoryType
+from memkernel.core.models import (
+    WITHDRAWN_DELETED,
+    WITHDRAWN_DEPRECATED,
+    WITHDRAWN_SUPERSEDED,
+    MemoryTier,
+    MemoryType,
+)
+from memkernel.wiki.ledger import (
+    ACTION_IMPORT,
+    ACTION_SUPERSEDE,
+    ACTION_WITHDRAW,
+    ORIGIN_IMPORT,
+    ORIGIN_REBUILT,
+    STATE_APPLIED,
+    STATE_FAILED,
+    STATE_PENDING,
+    LedgerEntry,
+    SyncLedger,
+)
 from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
 from memkernel.wiki.studio import (
+    SUPERSEDED_STATE,
     GatedPage,
     GateError,
     GateUncertainError,
@@ -40,6 +59,7 @@ from memkernel.wiki.studio import (
     load_studio,
     propose_and_promote,
     review_pages,
+    wiki_id,
 )
 
 if TYPE_CHECKING:
@@ -50,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 WIKI_TAG = "wiki"
 PAGE_KEY_TAG = "page_key:"
+DEPRECATED_STATUS = "deprecated"
 PAGE_SHA_TAG = "page_sha:"
 CORRECTS_KEY = "corrects"  # memkernel's frontmatter key (wiki-studio ADR-0002 registers it, keeps it byte for byte)
 _CORRECTS_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
@@ -137,6 +158,12 @@ class ImportReport:
     unresolved: list[dict[str, str]] = field(default_factory=list)  # {"page", "token", "reason"}
     invalid_corrects: list[dict[str, str]] = field(default_factory=list)  # {"page", "reason"}
     import_error: str | None = None
+    # memkernel-0-7 (governed import only): memories taken out of the current answers and the sync ledger's state.
+    withdrawn: list[dict[str, str]] = field(default_factory=list)  # {"path", "ref_id", "reason"}
+    superseded: list[dict[str, str]] = field(default_factory=list)  # {"path", "ref_id", "by"}
+    pending: list[dict[str, str]] = field(default_factory=list)  # {"path", "action", "detail"}
+    sync_failed: list[dict[str, Any]] = field(default_factory=list)  # {"path", "action", "error", "attempts"}
+    ledger_error: str | None = None
 
 
 class WikiExporter:
@@ -163,7 +190,7 @@ class WikiExporter:
         """Write one page per exportable memory that is not already a wiki page.
 
         Memories that came from the wiki (tagged ``wiki``), chunk records, or
-        memories a newer memory supersedes (``superseded_by`` set) are skipped. Existing pages with
+        retired memories (superseded or withdrawn) are skipped. Existing pages with
         the same slug are left untouched: the wiki, once written, is curated
         by humans/agents, not overwritten by the store. With the ``memkernel[wiki]``
         extra installed the report carries wiki-studio's lint and health findings
@@ -175,7 +202,7 @@ class WikiExporter:
         planned: list[tuple[str, WikiPage]] = []
         for memory in candidates:
             mapping = EXPORT_MAP.get(memory.type)
-            if mapping is None or WIKI_TAG in memory.tags or memory.superseded_by or memory.chunk_refs:
+            if mapping is None or WIKI_TAG in memory.tags or memory.retired() or memory.chunk_refs:
                 report.skipped += 1
                 continue
             page_type, directory = mapping
@@ -356,7 +383,21 @@ class WikiImporter:
             self._import_files(report, live, session_id)
         else:
             report.governed = True
-            self._import_reviewed(reviews, report, live, session_id)
+            settings = self._service.settings
+            ledger = SyncLedger.for_wiki(
+                settings.state_dir,
+                bool(settings.chroma_persist_path.strip()),
+                self._service.project_id,
+                wiki_id(api, self._wiki_dir, self._project_root),
+                self._wiki_dir,
+                self._project_root,
+            )
+            with ledger.run():
+                if ledger.error is not None:
+                    report.ledger_error = ledger.error
+                    self._rebuild(ledger, live)
+                self._import_reviewed(reviews, report, live, session_id, ledger)
+                self._withdraw(reviews, report, ledger, session_id)
         return report
 
     def _import_files(self, report: ImportReport, live: list[Memory], session_id: str | None) -> None:
@@ -369,16 +410,157 @@ class WikiImporter:
             self._retain_page(rel, page, None, live, session_id, report)
 
     def _import_reviewed(
-        self, reviews: list[PageReview], report: ImportReport, live: list[Memory], session_id: str | None
+        self,
+        reviews: list[PageReview],
+        report: ImportReport,
+        live: list[Memory],
+        session_id: str | None,
+        ledger: SyncLedger,
     ) -> None:
-        for review in sorted(reviews, key=lambda r: r.path):
+        """Import every approved page, those with an unfinished ledger entry first (memkernel-0-7 FR-004)."""
+        retry = {e.path for e in ledger.unfinished()}
+        for review in sorted(reviews, key=lambda r: (r.path not in retry, r.path)):
             if review.text is None:
                 report.not_approved.append({"path": review.path, "state": review.state, "reason": review.reason})
                 continue
             page = parse_page(review.text)
-            ref_id = self._retain_page(review.path, page, review, live, session_id, report)
-            if ref_id is not None and page is not None:
-                self._reconcile(review.path, page, review, ref_id, report)
+            if page is not None and page.status == DEPRECATED_STATUS:
+                continue  # withdrawn in _withdraw once the deprecated revision is approved (D5)
+            prior = ledger.entries.get(review.page_key)
+            entry = LedgerEntry(review.page_key, review.path, STATE_PENDING, ACTION_IMPORT, sha256=review.sha256 or "")
+            ledger.mark(entry, STATE_PENDING)
+            imported_before = len(report.imported)
+            try:
+                ref_id = self._retain_page(review.path, page, review, live, session_id, report)
+                if ref_id is not None and page is not None:
+                    self._reconcile(review.path, page, review, ref_id, report)
+            except Exception as exc:  # one page's failure is recorded and retried; the run goes on
+                self._failed(ledger, entry, prior, exc, report)
+                continue
+            if ref_id is None:  # skipped: nothing in the store to track
+                self._restore(ledger, entry.page_key, prior)
+                continue
+            entry.ref_id = ref_id
+            if len(report.imported) == imported_before:  # already current: adopt it, keeping a prior entry's origin
+                entry.origin = prior.origin if prior is not None and prior.ref_id == ref_id else ORIGIN_REBUILT
+            ledger.mark(entry, STATE_APPLIED)
+
+    def _withdraw(
+        self, reviews: list[PageReview], report: ImportReport, ledger: SyncLedger, session_id: str | None
+    ) -> None:
+        """memkernel-0-7 FR-005: deletion (D3), supersession (D4) and deprecation (D5), in that order."""
+        live = [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if WIKI_TAG in m.tags]
+        listed_keys = {r.page_key for r in reviews}
+        listed_paths = {r.path for r in reviews}
+        by_path = {r.path: r for r in reviews}
+        for entry in list(ledger.entries.values()):  # D3: only memories this wiki's ledger recorded
+            deletion_retry = entry.action == ACTION_WITHDRAW and entry.detail == WITHDRAWN_DELETED
+            recorded = entry.action == ACTION_IMPORT and entry.state == STATE_APPLIED and entry.origin == ORIGIN_IMPORT
+            if not (recorded or (deletion_retry and entry.state != STATE_APPLIED)) or not entry.ref_id:
+                continue
+            if entry.page_key in listed_keys or entry.path in listed_paths or (self._wiki_dir / entry.path).exists():
+                continue
+            self._apply_withdrawal(ledger, report, entry, entry.ref_id, WITHDRAWN_DELETED)
+        for review in reviews:  # D4
+            if review.superseded_by is not None or review.state == SUPERSEDED_STATE:
+                self._supersede_page(review, by_path, live, report, ledger)
+        for review in reviews:  # D5: the deprecated revision is approved
+            page = parse_page(review.text) if review.text is not None else None
+            if page is None or page.status != DEPRECATED_STATUS:
+                continue
+            previous = self._previous(review.path, review, live)
+            if previous is None:
+                report.skipped.append(review.path)
+                continue
+            entry = LedgerEntry(
+                review.page_key, review.path, STATE_PENDING, ACTION_WITHDRAW, detail=WITHDRAWN_DEPRECATED
+            )
+            self._apply_withdrawal(ledger, report, entry, previous.ref_id, WITHDRAWN_DEPRECATED)
+
+    def _supersede_page(
+        self,
+        review: PageReview,
+        by_path: dict[str, PageReview],
+        live: list[Memory],
+        report: ImportReport,
+        ledger: SyncLedger,
+    ) -> None:
+        """D4: supersede by the successor's memory when it exists; else withdraw and wait for it, reported."""
+        prior = ledger.entries.get(review.page_key)
+        old = self._previous(review.path, review, live)
+        old_ref = old.ref_id if old is not None else (prior.ref_id if prior is not None else "")
+        if not old_ref:
+            return  # never imported: nothing in the store to supersede
+        successor = review.superseded_by or ""
+        entry = LedgerEntry(review.page_key, review.path, STATE_PENDING, ACTION_SUPERSEDE, ref_id=old_ref)
+        entry.detail = successor
+        entry.attempts = prior.attempts if prior is not None else 0
+        succ_review = by_path.get(successor)
+        succ = self._previous(successor, succ_review, live) if succ_review is not None else None
+        try:
+            if succ is None:
+                if old is not None:
+                    self._service.withdraw(old_ref, WITHDRAWN_SUPERSEDED)
+                why = "not in the wiki's listing" if succ_review is None else f"no memory yet ({succ_review.state})"
+                ledger.mark(entry, STATE_PENDING)
+                report.pending.append(
+                    {"path": review.path, "action": ACTION_SUPERSEDE, "detail": f"successor {successor}: {why}"}
+                )
+                return
+            current = self._service.get(old_ref, touch=False)
+            if current is not None and current.superseded_by != succ.ref_id:
+                self._service.supersede(old_ref, succ.ref_id)
+                report.superseded.append({"path": review.path, "ref_id": old_ref, "by": succ.ref_id})
+        except (ValueError, OSError) as exc:
+            self._failed(ledger, entry, prior, exc, report)
+            return
+        ledger.mark(entry, STATE_APPLIED)
+
+    def _apply_withdrawal(
+        self, ledger: SyncLedger, report: ImportReport, entry: LedgerEntry, ref_id: str, reason: str
+    ) -> None:
+        prior = ledger.entries.get(entry.page_key)
+        entry.action, entry.detail, entry.ref_id = ACTION_WITHDRAW, reason, ref_id
+        entry.attempts = prior.attempts if prior is not None else 0
+        ledger.mark(entry, STATE_PENDING)
+        try:
+            changed = self._service.withdraw(ref_id, reason)
+        except (ValueError, OSError) as exc:
+            self._failed(ledger, entry, prior, exc, report)
+            return
+        ledger.mark(entry, STATE_APPLIED)
+        if changed:
+            report.withdrawn.append({"path": entry.path, "ref_id": ref_id, "reason": reason})
+
+    @staticmethod
+    def _failed(
+        ledger: SyncLedger, entry: LedgerEntry, prior: LedgerEntry | None, exc: Exception, report: ImportReport
+    ) -> None:
+        entry.attempts = prior.attempts if prior is not None else entry.attempts
+        ledger.mark(entry, STATE_FAILED, str(exc))
+        logger.warning("wiki import: %s of %s failed: %s", entry.action, entry.path, exc)
+        report.sync_failed.append(
+            {"path": entry.path, "action": entry.action, "error": str(exc), "attempts": entry.attempts}
+        )
+
+    @staticmethod
+    def _restore(ledger: SyncLedger, page_key: str, prior: LedgerEntry | None) -> None:
+        if prior is None:
+            ledger.entries.pop(page_key, None)
+        else:
+            ledger.entries[page_key] = prior
+
+    @staticmethod
+    def _rebuild(ledger: SyncLedger, live: list[Memory]) -> None:
+        """A corrupt ledger is rebuilt from the store's page_key tags, with origin ``rebuilt``: such entries never
+        make a memory eligible for deletion (D3), which needs proof an import run wrote it."""
+        for memory in live:
+            keys = [_tag_unsafe(t[len(PAGE_KEY_TAG) :]) for t in memory.tags if t.startswith(PAGE_KEY_TAG)]
+            if len(keys) != 1:
+                continue
+            entry = LedgerEntry(keys[0], memory.source, STATE_APPLIED, ACTION_IMPORT, ref_id=memory.ref_id)
+            entry.origin = ORIGIN_REBUILT
+            ledger.mark(entry, STATE_APPLIED)
 
     def _reconcile(self, rel: str, page: WikiPage, review: PageReview, ref_id: str, report: ImportReport) -> None:
         """FR-015: supersede the originating memories an approved page's ``corrects`` names by the page's memory."""
@@ -421,7 +603,7 @@ class WikiImporter:
     ) -> str | None:
         """Retain one page; return its live memory's ref_id (new, or already current), or None when skipped."""
         memory_type = IMPORT_MAP.get(page.page_type) if page else None
-        if page is None or memory_type is None or page.status == "deprecated":
+        if page is None or memory_type is None or page.status == DEPRECATED_STATUS:
             report.skipped.append(rel)
             return None
         content = f"{page.title}\n\n{page.body}".strip()
@@ -486,6 +668,11 @@ def _shared(memory: Memory) -> bool:
 def _tag_safe(value: str) -> str:
     """Tags are stored comma-separated: a comma in a page key would split it into two tags."""
     return value.replace("%", "%25").replace(",", "%2C")
+
+
+def _tag_unsafe(value: str) -> str:
+    """The page key a ``_tag_safe`` tag holds."""
+    return value.replace("%2C", ",").replace("%25", "%")
 
 
 def parse_corrects(value: str) -> list[str]:

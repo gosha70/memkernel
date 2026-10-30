@@ -26,6 +26,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from memkernel.wiki.pages import parse_page
+
 logger = logging.getLogger(__name__)
 
 INSTALL_HINT = "install memkernel[wiki] for lint and health"
@@ -235,6 +237,8 @@ def gate_available() -> Any | None:
 
 
 APPROVED_STATE = "approved"
+SUPERSEDED_STATE = "superseded"  # the page names its successor in its ``superseded_by`` frontmatter (memkernel-0-7 D4)
+SUPERSEDED_BY_FIELD = "superseded_by"
 CHANGED_SINCE_CHECK = "live_bytes_differ_from_approved"  # read_page's bytes are not the approved revision
 
 
@@ -248,6 +252,7 @@ class PageReview:
     reason: str
     text: str | None = None  # set only when the page is importable
     sha256: str | None = None
+    superseded_by: str | None = None  # a superseded page's successor path, from its frontmatter (memkernel-0-7 D4)
 
 
 def review_pages(api: Any, wiki_dir: Path, project_root: Path) -> list[PageReview]:
@@ -264,6 +269,13 @@ def review_pages(api: Any, wiki_dir: Path, project_root: Path) -> list[PageRevie
         paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir)
         reviews: list[PageReview] = []
         for state in api.review_state(paths):
+            if state.state == SUPERSEDED_STATE:
+                page = parse_page(api.read_page(state.path, paths).text)
+                successor = page.extra.get(SUPERSEDED_BY_FIELD) if page is not None else None
+                reviews.append(
+                    PageReview(state.path, state.page_key, state.state, state.reason, superseded_by=successor or None)
+                )
+                continue
             if state.state != APPROVED_STATE:
                 reviews.append(PageReview(state.path, state.page_key, state.state, state.reason))
                 continue
@@ -276,6 +288,19 @@ def review_pages(api: Any, wiki_dir: Path, project_root: Path) -> list[PageRevie
         logger.warning("wiki-studio review state failed for %s: %s", wiki_dir, exc)
         raise GateError(f"wiki-studio review state failed: {exc}") from exc
     return reviews
+
+
+def wiki_id(api: Any, wiki_dir: Path, project_root: Path) -> str | None:
+    """The wiki manifest's ``wiki_id`` through ``api.info``, or None when there is no manifest or no ``info``."""
+    try:
+        from wiki_studio.paths import WikiPaths
+
+        manifest = api.info(WikiPaths.for_root(project_root, wiki_dir=wiki_dir)).manifest
+    except Exception as exc:  # the id only names the ledger file; without it the path-based key is used
+        logger.info("wiki-studio info unavailable for %s: %s", wiki_dir, exc)
+        return None
+    value = getattr(manifest, "wiki_id", None)
+    return value if isinstance(value, str) and value else None
 
 
 def propose_and_promote(

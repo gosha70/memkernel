@@ -89,7 +89,7 @@ retrieval ranks by a combination of axes rather than cosine alone.
 | Mechanism | Source | Implementation |
 |---|---|---|
 | Tiered types with per-tier persistence | CoALA; Roynard 2026 | `core/models.py` (`MemoryTier`, `TYPE_TIER`, `DEFAULT_IMPORTANCE`) |
-| Supersession instead of deletion for facts | Zep/Graphiti bi-temporal edges | `retain(supersedes=...)`; `_filter_live` hides superseded records; wiki import supersedes changed pages; an approved wiki page's `corrects` supersedes the raw memories it names through `MemoryService.supersede` (sets only `superseded_by`, owned chunks first and the record last, idempotent and completing a partial mark, refuses instead of overwriting another supersession) |
+| Supersession instead of deletion for facts | Zep/Graphiti bi-temporal edges | `retain(supersedes=...)`; `_filter_live` hides superseded records; wiki import supersedes changed pages; an approved wiki page's `corrects` supersedes the raw memories it names through `MemoryService.supersede` (sets only `superseded_by`, owned chunks first and the record last, idempotent and completing a partial mark, refuses instead of overwriting another supersession); a governed wiki import **withdraws** the memory of a deleted, deprecated or (successor-less) superseded page through `MemoryService.withdraw` (memkernel-0-7): a second durable marker, `withdrawn_reason` and `withdrawn_at`, for history with no replacing record. A record is live only with neither marker (`Memory.retired()`); both are kept when a withdrawn record is later superseded |
 | Ebbinghaus retention strengthened by recall | MemoryBank (Zhong et al. 2023) | `memory/lifecycle.py::effective_ttl_days` (`base × (1 + access_boost × access_count)`), `_touch` on `recall`/`get` |
 | Recency decays from last *access*, not creation | Generative Agents (Park et al. 2023) | `recency_score` uses `last_accessed`; per-tier half-life |
 | relevance + recency + importance scoring | Generative Agents | `retrieval/search.py::rescore`; weights in settings |
@@ -169,6 +169,12 @@ to apply a page's `corrects` (memkernel-0-6 FR-017).
 `recall`'s rules, without code-chunk and document-part records, newest first (ties by `ref_id`), without content
 and without touching. The session-start, compact and post-compact blocks take "the latest checkpoint" from it,
 never from a relevance-ranked `recall` window (memkernel-0-6-compaction-hooks FR-011).
+
+`MemoryService.withdraw(ref_id, reason)` is a library method, not an MCP tool: it takes a record out of the
+current answers with no replacing record (`deleted`, `deprecated`, `superseded`), owned chunks first and the
+record last, idempotent, never overwriting either marker (memkernel-0-7 FR-003). The governed wiki import uses it,
+with a per-project, per-wiki sync ledger in `MEMKERNEL_STATE_DIR` that records each page's last action
+(`pending`, `applied`, `failed`) so a failed one is retried.
 
 ## 6. Session protocol (what the harness should do)
 
