@@ -6,7 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **What the session hooks inject** (#59, D5–D8; specs/memkernel-0-7-hooks):
+  - every memory line ends with its `ref_id`, and the checkpoint's age line carries it too;
+  - at session start, the long-term context is chosen without a query (decisions, conventions, procedures,
+    facts, then the rest; by importance, then recency), and after a compaction it is recalled with the
+    checkpoint's text; injecting no longer counts as an access;
+  - each block stays under 9,000 characters (Claude Code caps hook output at 10,000), with named section
+    shares; a cut checkpoint says which `get(ref_id)` holds the rest;
+  - an item equal to the checkpoint or an earlier item, or the source of a promotion also shown, appears once.
+- The agent instructions, the Kiro steering file and the Kiro hook prompt find the latest checkpoint with
+  `recall(…, checkpoint_only=true, order="newest", top_k=1)`, and the instructions say to skip the session-start
+  recalls when the hooks are installed. Copy the templates again. The 0.5 lifecycle suite's arms keep the 0.5
+  block, now checked against a frozen copy (`eval/lifecycle-suite/arms/minimal-block-0.5.md`).
+
 ### Added
+
+- `templates/hooks/session-end.py` (#59, D9): a SessionEnd hook that only appends a line to a session spool
+  in `MEMKERNEL_STATE_DIR` (no store, no model, within SessionEnd's 1.5-second budget); `session-start.py` adds a
+  `started` line for every `source` and no longer opens the store on `resume` or `fork`. At the next startup,
+  a session that saved no checkpoint between its first start and its last end gets one line under
+  `### Previous sessions`. Register `session-end.py` under `SessionEnd`; `on_session_end` is unchanged.
+- `recall(order="newest")` (MCP tool and `MemoryService.recall`): with `checkpoint_only=true`, the latest
+  checkpoints by time instead of by relevance; refused without `checkpoint_only`. The tool count is unchanged.
 
 - **Withdrawal in the governed `wiki_import`** (#48, Release B part 2b;
   specs/memkernel-0-7). A page's memory leaves the current answers, its record

@@ -64,10 +64,15 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         checkpoint_only: bool = False,
         top_k: int | None = None,
         include_needs_review: bool = False,
+        order: str = "relevance",
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Search memories by query. Returns ref_id + preview pairs ranked by relevance,
         recency and importance. Use get(ref_id) for full content.
+
+        order: "relevance" (default), or "newest" together with checkpoint_only=true to get the
+        latest checkpoints newest first, e.g. recall(query="session checkpoint",
+        checkpoint_only=true, order="newest", top_k=1) for the latest checkpoint.
 
         tier: working | short_term | long_term to restrict the search to one tier.
         include_needs_review: also return code memories whose source file changed or
@@ -82,6 +87,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
             checkpoint_only=checkpoint_only,
             top_k=top_k,
             include_needs_review=include_needs_review,
+            order=order,
         )
         return json.dumps([ref.model_dump(mode="json") for ref in results])
 

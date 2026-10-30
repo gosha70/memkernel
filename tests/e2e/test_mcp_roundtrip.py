@@ -531,3 +531,33 @@ async def test_status_resource_carries_health_summary() -> None:
         assert json.loads(_text(r))["health"]["dangling_links"] == 1
         tools = await client.list_tools()
         assert len(tools.tools) == 9
+
+
+@pytest.mark.e2e
+async def test_recall_order_newest_through_the_mcp_tool() -> None:
+    """memkernel-0-7-hooks FR-005: the latest checkpoint by time; misuse is refused with a clear error."""
+    settings = MemKernelSettings(project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}", chroma_persist_path="")
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+
+    async with create_connected_server_and_client_session(server) as client:
+        await client.call_tool(
+            "retain", arguments={"content": "SESSION CHECKPOINT old", "type": "episode", "checkpoint": True}
+        )
+        latest = json.loads(
+            _text(
+                await client.call_tool(
+                    "retain", arguments={"content": "SESSION CHECKPOINT new", "type": "episode", "checkpoint": True}
+                )
+            )
+        )
+        newest = json.loads(
+            _text(
+                await client.call_tool(
+                    "recall", arguments={"query": "x", "checkpoint_only": True, "order": "newest", "top_k": 1}
+                )
+            )
+        )
+        refused = await client.call_tool("recall", arguments={"query": "x", "order": "newest"})
+
+    assert [r["ref_id"] for r in newest] == [latest["ref_id"]]
+    assert refused.isError and "only for checkpoint_only" in _text(refused)

@@ -179,6 +179,10 @@ def _matches_query(memory: Memory, query: SearchQuery) -> bool:
     return not (query.checkpoint_only and not memory.checkpoint)
 
 
+ORDER_RELEVANCE = "relevance"
+ORDER_NEWEST = "newest"  # recall(order=...): newest checkpoints first (memkernel-0-7-hooks FR-005)
+
+
 def _artifact_ref(memory: Memory, score: float, preview_length: int) -> ArtifactRef:
     return ArtifactRef(
         ref_id=memory.ref_id,
@@ -695,8 +699,13 @@ class MemoryService:
         tier: MemoryTier | None = None,
         touch: bool = True,
         include_needs_review: bool = False,
+        order: str = ORDER_RELEVANCE,
     ) -> list[ArtifactRef]:
         """Search for memories matching the query.
+
+        ``order="newest"`` (memkernel-0-7-hooks FR-005) is only for ``checkpoint_only=True``: it returns live
+        checkpoints newest first from :meth:`checkpoints_newest_first`, ignoring the query, so "the latest
+        checkpoint" is never chosen from a relevance-ranked window. Any other use raises ``ValueError``.
 
         Returns a list of ArtifactRef (lightweight references, no full content).
         Expired, superseded and (unless ``include_needs_review``) needs-review
@@ -705,6 +714,12 @@ class MemoryService:
         their retention — unless ``touch=False`` (used by maintenance paths).
         BM25 index is self-healed (rebuilt from vector store) if needs_rebuild is set.
         """
+        if order not in (ORDER_RELEVANCE, ORDER_NEWEST):
+            raise ValueError(f"order must be {ORDER_RELEVANCE!r} or {ORDER_NEWEST!r}, got {order!r}")
+        if order == ORDER_NEWEST:
+            if not checkpoint_only:
+                raise ValueError(f"order={ORDER_NEWEST!r} is only for checkpoint_only=true (the latest checkpoints)")
+            return self._newest_checkpoints(type, session_id, top_k, tier, touch)
         _start = time.perf_counter()
 
         if self._sparse_index.needs_rebuild:
@@ -858,6 +873,31 @@ class MemoryService:
         if tier is not None:
             memories = [m for m in memories if m.tier == tier]
         return memories
+
+    def _newest_checkpoints(
+        self,
+        memory_type: MemoryType | None,
+        session_id: str | None,
+        top_k: int | None,
+        tier: MemoryTier | None,
+        touch: bool,
+    ) -> list[ArtifactRef]:
+        """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints, filtered like recall."""
+        limit = top_k if top_k is not None else self._settings.search_top_k
+        picked: list[ArtifactRef] = []
+        for candidate in self.checkpoints_newest_first():
+            if len(picked) >= limit:
+                break
+            if (memory_type is not None and candidate.type != memory_type) or (
+                session_id is not None and candidate.session_id != session_id
+            ):
+                continue
+            if tier is not None and candidate.tier != tier:
+                continue
+            memory = self.get(candidate.ref_id, touch=touch)
+            if memory is not None:
+                picked.append(_artifact_ref(memory, 1.0, self._settings.preview_length))
+        return picked
 
     def checkpoints_newest_first(self) -> list[Memory]:
         """Every live checkpoint record, newest first (ties by ``ref_id``), without content and without touching.

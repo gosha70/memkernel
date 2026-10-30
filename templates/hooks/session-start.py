@@ -7,8 +7,10 @@ JSON. Claude Code adds this hook's stdout to the model's context:
   context and promotion candidates, after a consolidation pass;
 - ``compact``: the recovery after a compaction (the latest checkpoint the agent
   saved, with its age, and long-term context; no consolidation);
-- ``resume`` and ``fork``: nothing.
-Register it without a matcher, so it runs for every ``source``.
+- ``resume`` and ``fork``: nothing (and the store is not opened).
+Register it without a matcher, so it runs for every ``source``. For every
+``source`` it also appends a ``started`` line to the session spool in
+MEMKERNEL_STATE_DIR, which session-end.py completes (memkernel-0-7-hooks D9).
 
 The whole protocol lives in ``memkernel.lifecycle.MemoryLifecycle``; this
 script only reads ``source``, builds the service and prints
@@ -39,6 +41,7 @@ import json
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Allow running from a local checkout without `pip install`.
@@ -46,9 +49,10 @@ _REPO_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 if _REPO_SRC.is_dir() and str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
 
+from memkernel import session_spool  # noqa: E402
 from memkernel.config import MemKernelSettings  # noqa: E402
 from memkernel.factory import build_service  # noqa: E402
-from memkernel.lifecycle import MemoryLifecycle  # noqa: E402
+from memkernel.lifecycle import SOURCES_ALREADY_IN_CONTEXT, MemoryLifecycle  # noqa: E402
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 # Claude Code runs hooks from the project directory: make it the source root unless set.
@@ -72,9 +76,16 @@ def _text(payload: dict[str, object], key: str) -> str:
 
 
 def main() -> None:
-    source = _text(_payload(), "source") or None
+    payload = _payload()
+    source = _text(payload, "source") or None
+    session_id = _text(payload, "session_id") or None
     settings = MemKernelSettings()
-    text = MemoryLifecycle(build_service(settings), settings).on_session_start(source)
+    session_spool.append(
+        settings, session_spool.EVENT_STARTED, session_id or "", datetime.now(UTC), source=source or ""
+    )
+    if source in SOURCES_ALREADY_IN_CONTEXT:
+        return  # nothing to inject: do not load the store or the model
+    text = MemoryLifecycle(build_service(settings), settings).on_session_start(source, session_id=session_id)
     if text:
         print(text)
 

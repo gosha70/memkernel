@@ -16,6 +16,7 @@ from memkernel.lifecycle import (
     HEADING_CHECKPOINT,
     HEADING_CONTEXT,
     HEADING_POST_COMPACT,
+    HEADING_PREVIOUS_SESSIONS,
     HEADING_SESSION_END,
     HEADING_SESSION_START,
     HEADING_WIKI,
@@ -241,7 +242,8 @@ def test_the_compact_block_shows_the_checkpoints_age(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(module, "datetime", ThreeHoursLater)
     text = lifecycle.on_session_start("compact")
 
-    assert f"Saved 3 hours ago ({saved.strftime('%Y-%m-%d %H:%M UTC')}); it may predate this session's work." in text
+    stamp = saved.strftime("%Y-%m-%d %H:%M UTC")
+    assert f"Saved 3 hours ago ({stamp}, {ref}); it may predate this session's work." in text  # FR-001: the ref_id
 
 
 @pytest.mark.parametrize(
@@ -359,3 +361,230 @@ def test_expiry_is_judged_with_the_services_settings(call: str) -> None:
     text = lifecycle.on_post_compact() if call == "post_compact" else lifecycle.on_session_start(call)
 
     assert "FORTY-FIVE-DAYS" in text
+
+
+# ── memkernel-0-7-hooks phase 1: D5–D8 and the agents' latest checkpoint ──────
+
+
+def _memory_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("- [")]
+
+
+@pytest.mark.parametrize("source", ["startup", "compact"])
+def test_every_injected_memory_line_and_the_checkpoint_carry_a_ref_id(source: str) -> None:
+    """SC-1 (D5)."""
+    lifecycle, svc = _lifecycle()
+    refs = {svc.retain(f"Decision {i}: use tool {i}", MemoryType.DECISION) for i in range(3)}
+    checkpoint = svc.retain("SESSION CHECKPOINT\n\nNext: wire tool 1", MemoryType.EPISODE, checkpoint=True)
+
+    text = lifecycle.on_session_start(source)
+
+    lines = _memory_lines(text)
+    assert lines and all(line.endswith(")") and line.rsplit("(", 1)[1][:-1] in refs for line in lines)
+    assert f", {checkpoint}); it may predate" in text
+    for line in lines:
+        assert svc.get(line.rsplit("(", 1)[1][:-1], touch=False) is not None
+
+
+def test_startup_context_is_chosen_by_type_importance_and_recency_without_touching() -> None:
+    """SC-2 (D6, H1): no query; decisions before conventions before facts; injecting changes no access count."""
+    lifecycle, svc = _lifecycle()
+    fact = svc.retain("The CI runner has 4 cores", MemoryType.FACT)
+    convention = svc.retain("Branch names start with feature/", MemoryType.CONVENTION)
+    decision = svc.retain("Use Postgres for the user DB", MemoryType.DECISION)
+
+    text = lifecycle.on_session_start("startup")
+
+    order = [line.rsplit("(", 1)[1][:-1] for line in _memory_lines(text)]
+    assert order[:3] == [decision, convention, fact]
+    assert all(m.access_count == 0 for m in svc.list_memories() if m.ref_id in {fact, convention, decision})
+
+
+def test_the_compact_block_recalls_context_with_the_checkpoint_text() -> None:
+    """SC-2 (H1): the work in progress is the query."""
+    lifecycle, svc = _lifecycle()
+    for i in range(8):
+        svc.retain(f"Unrelated decision number {i} about logging format", MemoryType.DECISION)
+    target = svc.retain("Use arq for background jobs because it is async-native", MemoryType.DECISION)
+    svc.retain("SESSION CHECKPOINT\n\nCurrent: moving background jobs to arq", MemoryType.EPISODE, checkpoint=True)
+
+    text = lifecycle.on_session_start("compact")
+
+    assert target in text
+    assert svc.get(target, touch=False).access_count == 0  # type: ignore[union-attr]
+
+
+def test_each_block_stays_under_the_budget_and_names_what_to_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-3 (D7): an oversized checkpoint, 50 flagged memories and long candidates still fit under 9,000."""
+    from memkernel import lifecycle as module
+
+    lifecycle, svc = _lifecycle()
+    big = svc.retain(
+        "SESSION CHECKPOINT\n\n" + "\n".join(f"line {i} " + "x" * 80 for i in range(200)),
+        MemoryType.EPISODE,
+        checkpoint=True,
+    )
+    for i in range(30):
+        svc.retain(f"Decision {i}: " + "y" * 300, MemoryType.DECISION)
+    real = svc.consolidate
+
+    def flooded(*args: Any, **kwargs: Any) -> Any:
+        report = real(*args, **kwargs)
+        report["candidates"] = [
+            {"ref_id": f"c{i}", "type": "observation", "access_count": 1, "preview": "z" * 190} for i in range(50)
+        ]
+        report["revalidated"] = {
+            "flagged": [{"source": f"src/f{i}.py", "reason": "changed", "ref_id": f"r{i}"} for i in range(50)]
+        }
+        return report
+
+    monkeypatch.setattr(svc, "consolidate", flooded)
+    for source in ("startup", "compact"):
+        text = lifecycle.on_session_start(source)
+        assert len(text) < module.TOTAL_BUDGET, (source, len(text))
+        assert f"(truncated; get({big}) for the rest)" in text
+    startup = lifecycle.on_session_start("startup")
+    assert "… and 40 more (consolidate(revalidate=true) lists all)" in startup
+
+
+def test_an_item_equal_to_the_checkpoint_or_a_shown_promotions_source_appears_once() -> None:
+    """SC-4 (D8): de-duplication inside one block."""
+    from memkernel.lifecycle import _distinct
+
+    lifecycle, svc = _lifecycle()
+    a = svc.retain("Use Postgres", MemoryType.DECISION)
+    twin = svc.retain("Use Postgres", MemoryType.FACT)  # same content, another record
+    source = svc.retain("Deploys go out on Tuesdays", MemoryType.CONVENTION)
+    promoted = svc.retain("Deploys go out on Tuesdays, never Fridays", MemoryType.CONVENTION, promoted_from=source)
+    memories = [svc.get(r, touch=False) for r in (a, twin, source, promoted)]
+    assert all(m is not None for m in memories)
+
+    kept = _distinct([m for m in memories if m is not None], None, 10)
+
+    assert [m.ref_id for m in kept] == [a, promoted]
+    checkpoint = svc.get(a, touch=False)
+    assert [m.ref_id for m in _distinct([m for m in memories if m is not None], checkpoint, 10)] == [promoted]
+
+
+# ── memkernel-0-7-hooks phase 2: D9, the session spool ────────────────────────
+
+
+def _spooled(tmp_path: Path) -> tuple[MemoryLifecycle, Any, Any]:
+    from memkernel import session_spool
+
+    lifecycle, svc = _lifecycle(chroma_persist_path=str(tmp_path / "chroma"), state_dir=str(tmp_path / "state"))
+    return lifecycle, svc, session_spool
+
+
+def _at(svc: Any, ref: str, when: Any) -> None:
+    svc._vector_store.update_metadata(ref, {"timestamp": when.isoformat()})
+
+
+def test_a_session_that_saved_no_checkpoint_is_reported_once_at_the_next_startup(tmp_path: Path) -> None:
+    """SC-7: no checkpoint inside the window, from its first start to its last end; reported once, then drained."""
+    from datetime import UTC, datetime, timedelta
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    t0 = datetime.now(UTC) - timedelta(hours=5)
+    settings = lifecycle._settings
+    spool.append(settings, spool.EVENT_STARTED, "s-unsaved", t0)
+    spool.append(settings, spool.EVENT_ENDED, "s-unsaved", t0 + timedelta(hours=1), reason="logout")
+    earlier = svc.retain("SESSION CHECKPOINT from another session", MemoryType.EPISODE, checkpoint=True)
+    _at(svc, earlier, t0 - timedelta(hours=1))  # saved in another session: does not count
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS in text and "(logout," in text and "ended without a saved checkpoint" in text
+    assert HEADING_PREVIOUS_SESSIONS not in lifecycle.on_session_start("startup", session_id="s-now")
+
+
+def test_a_checkpointed_or_resumed_session_and_an_end_without_a_start_get_no_line(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from memkernel.lifecycle import COMPACT_SUMMARY_TAG
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    t0 = datetime.now(UTC) - timedelta(hours=10)
+    # resumed twice: one window from the first start to the last end; a checkpoint in its second part counts
+    spool.append(settings, spool.EVENT_STARTED, "s-resumed", t0)
+    spool.append(settings, spool.EVENT_ENDED, "s-resumed", t0 + timedelta(hours=1), reason="other")
+    spool.append(settings, spool.EVENT_STARTED, "s-resumed", t0 + timedelta(hours=2), source="resume")
+    spool.append(settings, spool.EVENT_ENDED, "s-resumed", t0 + timedelta(hours=3), reason="other")
+    saved = svc.retain("SESSION CHECKPOINT resumed part", MemoryType.EPISODE, checkpoint=True)
+    _at(svc, saved, t0 + timedelta(hours=2, minutes=30))
+    # only a compact summary tagged with the session's id
+    spool.append(settings, spool.EVENT_STARTED, "s-compacted", t0 + timedelta(hours=4))
+    spool.append(settings, spool.EVENT_ENDED, "s-compacted", t0 + timedelta(hours=5), reason="other")
+    summary = svc.retain(
+        "Summary", MemoryType.EPISODE, checkpoint=True, tags=["checkpoint", COMPACT_SUMMARY_TAG, "session:s-compacted"]
+    )
+    _at(svc, summary, t0 - timedelta(days=1))
+    # an end without a start: unknown window
+    spool.append(settings, spool.EVENT_ENDED, "s-headless", t0 + timedelta(hours=6), reason="other")
+    path = spool.spool_path(settings)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS not in text
+
+
+def test_the_current_session_and_unfinished_sessions_stay_in_the_spool(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    lifecycle, _, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    now = datetime.now(UTC)
+    spool.append(settings, spool.EVENT_STARTED, "s-now", now)
+    spool.append(settings, spool.EVENT_STARTED, "s-still-running", now)
+
+    lifecycle.on_session_start("startup", session_id="s-now")
+
+    remaining = {
+        line.split('"session_id": "')[1].split('"')[0] for line in spool.spool_path(settings).read_text().splitlines()
+    }
+    assert remaining == {"s-now", "s-still-running"}
+
+
+def test_an_in_memory_store_keeps_no_spool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    from memkernel import session_spool
+
+    monkeypatch.chdir(tmp_path)
+    lifecycle, _ = _lifecycle()  # chroma_persist_path="": in-memory
+    session_spool.append(lifecycle._settings, session_spool.EVENT_STARTED, "s1", datetime.now(UTC))
+
+    assert lifecycle.on_session_start("startup", session_id="s1") and not (tmp_path / ".memkernel").exists()
+
+
+def test_a_checkpoint_counts_for_its_session_even_if_since_expired_superseded_or_withdrawn(tmp_path: Path) -> None:
+    """Review of #79: any checkpoint saved in the window counts, not only a live one."""
+    from datetime import UTC, datetime, timedelta
+
+    from memkernel.core.models import WITHDRAWN_DELETED
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    long_ago = datetime.now(UTC) - timedelta(days=settings.episode_ttl_days + 10)
+    windows = {
+        "s-expired": long_ago,
+        "s-superseded": long_ago + timedelta(hours=2),
+        "s-withdrawn": long_ago + timedelta(hours=4),
+    }
+    refs = {}
+    for session, start in windows.items():
+        spool.append(settings, spool.EVENT_STARTED, session, start)
+        spool.append(settings, spool.EVENT_ENDED, session, start + timedelta(hours=1), reason="other")
+        refs[session] = svc.retain(f"SESSION CHECKPOINT {session}", MemoryType.EPISODE, checkpoint=True)
+        _at(svc, refs[session], start + timedelta(minutes=30))  # all three are past the episode TTL: expired
+    replacement = svc.retain("SESSION CHECKPOINT replacement", MemoryType.EPISODE, checkpoint=True)
+    svc.supersede(refs["s-superseded"], replacement)
+    svc.withdraw(refs["s-withdrawn"], WITHDRAWN_DELETED)
+    assert svc.checkpoints_newest_first()[0].ref_id == replacement  # none of the three is live
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS not in text
