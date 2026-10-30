@@ -30,12 +30,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from memkernel import session_spool
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
 
 if TYPE_CHECKING:
     from memkernel.core.models import ArtifactRef, Memory
     from memkernel.core.services import MemoryService
+    from memkernel.session_spool import SessionWindow
 
 # Section headings are part of the hooks' stdout contract (FR-012): keep them stable.
 HEADING_SESSION_START = "## Recovered from MemKernel (session start)"
@@ -47,6 +49,7 @@ HEADING_CANDIDATES = "### Promotion candidates (short-term memories worth keepin
 HEADING_NEEDS_REVIEW = "### Needs review"
 HEADING_STORE_HEALTH = "### Store health"
 HEADING_WIKI = "### Wiki"
+HEADING_PREVIOUS_SESSIONS = "### Previous sessions"
 SEPARATOR = "---"
 
 CHECKPOINT_TAG = "checkpoint"
@@ -55,6 +58,7 @@ COMPACT_SUMMARY_TAG = "compact-summary"  # a checkpoint captured from Claude Cod
 SESSION_TAG_PREFIX = "session:"
 # SessionStart ``source`` values (Claude Code hooks reference): the full block for the rest, including ``clear``.
 SOURCE_COMPACT = "compact"
+SOURCE_STARTUP = "startup"
 SOURCES_ALREADY_IN_CONTEXT = frozenset({"resume", "fork"})
 CHECKPOINT_IMPORTANCE = 0.8
 CANDIDATE_LIMIT = 5
@@ -71,6 +75,7 @@ CONTEXT_BUDGET = 2_500
 CANDIDATES_BUDGET = 1_200
 NEEDS_REVIEW_BUDGET = 1_000
 NEEDS_REVIEW_MAX_LINES = 10
+PREVIOUS_SESSIONS_MAX_LINES = 3
 
 _CHECKPOINT_PREFIX = "SESSION CHECKPOINT — "
 _PROMOTE_HINT = "Call promote(ref_id, type, content) for anything that should outlive this session."
@@ -88,7 +93,7 @@ class MemoryLifecycle:
     # Session boundaries
     # ------------------------------------------------------------------
 
-    def on_session_start(self, source: str | None = None) -> str:
+    def on_session_start(self, source: str | None = None, session_id: str | None = None) -> str:
         """The SessionStart block for ``source``.
 
         ``resume`` and ``fork``: an empty string (the context already holds it). ``compact``: the recovery block of
@@ -100,6 +105,7 @@ class MemoryLifecycle:
             return ""
         if source == SOURCE_COMPACT:
             return self._compact_recovery()
+        unsaved = self._drain_spool(session_id) if source == SOURCE_STARTUP else []
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
         context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
@@ -108,6 +114,7 @@ class MemoryLifecycle:
             "",
             HEADING_CHECKPOINT,
             *(self._checkpoint_lines(latest) if latest is not None else ["No checkpoint found yet."]),
+            *_previous_sessions_block(unsaved),
             "",
             HEADING_CONTEXT,
             *(self._memory_lines(context) or ["No prior memories found."]),
@@ -231,6 +238,16 @@ class MemoryLifecycle:
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         return _cap("\n".join(lines))
 
+    def _drain_spool(self, session_id: str | None) -> list[SessionWindow]:
+        """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009)."""
+        checkpoints = [m for m in self._service.list_memories(include_superseded=True) if m.checkpoint]
+
+        def checkpointed(window: SessionWindow) -> bool:
+            tag = f"{SESSION_TAG_PREFIX}{window.session_id}"
+            return any(window.start <= m.timestamp <= window.end or tag in m.tags for m in checkpoints)
+
+        return session_spool.drain(self._settings, session_id, checkpointed)
+
     def _startup_context(self) -> list[Memory]:
         """Live long-term memories without a query: by type (CONTEXT_TYPE_ORDER), importance, recency (H1)."""
         rank = {t: i for i, t in enumerate(CONTEXT_TYPE_ORDER)}
@@ -283,6 +300,21 @@ def _age(delta: timedelta) -> str:
 
 def _context_lines(refs: list[ArtifactRef]) -> list[str]:
     return _fit([f"- [{r.type}] {r.preview} ({r.ref_id})" for r in refs], CONTEXT_BUDGET)
+
+
+def _previous_sessions_block(unsaved: list[SessionWindow]) -> list[str]:
+    """One line per ended session with no checkpoint during it (H4), within PREVIOUS_SESSIONS_MAX_LINES."""
+    if not unsaved:
+        return []
+    shown = unsaved[-PREVIOUS_SESSIONS_MAX_LINES:]
+    lines = [
+        f"The previous session ({w.reason or 'ended'}, {w.end.astimezone(UTC).strftime('%Y-%m-%d %H:%M UTC')}) "
+        "ended without a saved checkpoint."
+        for w in shown
+    ]
+    if len(unsaved) > len(shown):
+        lines.insert(0, f"… and {len(unsaved) - len(shown)} earlier session(s) the same")
+    return ["", HEADING_PREVIOUS_SESSIONS, *lines]
 
 
 def _distinct(candidates: list[Memory], checkpoint: Memory | None, limit: int) -> list[Memory]:

@@ -16,6 +16,7 @@ from memkernel.lifecycle import (
     HEADING_CHECKPOINT,
     HEADING_CONTEXT,
     HEADING_POST_COMPACT,
+    HEADING_PREVIOUS_SESSIONS,
     HEADING_SESSION_END,
     HEADING_SESSION_START,
     HEADING_WIKI,
@@ -463,3 +464,97 @@ def test_an_item_equal_to_the_checkpoint_or_a_shown_promotions_source_appears_on
     assert [m.ref_id for m in kept] == [a, promoted]
     checkpoint = svc.get(a, touch=False)
     assert [m.ref_id for m in _distinct([m for m in memories if m is not None], checkpoint, 10)] == [promoted]
+
+
+# ── memkernel-0-7-hooks phase 2: D9, the session spool ────────────────────────
+
+
+def _spooled(tmp_path: Path) -> tuple[MemoryLifecycle, Any, Any]:
+    from memkernel import session_spool
+
+    lifecycle, svc = _lifecycle(chroma_persist_path=str(tmp_path / "chroma"), state_dir=str(tmp_path / "state"))
+    return lifecycle, svc, session_spool
+
+
+def _at(svc: Any, ref: str, when: Any) -> None:
+    svc._vector_store.update_metadata(ref, {"timestamp": when.isoformat()})
+
+
+def test_a_session_that_saved_no_checkpoint_is_reported_once_at_the_next_startup(tmp_path: Path) -> None:
+    """SC-7: no checkpoint inside the window, from its first start to its last end; reported once, then drained."""
+    from datetime import UTC, datetime, timedelta
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    t0 = datetime.now(UTC) - timedelta(hours=5)
+    settings = lifecycle._settings
+    spool.append(settings, spool.EVENT_STARTED, "s-unsaved", t0)
+    spool.append(settings, spool.EVENT_ENDED, "s-unsaved", t0 + timedelta(hours=1), reason="logout")
+    earlier = svc.retain("SESSION CHECKPOINT from another session", MemoryType.EPISODE, checkpoint=True)
+    _at(svc, earlier, t0 - timedelta(hours=1))  # saved in another session: does not count
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS in text and "(logout," in text and "ended without a saved checkpoint" in text
+    assert HEADING_PREVIOUS_SESSIONS not in lifecycle.on_session_start("startup", session_id="s-now")
+
+
+def test_a_checkpointed_or_resumed_session_and_an_end_without_a_start_get_no_line(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from memkernel.lifecycle import COMPACT_SUMMARY_TAG
+
+    lifecycle, svc, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    t0 = datetime.now(UTC) - timedelta(hours=10)
+    # resumed twice: one window from the first start to the last end; a checkpoint in its second part counts
+    spool.append(settings, spool.EVENT_STARTED, "s-resumed", t0)
+    spool.append(settings, spool.EVENT_ENDED, "s-resumed", t0 + timedelta(hours=1), reason="other")
+    spool.append(settings, spool.EVENT_STARTED, "s-resumed", t0 + timedelta(hours=2), source="resume")
+    spool.append(settings, spool.EVENT_ENDED, "s-resumed", t0 + timedelta(hours=3), reason="other")
+    saved = svc.retain("SESSION CHECKPOINT resumed part", MemoryType.EPISODE, checkpoint=True)
+    _at(svc, saved, t0 + timedelta(hours=2, minutes=30))
+    # only a compact summary tagged with the session's id
+    spool.append(settings, spool.EVENT_STARTED, "s-compacted", t0 + timedelta(hours=4))
+    spool.append(settings, spool.EVENT_ENDED, "s-compacted", t0 + timedelta(hours=5), reason="other")
+    summary = svc.retain(
+        "Summary", MemoryType.EPISODE, checkpoint=True, tags=["checkpoint", COMPACT_SUMMARY_TAG, "session:s-compacted"]
+    )
+    _at(svc, summary, t0 - timedelta(days=1))
+    # an end without a start: unknown window
+    spool.append(settings, spool.EVENT_ENDED, "s-headless", t0 + timedelta(hours=6), reason="other")
+    path = spool.spool_path(settings)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS not in text
+
+
+def test_the_current_session_and_unfinished_sessions_stay_in_the_spool(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    lifecycle, _, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    now = datetime.now(UTC)
+    spool.append(settings, spool.EVENT_STARTED, "s-now", now)
+    spool.append(settings, spool.EVENT_STARTED, "s-still-running", now)
+
+    lifecycle.on_session_start("startup", session_id="s-now")
+
+    remaining = {
+        line.split('"session_id": "')[1].split('"')[0] for line in spool.spool_path(settings).read_text().splitlines()
+    }
+    assert remaining == {"s-now", "s-still-running"}
+
+
+def test_an_in_memory_store_keeps_no_spool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    from memkernel import session_spool
+
+    monkeypatch.chdir(tmp_path)
+    lifecycle, _ = _lifecycle()  # chroma_persist_path="": in-memory
+    session_spool.append(lifecycle._settings, session_spool.EVENT_STARTED, "s1", datetime.now(UTC))
+
+    assert lifecycle.on_session_start("startup", session_id="s1") and not (tmp_path / ".memkernel").exists()

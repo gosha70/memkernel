@@ -23,6 +23,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `templates/hooks/session-end.py` (#59, D9): a SessionEnd hook that only appends a line to a session spool
+  in `MEMKERNEL_STATE_DIR` (no store, no model, within SessionEnd's 1.5-second budget); `session-start.py` adds a
+  `started` line for every `source` and no longer opens the store on `resume` or `fork`. At the next startup,
+  a session that saved no checkpoint between its first start and its last end gets one line under
+  `### Previous sessions`. Register `session-end.py` under `SessionEnd`; `on_session_end` is unchanged.
 - `recall(order="newest")` (MCP tool and `MemoryService.recall`): with `checkpoint_only=true`, the latest
   checkpoints by time instead of by relevance; refused without `checkpoint_only`. The tool count is unchanged.
 

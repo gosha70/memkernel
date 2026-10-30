@@ -18,6 +18,6 @@
 
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
-| 8 | | `session-end.py` `ended` line and `session-start.py` `started` line, in `MEMKERNEL_STATE_DIR`'s spool; no store and no model in session-end (FR-008, H4) | `templates/hooks/session-end.py`, `templates/hooks/session-start.py` | build | [ ] |
-| 9 | | Drain at startup: the notice for an ended session with no checkpoint inside its window (FR-009) | `src/memkernel/lifecycle.py` | build | [ ] |
-| 10 | | Tests SC-7; CHANGELOG and README for the new hook (FR-010) | `tests/unit/test_hook_scripts.py`, `tests/unit/test_lifecycle_component.py`, docs | build | [ ] |
+| 8 | | `session-end.py` `ended` line and `session-start.py` `started` line, in `MEMKERNEL_STATE_DIR`'s spool; no store and no model in session-end (FR-008, H4) | `templates/hooks/session-end.py`, `templates/hooks/session-start.py` | build | [x] |
+| 9 | | Drain at startup: the notice for an ended session with no checkpoint inside its window (FR-009) | `src/memkernel/lifecycle.py` | build | [x] |
+| 10 | | Tests SC-7; CHANGELOG and README for the new hook (FR-010) | `tests/unit/test_hook_scripts.py`, `tests/unit/test_lifecycle_component.py`, docs | build | [x] |

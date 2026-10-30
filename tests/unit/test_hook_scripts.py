@@ -131,3 +131,58 @@ def test_post_compact_from_a_terminal_reads_nothing_and_retains_nothing(
 
     assert "nothing retained" in capsys.readouterr().err
     assert svc.recall("checkpoint", checkpoint_only=True, touch=False) == []
+
+
+def test_session_end_writes_one_line_without_opening_a_store_or_loading_a_model(tmp_path: Path) -> None:
+    """memkernel-0-7-hooks SC-7: run as Claude Code runs it, with the reference payload; a real subprocess."""
+    import subprocess
+    import sys
+
+    payload = {**COMMON, "hook_event_name": "SessionEnd", "reason": "logout"}
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "MEMKERNEL_PROJECT_ID": "p",
+        "MEMKERNEL_CHROMA_PERSIST_PATH": str(tmp_path / "chroma"),
+        "MEMKERNEL_STATE_DIR": str(tmp_path / "state"),
+    }
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, "-X", "importtime", str(HOOKS / "session-end.py")],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=True,
+    )
+
+    (line,) = (tmp_path / "state" / "session-spool" / "p" / "spool.jsonl").read_text().splitlines()
+    record = json.loads(line)
+    assert (record["event"], record["session_id"], record["reason"]) == ("ended", "abc123", "logout")
+    assert record["transcript_path"] == COMMON["transcript_path"] and done.stdout == ""
+    assert not (tmp_path / "chroma").exists()
+    assert not any(m in done.stderr for m in ("chromadb", "sentence_transformers", "torch"))
+
+
+def test_session_start_writes_a_started_line_for_resume_and_fork_without_building_the_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MEMKERNEL_PROJECT_ID", "p")
+    monkeypatch.setenv("MEMKERNEL_CHROMA_PERSIST_PATH", str(tmp_path / "chroma"))
+    monkeypatch.setenv("MEMKERNEL_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("MEMKERNEL_PROJECT_ROOT", str(tmp_path))
+
+    def no_service(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("resume and fork must not build the service")
+
+    spec = importlib.util.spec_from_file_location("hook_session_start_spool", HOOKS / "session-start.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "build_service", no_service)
+    for source in ("resume", "fork"):
+        payload = {**COMMON, "hook_event_name": "SessionStart", "source": source}
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+        module.main()
+    lines = (tmp_path / "state" / "session-spool" / "p" / "spool.jsonl").read_text().splitlines()
+
+    assert [json.loads(x)["source"] for x in lines] == ["resume", "fork"] and capsys.readouterr().out == ""
