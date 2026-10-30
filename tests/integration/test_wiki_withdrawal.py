@@ -280,3 +280,55 @@ def test_a_rename_that_kept_its_page_id_is_not_a_deletion(tmp_path: Path) -> Non
 
     assert report.withdrawn == []
     assert any(m.source == rel for m in w.wiki_memories())  # the page's memory is still live
+
+
+# ── Review of #78 ─────────────────────────────────────────────────────────────
+
+
+def test_an_unreadable_manifest_stops_the_governed_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ledger key falls back to the path hash only without a manifest or wiki_id; an existing manifest that
+    cannot be read stops the import with import_error, before anything is imported or a ledger is touched."""
+    from wiki_studio import api
+
+    w = _persisted(tmp_path)
+    w.publish(DECISION)
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("malformed manifest (exit 4)")
+
+    monkeypatch.setattr(api, "info", broken)
+    report = w.import_pages()
+
+    assert report.import_error is not None and "manifest" in report.import_error
+    assert report.imported == [] and w.wiki_memories() == []
+    assert not (tmp_path / "state" / "wiki-sync").exists()
+
+
+def test_a_manifest_without_a_wiki_id_uses_the_path_hash_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from wiki_studio import api
+
+    from memkernel.wiki.ledger import wiki_key
+
+    w = _persisted(tmp_path)
+    w.publish(DECISION)
+    monkeypatch.setattr(api, "info", lambda *a, **k: SimpleNamespace(manifest=SimpleNamespace(wiki_id=None)))
+    w.import_pages()
+
+    expected = wiki_key(None, w.wiki, w.root)
+    assert (tmp_path / "state" / "wiki-sync" / w.svc.project_id / f"{expected}.json").is_file()
+
+
+def test_an_already_withdrawn_deprecated_page_is_not_listed_as_skipped(tmp_path: Path) -> None:
+    """FR-006: after the withdrawal, later imports neither withdraw it again nor list it in skipped."""
+    w = Wiki(tmp_path)
+    rel, _ = w.publish(DECISION)
+    w.import_pages()
+    w.update(rel, lambda t: t.replace("status: stable", "status: deprecated", 1))
+    w.approve(rel)
+    assert [x["path"] for x in w.import_pages().withdrawn] == [rel]
+
+    again = w.import_pages()
+
+    assert again.withdrawn == [] and rel not in again.skipped

@@ -371,9 +371,12 @@ class WikiImporter:
     def import_pages(self, session_id: str | None = None) -> ImportReport:
         """Retain each importable page; return what was imported, skipped and why (memkernel-0-6 FR-010-FR-016)."""
         report = ImportReport()
+        identity: str | None = None
         try:
             api = gate_available()
             reviews = review_pages(api, self._wiki_dir, self._project_root) if api is not None else None
+            if api is not None:
+                identity = wiki_id(api, self._wiki_dir, self._project_root)
         except GateError as exc:  # installed but broken, too old or failing: never fall back to the ungoverned path
             report.import_error = str(exc)
             logger.warning("wiki import from %s refused: %s", self._wiki_dir, exc)
@@ -388,7 +391,7 @@ class WikiImporter:
                 settings.state_dir,
                 bool(settings.chroma_persist_path.strip()),
                 self._service.project_id,
-                wiki_id(api, self._wiki_dir, self._project_root),
+                identity,
                 self._wiki_dir,
                 self._project_root,
             )
@@ -453,6 +456,11 @@ class WikiImporter:
         listed_keys = {r.page_key for r in reviews}
         listed_paths = {r.path for r in reviews}
         by_path = {r.path: r for r in reviews}
+        history = [
+            m
+            for m in self._service.list_memories(tier=MemoryTier.LONG_TERM, include_superseded=True)
+            if WIKI_TAG in m.tags and m.withdrawn_reason == WITHDRAWN_DEPRECATED
+        ]
         for entry in list(ledger.entries.values()):  # D3: only memories this wiki's ledger recorded
             deletion_retry = entry.action == ACTION_WITHDRAW and entry.detail == WITHDRAWN_DELETED
             recorded = entry.action == ACTION_IMPORT and entry.state == STATE_APPLIED and entry.origin == ORIGIN_IMPORT
@@ -470,8 +478,9 @@ class WikiImporter:
                 continue
             previous = self._previous(review.path, review, live)
             if previous is None:
-                report.skipped.append(review.path)
-                continue
+                if self._previous(review.path, review, history) is None:  # never imported: nothing to withdraw
+                    report.skipped.append(review.path)
+                continue  # already withdrawn as deprecated (FR-006): neither withdrawn again nor skipped
             entry = LedgerEntry(
                 review.page_key, review.path, STATE_PENDING, ACTION_WITHDRAW, detail=WITHDRAWN_DEPRECATED
             )

@@ -291,14 +291,19 @@ def review_pages(api: Any, wiki_dir: Path, project_root: Path) -> list[PageRevie
 
 
 def wiki_id(api: Any, wiki_dir: Path, project_root: Path) -> str | None:
-    """The wiki manifest's ``wiki_id`` through ``api.info``, or None when there is no manifest or no ``info``."""
+    """The wiki manifest's ``wiki_id`` through ``api.info`` (it names the sync ledger, memkernel-0-7 D2).
+
+    None only when the wiki has no manifest, or its manifest has no ``wiki_id``: the ledger then falls back to the
+    path-based key. An existing manifest that cannot be read (``info`` raises: malformed, or newer than this
+    wiki-studio) raises :class:`GateError`, so the governed import stops instead of switching to another ledger.
+    """
     try:
         from wiki_studio.paths import WikiPaths
 
         manifest = api.info(WikiPaths.for_root(project_root, wiki_dir=wiki_dir)).manifest
-    except Exception as exc:  # the id only names the ledger file; without it the path-based key is used
-        logger.info("wiki-studio info unavailable for %s: %s", wiki_dir, exc)
-        return None
+    except Exception as exc:  # any failure of the installed wiki-studio is reported, never raised raw
+        logger.warning("wiki-studio could not read the manifest of %s: %s", wiki_dir, exc)
+        raise GateError(f"wiki-studio could not read the wiki manifest: {exc}") from exc
     value = getattr(manifest, "wiki_id", None)
     return value if isinstance(value, str) and value else None
 
