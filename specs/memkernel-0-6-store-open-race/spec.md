@@ -54,8 +54,9 @@ no store, so the session has no memkernel tools. Measurements are in `plan.md`.
 - #68 (the compaction hooks) is a separate spec.
 
 ## Success Criteria
-- **SC-1 (deterministic, #69's injected-error test):** a helper process takes the lock on a new store's lock file,
-  holds it briefly, releases it and then writes a marker file. A fake `chromadb.PersistentClient` raises
+- **SC-1 (deterministic, #69's injected-error test; amended 2026-10-29):** a helper process takes the lock on a new
+  store's lock file, holds it briefly, writes a marker file and then releases the lock (the marker is written
+  before the release, so the waiting open can never run before the marker exists). A fake `chromadb.PersistentClient` raises
   `InternalError("... table collections already exists")` when it is called before the marker exists, which is
   what a real open does while another process is creating the tables, and opens normally afterwards. With FR-001
   the store's open waits for the lock and succeeds; on today's code it calls the fake at once and fails. The
