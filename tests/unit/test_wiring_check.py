@@ -72,34 +72,53 @@ def test_the_stub_makes_memkernel_see_no_wiki_studio(tmp_path: Path) -> None:
     visible = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
 
     assert hidden.stdout.strip() == "True"
-    assert visible.stdout.strip() == ("False" if _check_module().studio_version(sys.executable) else "True")
+    assert visible.stdout.strip() == ("False" if _check_module().studio_status(sys.executable)["version"] else "True")
 
 
-def test_auto_follows_the_wiki_studio_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SC-2: auto is governed with wiki-studio >= 0.7.0, else ungoverned; both runs governed then ungoverned."""
+def test_auto_uses_memkernels_floor_check_so_a_pre_release_is_ungoverned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SC-2, review of #83: auto asks memkernel's _below_floor in the server's interpreter; 0.7.0rc1 is below."""
+    import os
+
     check = _check_module()
-    for version, legs in (
-        ("0.7.0", ["governed"]),
-        ("0.8.1", ["governed"]),
-        ("0.6.0", ["ungoverned"]),
-        ("", ["ungoverned"]),
+    monkeypatch.setattr(check, "_server_env", lambda env: {**os.environ, **env})
+    status = check.studio_status(sys.executable)  # the real probe, in a real subprocess
+    assert status["meets_floor"] is bool(status["version"])  # the dev venv has wiki-studio 0.7.0, or none
+    for version, meets, legs in (
+        ("0.7.0", True, ["governed"]),
+        ("0.7.0rc1", False, ["ungoverned"]),
+        ("0.6.0", False, ["ungoverned"]),
+        ("", False, ["ungoverned"]),
     ):
-        monkeypatch.setattr(check, "studio_version", lambda python, v=version: v)
+        monkeypatch.setattr(
+            check, "studio_status", lambda python, v=version, ok=meets: {"version": v, "meets_floor": ok}
+        )
         assert check.resolve_wiki_path("auto", sys.executable) == legs
     assert check.resolve_wiki_path("both", sys.executable) == ["governed", "ungoverned"]
     assert check.resolve_wiki_path("ungoverned", sys.executable) == ["ungoverned"]
 
 
+def test_the_floor_probe_counts_a_pre_release_as_below() -> None:
+    """The decision is memkernel's own: _below_floor('0.7.0rc1') is True, _below_floor('0.7.0') False."""
+    from memkernel.wiki.studio import _below_floor
+
+    assert _below_floor("0.7.0rc1") and not _below_floor("0.7.0") and not _below_floor("0.8.1")
+    assert "_below_floor" in _check_module().STUDIO_STATUS
+
+
 def test_governed_without_wiki_studio_fails_with_a_named_step(monkeypatch: pytest.MonkeyPatch) -> None:
     """SC-2: the governed leg stops at its first step, before any server is started."""
     check = _check_module()
-    monkeypatch.setattr(check, "studio_version", lambda python: "")
+    monkeypatch.setattr(check, "studio_status", lambda python: {"version": "0.7.0rc1", "meets_floor": False})
 
     report = check.run_check(SUITE_DIR, "memkernel-not-started", sys.executable, None, "governed")
 
     assert report["passed"] is False
     assert report["steps"] == [
-        {"step": "the server's interpreter has wiki-studio (governed leg)", "passed": False, "version": ""}
+        {
+            "step": "the server's interpreter has wiki-studio at memkernel's floor (governed leg)",
+            "passed": False,
+            "version": "0.7.0rc1",
+        }
     ]
 
 

@@ -99,7 +99,8 @@ def drain(
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 record = json.loads(line)
-                datetime.fromisoformat(record["time"])
+                if datetime.fromisoformat(record["time"]).tzinfo is None:
+                    raise ValueError("a time without a timezone")  # it could not be compared with the window
                 if record["event"] not in (EVENT_STARTED, EVENT_ENDED) or not record["session_id"]:
                     raise ValueError(record["event"])
             except (ValueError, KeyError, TypeError):

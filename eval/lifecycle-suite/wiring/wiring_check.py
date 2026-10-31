@@ -65,13 +65,17 @@ WIKI_PATHS = ("auto", "governed", "ungoverned", "both")
 GOVERNED, UNGOVERNED = "governed", "ungoverned"
 STUB_MESSAGE = "wiki-studio hidden by the wiring check (ungoverned leg)"
 CURATOR = "wiring-check"
-STUDIO_VERSION = (
-    "import importlib.metadata as m\n"
+# Run in the server's interpreter: the installed wiki-studio version, and memkernel's own floor check on it
+# (memkernel.wiki.studio._below_floor: a pre-release of the floor, 0.7.0rc1, is below it).
+STUDIO_STATUS = (
+    "import importlib.metadata as m, json\n"
+    "from memkernel.wiki.studio import _below_floor\n"
     "try:\n"
     "    import wiki_studio  # noqa: F401\n"
-    "    print(m.version('wiki-studio'))\n"
+    "    version = m.version('wiki-studio')\n"
     "except ModuleNotFoundError:\n"
-    "    print('')\n"
+    "    version = ''\n"
+    "print(json.dumps({'version': version, 'meets_floor': bool(version) and not _below_floor(version)}))\n"
 )
 CURATE = (
     "import sys\n"
@@ -100,23 +104,26 @@ def write_stub(directory: Path) -> Path:
     return directory
 
 
-def studio_version(python: str) -> str:
-    """The wiki-studio version the server's interpreter imports, or "" when it has none."""
+def studio_status(python: str) -> dict[str, Any]:
+    """``{"version", "meets_floor"}`` for the server's interpreter: its wiki-studio version ("" without one) and
+    whether memkernel's own floor check accepts it; both empty or false when the probe itself fails."""
     completed = subprocess.run(
-        [python, "-c", STUDIO_VERSION], env=_server_env({}), capture_output=True, text=True, timeout=120, check=False
+        [python, "-c", STUDIO_STATUS], env=_server_env({}), capture_output=True, text=True, timeout=120, check=False
     )
-    return completed.stdout.strip().splitlines()[-1] if completed.returncode == 0 and completed.stdout.strip() else ""
+    lines = completed.stdout.strip().splitlines()
+    if completed.returncode != 0 or not lines:
+        return {"version": "", "meets_floor": False}
+    status: dict[str, Any] = json.loads(lines[-1])
+    return status
 
 
 def resolve_wiki_path(wiki_path: str, python: str) -> list[str]:
-    """The legs to run: ``auto`` is governed with wiki-studio >= 0.7.0, else ungoverned."""
+    """The legs to run: ``auto`` is governed when memkernel's floor check accepts the installed wiki-studio."""
     if wiki_path == "both":
         return [GOVERNED, UNGOVERNED]
     if wiki_path != "auto":
         return [wiki_path]
-    version = studio_version(python)
-    release = tuple(int(part) for part in version.split(".")[:2] if part.isdigit()) if version else ()
-    return [GOVERNED if release >= (0, 7) else UNGOVERNED]
+    return [GOVERNED if studio_status(python)["meets_floor"] else UNGOVERNED]
 
 
 def _sha256(path: Path) -> str:
@@ -263,8 +270,12 @@ def _run_leg(
         source = runner.prepare_session(task, arm, 0, chain, runner.ChainState())
         hidden = {"PYTHONPATH": str(write_stub(work / "hide-wiki-studio"))} if leg == UNGOVERNED else {}
         if leg == GOVERNED:
-            version = studio_version(python)
-            if not step("the server's interpreter has wiki-studio (governed leg)", bool(version), version=version):
+            status = studio_status(python)
+            if not step(
+                "the server's interpreter has wiki-studio at memkernel's floor (governed leg)",
+                bool(status["meets_floor"]),
+                version=status["version"],
+            ):
                 return
         source_env = {**runner._memkernel_env(source, CHAIN_ID, cfg), **hidden}
         step("source store starts empty", _inventory(python, source_env) == 0)
