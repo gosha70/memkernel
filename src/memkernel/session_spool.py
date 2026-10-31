@@ -16,7 +16,7 @@ import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +36,17 @@ SPOOL_DIR = "session-spool"
 SPOOL_FILE = "spool.jsonl"
 EVENT_STARTED = "started"
 EVENT_ENDED = "ended"
+# A session with no ended line (a crash, or session-end.py not registered) is removed once its newest line is this
+# old, so the spool stays bounded (memkernel-0-7-wiring-spool W2).
+SPOOL_UNENDED_MAX_AGE = timedelta(days=7)
+
+
+@dataclass(frozen=True)
+class DrainResult:
+    """What a drain found: ended sessions with no checkpoint in their window, and how many unended ones it pruned."""
+
+    unsaved: list[SessionWindow]
+    unended_removed: int
 
 
 @dataclass(frozen=True)
@@ -66,23 +77,30 @@ def append(settings: MemKernelSettings, event: str, session_id: str, when: datet
 
 
 def drain(
-    settings: MemKernelSettings, current_session_id: str | None, checkpointed: Callable[[SessionWindow], bool]
-) -> list[SessionWindow]:
-    """Remove every ended session from the spool; return those that saved no checkpoint during their window.
+    settings: MemKernelSettings,
+    current_session_id: str | None,
+    checkpointed: Callable[[SessionWindow], bool],
+    now: datetime | None = None,
+) -> DrainResult:
+    """Remove every ended session from the spool; report those that saved no checkpoint during their window.
 
-    Kept: the current session's lines and sessions that have not ended. An ended session with no ``started``
-    line has no known window: it is removed without a report. A malformed line is removed and logged once.
+    Kept: the current session's lines, and unended sessions whose newest line is younger than
+    SPOOL_UNENDED_MAX_AGE. An older unended session is removed and counted (W2). An ended session with no
+    ``started`` line has no known window: it is removed without a report. A malformed line is removed and logged
+    once.
     """
     path = spool_path(settings)
     if path is None or not path.exists():
-        return []
+        return DrainResult([], 0)
+    cutoff = (now or datetime.now(UTC)) - SPOOL_UNENDED_MAX_AGE
     with _locked(path):
         records: list[dict[str, Any]] = []
         malformed = 0
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 record = json.loads(line)
-                datetime.fromisoformat(record["time"])
+                if datetime.fromisoformat(record["time"]).tzinfo is None:
+                    raise ValueError("a time without a timezone")  # it could not be compared with the window
                 if record["event"] not in (EVENT_STARTED, EVENT_ENDED) or not record["session_id"]:
                     raise ValueError(record["event"])
             except (ValueError, KeyError, TypeError):
@@ -96,11 +114,18 @@ def drain(
             by_session.setdefault(record["session_id"], []).append(record)
         unsaved: list[SessionWindow] = []
         kept: list[dict[str, Any]] = []
+        unended_removed = 0
         for session_id, lines in by_session.items():
             starts = [datetime.fromisoformat(r["time"]) for r in lines if r["event"] == EVENT_STARTED]
             ends = [r for r in lines if r["event"] == EVENT_ENDED]
-            if session_id == current_session_id or not ends:
+            if session_id == current_session_id:
                 kept.extend(lines)
+                continue
+            if not ends:
+                if max(datetime.fromisoformat(r["time"]) for r in lines) < cutoff:
+                    unended_removed += 1  # its window never closed: no notice for it, only the count
+                else:
+                    kept.extend(lines)
                 continue
             if not starts:
                 continue  # an end without a start: the window is unknown
@@ -113,7 +138,7 @@ def drain(
         tmp = path.with_name(f"{path.name}.tmp")
         tmp.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in kept), encoding="utf-8")
         os.replace(tmp, path)
-    return sorted(unsaved, key=lambda w: w.end)
+    return DrainResult(sorted(unsaved, key=lambda w: w.end), unended_removed)
 
 
 @contextmanager

@@ -37,7 +37,7 @@ from memkernel.core.models import MemoryTier, MemoryType
 if TYPE_CHECKING:
     from memkernel.core.models import ArtifactRef, Memory
     from memkernel.core.services import MemoryService
-    from memkernel.session_spool import SessionWindow
+    from memkernel.session_spool import DrainResult, SessionWindow
 
 # Section headings are part of the hooks' stdout contract (FR-012): keep them stable.
 HEADING_SESSION_START = "## Recovered from MemKernel (session start)"
@@ -105,7 +105,7 @@ class MemoryLifecycle:
             return ""
         if source == SOURCE_COMPACT:
             return self._compact_recovery()
-        unsaved = self._drain_spool(session_id) if source == SOURCE_STARTUP else []
+        drained = self._drain_spool(session_id) if source == SOURCE_STARTUP else session_spool.DrainResult([], 0)
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
         context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
@@ -114,7 +114,7 @@ class MemoryLifecycle:
             "",
             HEADING_CHECKPOINT,
             *(self._checkpoint_lines(latest) if latest is not None else ["No checkpoint found yet."]),
-            *_previous_sessions_block(unsaved),
+            *_previous_sessions_block(drained),
             "",
             HEADING_CONTEXT,
             *(self._memory_lines(context) or ["No prior memories found."]),
@@ -238,7 +238,7 @@ class MemoryLifecycle:
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         return _cap("\n".join(lines))
 
-    def _drain_spool(self, session_id: str | None) -> list[SessionWindow]:
+    def _drain_spool(self, session_id: str | None) -> DrainResult:
         """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009).
 
         Any checkpoint saved in the window counts, live or not: one since expired, superseded or withdrawn was
@@ -307,9 +307,11 @@ def _context_lines(refs: list[ArtifactRef]) -> list[str]:
     return _fit([f"- [{r.type}] {r.preview} ({r.ref_id})" for r in refs], CONTEXT_BUDGET)
 
 
-def _previous_sessions_block(unsaved: list[SessionWindow]) -> list[str]:
-    """One line per ended session with no checkpoint during it (H4), within PREVIOUS_SESSIONS_MAX_LINES."""
-    if not unsaved:
+def _previous_sessions_block(drained: DrainResult) -> list[str]:
+    """One line per ended session with no checkpoint during it (H4), within PREVIOUS_SESSIONS_MAX_LINES, and one
+    line when unended sessions were pruned (memkernel-0-7-wiring-spool W2)."""
+    unsaved = drained.unsaved
+    if not unsaved and not drained.unended_removed:
         return []
     shown = unsaved[-PREVIOUS_SESSIONS_MAX_LINES:]
     lines = [
@@ -319,6 +321,11 @@ def _previous_sessions_block(unsaved: list[SessionWindow]) -> list[str]:
     ]
     if len(unsaved) > len(shown):
         lines.insert(0, f"… and {len(unsaved) - len(shown)} earlier session(s) the same")
+    if drained.unended_removed:
+        lines.append(
+            f"{drained.unended_removed} earlier session(s) recorded no end (crashed, or session-end.py is not "
+            "registered under SessionEnd)."
+        )
     return ["", HEADING_PREVIOUS_SESSIONS, *lines]
 
 

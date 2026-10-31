@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -588,3 +589,55 @@ def test_a_checkpoint_counts_for_its_session_even_if_since_expired_superseded_or
     text = lifecycle.on_session_start("startup", session_id="s-now")
 
     assert HEADING_PREVIOUS_SESSIONS not in text
+
+
+def test_unended_sessions_older_than_seven_days_are_pruned_and_counted_once(tmp_path: Path) -> None:
+    """memkernel-0-7-wiring-spool SC-4 (W2): bounded spool; the current session is kept whatever its age."""
+    from datetime import UTC, datetime, timedelta
+
+    lifecycle, _, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    now = datetime.now(UTC)
+    old = now - spool.SPOOL_UNENDED_MAX_AGE - timedelta(hours=1)
+    spool.append(settings, spool.EVENT_STARTED, "s-crashed-1", old)
+    spool.append(settings, spool.EVENT_STARTED, "s-crashed-2", old - timedelta(days=3))
+    spool.append(settings, spool.EVENT_STARTED, "s-recent", now - timedelta(days=2))  # younger: kept
+    spool.append(settings, spool.EVENT_STARTED, "s-now", old - timedelta(days=30))  # the current one: kept
+    spool.append(settings, spool.EVENT_STARTED, "s-ended", now - timedelta(hours=3))
+    spool.append(settings, spool.EVENT_ENDED, "s-ended", now - timedelta(hours=2), reason="other")
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert (
+        "2 earlier session(s) recorded no end (crashed, or session-end.py is not registered under SessionEnd)." in text
+    )
+    assert "The previous session (other," in text  # the ended one, handled as before
+    remaining = {
+        json.loads(line)["session_id"] for line in spool.spool_path(settings).read_text(encoding="utf-8").splitlines()
+    }
+    assert remaining == {"s-recent", "s-now"}
+    again = lifecycle.on_session_start("startup", session_id="s-now")
+    assert HEADING_PREVIOUS_SESSIONS not in again  # counted once
+
+
+def test_a_spool_time_without_a_timezone_is_a_malformed_line_not_a_crash(tmp_path: Path) -> None:
+    """Review of #83: a naive time cannot be compared with the window or the cutoff; it is skipped, not raised."""
+    from datetime import UTC, datetime, timedelta
+
+    lifecycle, _, spool = _spooled(tmp_path)
+    settings = lifecycle._settings
+    path = spool.spool_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    naive = (datetime.now(UTC) - timedelta(days=30)).replace(tzinfo=None).isoformat()
+    path.write_text(
+        json.dumps({"event": "started", "session_id": "s-naive", "time": naive})
+        + "\n"
+        + json.dumps({"event": "ended", "session_id": "s-naive", "time": naive, "reason": "other"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    text = lifecycle.on_session_start("startup", session_id="s-now")
+
+    assert HEADING_PREVIOUS_SESSIONS not in text
+    assert path.read_text(encoding="utf-8") == ""  # dropped as malformed
