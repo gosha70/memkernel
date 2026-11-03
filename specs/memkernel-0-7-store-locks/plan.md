@@ -14,6 +14,7 @@ origin:
     - specs/memkernel-0-7-store-locks/origin/2026-11-03-split.md
     - specs/memkernel-0-7-store-locks/origin/2026-11-03-reentry.md
     - specs/memkernel-0-7-store-locks/origin/2026-11-03-approval.md
+    - specs/memkernel-0-7-store-locks/origin/2026-11-03-build-review.md
   origin_claim: |
     The owner, 2026-11-03: "split S8." S8 was the concurrency and tag-integrity
     section of the #80 spec (memkernel-0-7-wiki-scope, PR #84), added over three

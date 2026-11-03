@@ -163,6 +163,11 @@ extra, never a requirement.
 | `wiki_export(wiki_dir)` | long | compile long-term memories to draft wiki pages |
 | `wiki_import(wiki_dir)` | long | index wiki pages: approved revisions only with wiki-studio ≥ 0.7.0, every page without it; applies an approved page's `corrects` |
 
+`VectorStorePort.merge_tags(ref_id, add, remove)` is the only writer of a record's tags: it reads and writes them
+under the store's `tags` lock, so a tag added meanwhile by another process is kept; `update_metadata` refuses a
+`tags` key and sends only the caller's keys (ChromaDB keeps the rest). `VectorStorePort.exclusive(name)` holds one
+of the store's named locks (`STORE_LOCK_NAMES`) for a block, keyed by the store itself, not re-entrant; without
+`fcntl` both run unlocked with one warning (memkernel-0-7-store-locks).
 `MemoryService.supersede(ref_id, by_ref)` is a library method, not an MCP tool: the governed wiki import uses it
 to apply a page's `corrects` (memkernel-0-6 FR-017).
 `MemoryService.checkpoints_newest_first()` is a library method, not an MCP tool: every live checkpoint by

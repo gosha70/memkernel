@@ -16,9 +16,11 @@ Origin: the owner's "split S8" of 2026-11-03 (`origin/2026-11-03-split.md`). Fac
   a real absolute path, plus its `tenant`, `database` and the collection name. Lock files sit in that directory,
   beside `.memkernel-open.lock`, named `.memkernel-<name>-<key>.lock`, where `<key>` is a short sha256 of tenant,
   database and collection.
-- **An injected persistent client** whose directory differs from a non-empty `chroma_persist_path` is refused
-  with `ValueError` when the adapter is built, so settings and store can't disagree. With `chroma_persist_path`
-  empty, an injected persistent client is allowed, and its locks key off its own directory.
+- **An injected persistent client** whose directory differs from a `chroma_persist_path` that was explicitly
+  set (by `MEMKERNEL_CHROMA_PERSIST_PATH` or as a setting), and is non-empty, is refused with `ValueError` when
+  the adapter is built, so settings and store can't disagree. With the default or an empty `chroma_persist_path`,
+  an injected persistent client is allowed, and its locks key off its own directory (the owner's decision,
+  2026-11-03, so `build_service(chroma_client=...)` with default settings keeps working).
 - `realpath` resolves symlinks, not case: on a case-insensitive file system, two spellings of one directory
   give two keys. memkernel opens the store from one configured path, so this needs two processes configured
   with differently cased paths; the README says to use one spelling.
@@ -35,11 +37,12 @@ deliberately: `flock` is released when the holder exits or dies, and a hung hold
 time out around. #80's wiki
 import holds `exclusive("wiki-import")` for its whole run: it takes the lock where one exists, and never
 refuses without one (L4).
-- **Not re-entrant.** A process holds each store lock at most once. Taking a lock name the same process already
+- **Not re-entrant.** A thread holds each store lock at most once. Taking a lock name the same thread already
   holds, for the same store, raises a new `LockReentryError` (a `RuntimeError` subclass in `core/models.py`)
   before acquiring anything, so a nested take fails loudly instead of deadlocking (a second `flock` on a new file
-  handle blocks against the first, even in one process). A process-wide registry of held (store key, name)
-  pairs, guarded by a `threading.Lock`, tracks this; it applies with and without `fcntl`. `merge_tags` takes
+  handle blocks against the first, even in one process). A per-thread registry of held (store key, name) pairs
+  tracks this; another thread of the same process waits for the lock instead (the owner's decision,
+  2026-11-03). It applies with and without `fcntl`. `merge_tags` takes
   `tags` itself, so a caller holding `exclusive("tags")` can't call it: the error says so.
 - **Long waits are logged.** A take that waits longer than `LOCK_WAIT_LOG_SECONDS` (a named constant, 10 seconds)
   logs one info line naming the lock and the store, then keeps waiting.
@@ -92,7 +95,8 @@ The existing store-open and ledger locks keep their behavior; this spec doesn't 
   - two processes on one persist directory with different `MEMKERNEL_STATE_DIR` serialize under `exclusive`;
   - two processes, each injecting its own `PersistentClient` for one directory, serialize; the test first
     asserts that a record written through each client is read through the other;
-  - an injected client whose directory differs from a non-empty `chroma_persist_path` is refused;
+  - an injected client whose directory differs from an explicitly set, non-empty `chroma_persist_path` (setting
+    or environment) is refused; with the default setting it is allowed;
   - two adapters on one `EphemeralClient`, and two separately constructed `EphemeralClient`s, serialize; the
     second case first asserts that the two clients see each other's records, so it can't pass vacuously; two
     collections don't block each other.

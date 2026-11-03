@@ -115,6 +115,10 @@ NEEDS_REVIEW_KEY = "needs_review"
 REVIEW_REASON_KEY = "review_reason"
 REVIEW_REASON_CHANGED = "changed"
 REVIEW_REASON_MISSING = "missing"
+# Store locks (memkernel-0-7-store-locks L2): the names a caller may take with ``VectorStorePort.exclusive``.
+STORE_LOCK_WIKI_IMPORT = "wiki-import"
+STORE_LOCK_TAGS = "tags"  # held by ``merge_tags``, the only writer of a record's tags
+STORE_LOCK_NAMES = frozenset({STORE_LOCK_WIKI_IMPORT, STORE_LOCK_TAGS})
 
 
 def tier_of(memory_type: MemoryType) -> MemoryTier:
@@ -219,6 +223,10 @@ class HealthReport(BaseModel):
 
 class ReasonerError(RuntimeError):
     """A ReasonerPort implementation ran but did not produce an answer (provider error, timeout, budget)."""
+
+
+class LockReentryError(RuntimeError):
+    """A thread took a store lock it already holds (memkernel-0-7-store-locks L2): store locks are not re-entrant."""
 
 
 class Answer(BaseModel):
