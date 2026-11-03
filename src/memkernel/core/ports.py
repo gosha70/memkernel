@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from contextlib import AbstractContextManager
+
     from memkernel.core.models import Answer, Memory, SearchResult
 
 
@@ -50,7 +53,27 @@ class VectorStorePort(Protocol):
         ...
 
     def update_metadata(self, ref_id: str, metadata: dict[str, Any]) -> None:
-        """Fetch-and-merge: only overwrites caller-specified keys."""
+        """Overwrite only the caller's keys; every other key is kept.
+
+        Raises ``ValueError`` for a ``tags`` key: ``merge_tags`` is the only writer of tags (memkernel-0-7-store-locks
+        L3), so a write of other keys can never put back a stale tag list.
+        """
+        ...
+
+    def merge_tags(self, ref_id: str, add: Sequence[str] = (), remove: Sequence[str] = ()) -> bool:
+        """Drop ``remove``, then append the missing ``add`` tags, read and written under the store's tags lock.
+
+        A tag in both ends up present, after the kept ones. Returns False when the record is unknown or its tags
+        are already as asked. Raises ``LockReentryError`` when the calling thread already holds the tags lock.
+        """
+        ...
+
+    def exclusive(self, name: str) -> AbstractContextManager[None]:
+        """Hold the store's lock ``name`` (one of ``STORE_LOCK_NAMES``) until the context exits.
+
+        Keyed by the store itself, not by settings; blocks until acquired; not re-entrant (``LockReentryError``).
+        Where the platform has no lock, it runs unlocked with one logged warning.
+        """
         ...
 
     def count(self, where: dict[str, Any] | None = None) -> int:

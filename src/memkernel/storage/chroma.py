@@ -4,13 +4,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import threading
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import chromadb
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 
 from memkernel.core.models import (
     CODE_CHUNK_KEY,
@@ -18,9 +23,12 @@ from memkernel.core.models import (
     NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
     REVIEW_REASON_KEY,
+    STORE_LOCK_NAMES,
+    STORE_LOCK_TAGS,
     SUPERSEDED_BY_KEY,
     WITHDRAWN_AT_KEY,
     WITHDRAWN_REASON_KEY,
+    LockReentryError,
     Memory,
     MemoryTier,
     MemoryType,
@@ -67,6 +75,59 @@ def _store_open_lock(persist_path: str) -> Iterator[None]:
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / OPEN_LOCK_FILE).open("a", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+# Store locks (memkernel-0-7-store-locks): keyed by the store itself, never by a setting.
+STORE_LOCK_FILE_PREFIX = ".memkernel-"
+LOCK_WAIT_LOG_SECONDS = 10.0  # a take waiting longer than this logs one info line, then keeps waiting
+_LOCK_POLL_SECONDS = 0.05
+_STORE_KEY_HASH_CHARS = 16
+TAGS_KEY = "tags"
+
+_thread_locks: dict[tuple[str, str], threading.Lock] = {}  # serialises threads of this process, per store and name
+_thread_locks_guard = threading.Lock()
+_held = threading.local()  # the (store key, name) pairs the current thread holds: store locks are not re-entrant
+_unlocked_warned: set[str] = set()
+
+
+def _thread_lock(key: tuple[str, str]) -> threading.Lock:
+    with _thread_locks_guard:
+        return _thread_locks.setdefault(key, threading.Lock())
+
+
+def _held_pairs() -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] | None = getattr(_held, "pairs", None)
+    if pairs is None:
+        pairs = set()
+        _held.pairs = pairs
+    return pairs
+
+
+def _acquire_thread_lock(lock: threading.Lock, name: str, store: str) -> None:
+    if not lock.acquire(timeout=LOCK_WAIT_LOG_SECONDS):
+        logger.info("waiting for store lock %s on %s", name, store)
+        lock.acquire()
+
+
+@contextmanager
+def _file_lock(path: Path, name: str, store: str) -> Iterator[None]:
+    """Hold an exclusive ``flock`` on ``path``; polls so that a long wait is logged once, then keeps waiting."""
+    with path.open("a", encoding="utf-8") as handle:
+        started = time.monotonic()
+        logged = False
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if not logged and time.monotonic() - started > LOCK_WAIT_LOG_SECONDS:
+                    logger.info("waiting for store lock %s on %s", name, store)
+                    logged = True
+                time.sleep(_LOCK_POLL_SECONDS)
         try:
             yield
         finally:
@@ -127,7 +188,7 @@ def _memory_from_chroma(
         importance=importance,
         access_count=int(meta.get("access_count", 0) or 0),
         last_accessed=last_accessed,
-        tags=_split_csv(meta.get("tags")),
+        tags=_split_csv(meta.get(TAGS_KEY)),
         supersedes=str(meta["supersedes"]) if meta.get("supersedes") else None,
         promoted_from=str(meta["promoted_from"]) if meta.get("promoted_from") else None,
         document_id=str(meta["document_id"]) if meta.get("document_id") else None,
@@ -174,6 +235,67 @@ class ChromaVectorStore:
         else:
             self._client = client if client is not None else chromadb.EphemeralClient()
             self._collection = self._open_collection(collection_name)
+        self._lock_dir, self._store_key = self._lock_identity(collection_name, persist_path, client is not None)
+
+    def _lock_identity(self, collection_name: str, persist_path: str, injected: bool) -> tuple[Path | None, str]:
+        """The store's own lock identity (store-locks L1): its directory and a key, never a setting.
+
+        A persistent client's locks live in its resolved directory, named by tenant, database and collection. An
+        in-memory store's locks are process-wide per tenant, database and collection: separately built
+        ``EphemeralClient`` objects share one data set. An injected persistent client must use the configured
+        directory when one is configured.
+        """
+        client_settings = self._client.get_settings()
+        tenant = str(getattr(self._client, "tenant", DEFAULT_TENANT))
+        database = str(getattr(self._client, "database", DEFAULT_DATABASE))
+        digest = hashlib.sha256(f"{tenant}/{database}/{collection_name}".encode()).hexdigest()
+        name_key = digest[:_STORE_KEY_HASH_CHARS]
+        if not client_settings.is_persistent:
+            return None, f"memory:{name_key}"
+        directory = Path(os.path.realpath(str(client_settings.persist_directory)))
+        if injected and persist_path and directory != Path(os.path.realpath(persist_path)):
+            raise ValueError(
+                f"the injected client's store {directory} is not the configured MEMKERNEL_CHROMA_PERSIST_PATH "
+                f"{persist_path}"
+            )
+        return directory, f"{directory}:{name_key}"
+
+    @contextmanager
+    def exclusive(self, name: str) -> Iterator[None]:
+        """Hold the store's lock ``name`` until the block exits (store-locks L2, L4).
+
+        Raises ``ValueError`` for a name outside ``STORE_LOCK_NAMES`` and ``LockReentryError`` when this thread
+        already holds the lock. Other threads of this process wait on an in-process lock; other processes wait on
+        an ``flock`` file in the store's directory. Without ``fcntl`` the cross-process part runs unlocked, with
+        one warning per process and lock name.
+        """
+        if name not in STORE_LOCK_NAMES:
+            raise ValueError(f"unknown store lock {name!r}; expected one of {sorted(STORE_LOCK_NAMES)}")
+        pair = (self._store_key, name)
+        held = _held_pairs()
+        if pair in held:
+            raise LockReentryError(
+                f"store lock {name!r} is already held by this thread; store locks are not re-entrant"
+            )
+        lock = _thread_lock(pair)
+        _acquire_thread_lock(lock, name, self._store_key)
+        held.add(pair)
+        try:
+            if self._lock_dir is None:
+                yield
+            elif fcntl is None:
+                if name not in _unlocked_warned:
+                    _unlocked_warned.add(name)
+                    logger.warning("fcntl is not available: store lock %s runs unlocked across processes", name)
+                yield
+            else:
+                digest = self._store_key.rsplit(":", 1)[1]
+                path = self._lock_dir / f"{STORE_LOCK_FILE_PREFIX}{name}-{digest}.lock"
+                with _file_lock(path, name, self._store_key):
+                    yield
+        finally:
+            held.discard(pair)
+            lock.release()
 
     def _open_collection(self, name: str) -> Collection:
         return self._client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
@@ -299,25 +421,40 @@ class ChromaVectorStore:
         return None
 
     def update_metadata(self, ref_id: str, metadata: dict[str, Any]) -> None:
-        """Fetch-and-merge: caller-specified keys overwrite existing; all other keys preserved."""
-        existing_result = self._collection.get(
-            ids=[ref_id],
-            include=["metadatas"],
-        )
-        existing_ids: list[str] = existing_result.get("ids") or []
-        raw_existing_metas = existing_result.get("metadatas")
-        existing_metadatas: list[Mapping[str, Any]] = list(raw_existing_metas) if raw_existing_metas is not None else []
+        """Overwrite only the caller's keys; ChromaDB keeps every other key (store-locks L3).
 
-        if not existing_ids:
+        Only the caller's keys are sent, so this never writes back a stale value of a key it was not given. A
+        ``tags`` key raises ``ValueError``: ``merge_tags`` is the only writer of tags.
+        """
+        if TAGS_KEY in metadata:
+            raise ValueError("update_metadata does not write tags; use merge_tags")
+        if not self._collection.get(ids=[ref_id], include=[]).get("ids"):
             return
+        self._collection.update(ids=[ref_id], metadatas=[_to_chroma_metadata(metadata)])
 
-        merged: dict[str, Any] = dict(existing_metadatas[0])
-        merged.update(metadata)
+    def merge_tags(self, ref_id: str, add: Sequence[str] = (), remove: Sequence[str] = ()) -> bool:
+        """Drop ``remove``, then append the missing ``add`` tags, read and written under the tags lock (L3).
 
-        self._collection.update(
-            ids=[ref_id],
-            metadatas=[_to_chroma_metadata(merged)],
-        )
+        A tag in both ends up present, after the kept ones, so ``remove=<all>`` with ``add=<list>`` sets the tags to
+        exactly that list in one locked write. Returns False when the record is unknown or nothing changed.
+        """
+        with self.exclusive(STORE_LOCK_TAGS):
+            current = self._read_tags(ref_id)
+            if current is None:
+                return False
+            dropped = set(remove)
+            tags = list(dict.fromkeys([*(tag for tag in current if tag not in dropped), *add]))
+            if tags == current:
+                return False
+            self._collection.update(ids=[ref_id], metadatas=[{TAGS_KEY: ",".join(tags)}])
+            return True
+
+    def _read_tags(self, ref_id: str) -> list[str] | None:
+        result = self._collection.get(ids=[ref_id], include=["metadatas"])
+        metadatas = result.get("metadatas")
+        if not result.get("ids") or not metadatas:
+            return None
+        return _split_csv(metadatas[0].get(TAGS_KEY))
 
     def count(self, where: dict[str, Any] | None = None) -> int:
         """Return the number of records in the collection, or of those matching ``where``.

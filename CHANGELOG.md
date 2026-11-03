@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Store locks and a single tag writer** (specs/memkernel-0-7-store-locks): a record's tags are now written only
+  under the store's `tags` lock (`VectorStorePort.merge_tags`), so a dedup refresh in one process no longer drops a
+  tag another process added; `update_metadata` sends only the caller's keys and refuses `tags`. Locks are keyed by
+  the store (lock files in the persist directory), are not re-entrant (`LockReentryError`) and log a wait longer
+  than 10 seconds. POSIX only; on Windows they run unlocked with one warning.
+- **Breaking for library callers:** `build_service(chroma_client=...)` and `ChromaVectorStore(settings, client=...)`
+  refuse a `PersistentClient` for a directory other than a non-empty `MEMKERNEL_CHROMA_PERSIST_PATH`; set the
+  setting to the client's directory, or to empty.
+
 - **What the session hooks inject** (#59, D5–D8; specs/memkernel-0-7-hooks):
   - every memory line ends with its `ref_id`, and the checkpoint's age line carries it too;
   - at session start, the long-term context is chosen without a query (decisions, conventions, procedures,

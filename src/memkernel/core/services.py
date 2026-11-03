@@ -445,22 +445,24 @@ class MemoryService:
         canonical = self._vector_store.get_by_id(parent_ref)
         if canonical is None:
             return
-        tags = ",".join(dict.fromkeys([*canonical.tags, CODE_CHUNK_TAG]))
+        tags = list(dict.fromkeys([*canonical.tags, CODE_CHUNK_TAG]))
         update: dict[str, Any] = {
             "session_id": session_id,
             "timestamp": datetime.now(UTC).isoformat(),
             "checkpoint": checkpoint,
             "importance": canonical.importance,
-            "tags": tags,
         }
         for chunk in self._owned_chunks(parent_ref):
+            tags_differ = chunk.tags != tags
             if (
                 chunk.session_id != session_id
                 or chunk.checkpoint != checkpoint
                 or chunk.importance != canonical.importance
-                or ",".join(chunk.tags) != tags
+                or tags_differ
             ):
                 self._vector_store.update_metadata(chunk.ref_id, update)
+            if tags_differ:  # tags have one writer, under the store's tags lock (memkernel-0-7-store-locks L3)
+                self._vector_store.merge_tags(chunk.ref_id, add=tags, remove=chunk.tags)
 
     def supersede(self, ref_id: str, by_ref: str) -> bool:
         """Mark the existing record ``ref_id`` as replaced by the existing record ``by_ref``.
@@ -681,11 +683,11 @@ class MemoryService:
         }
         if extra.importance is not None:
             update["importance"] = max(existing.importance, extra.importance)
-        if extra.tags:
-            update["tags"] = ",".join(dict.fromkeys([*existing.tags, *extra.tags]))
         if extra.supersedes:
             update["supersedes"] = extra.supersedes
         self._vector_store.update_metadata(existing.ref_id, update)
+        if extra.tags:  # read and merged under the store's tags lock, so a tag added meanwhile is kept (L3)
+            self._vector_store.merge_tags(existing.ref_id, add=extra.tags)
         if extra.supersedes:
             self._mark_superseded(extra.supersedes, existing.ref_id)
 

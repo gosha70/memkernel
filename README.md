@@ -292,7 +292,9 @@ for ref in svc.recall("database"):
 report = svc.consolidate()                 # {"purged": n, "candidates": [...]}
 ```
 
-`build_service()` is the supported entry point; the MCP server, the admin API and the hook templates all use it. Integration notes for `code-copilot-team` and `haa` are in [`docs/integration/harness-integration.md`](docs/integration/harness-integration.md).
+`build_service()` is the supported entry point; the MCP server, the admin API and the hook templates all use it. A `chroma_client` you pass to it must be in-memory, or a `PersistentClient` for the directory `MEMKERNEL_CHROMA_PERSIST_PATH` names (or with that setting empty); a persistent client for another directory raises `ValueError`.
+
+**Store locks.** Processes that share a store (the MCP server, a hook, a script) coordinate through locks keyed by the store itself: lock files in the persist directory, `.memkernel-<name>-<key>.lock`, whatever each process's `MEMKERNEL_STATE_DIR` is; an in-memory store's locks are per process. Only one writer changes a record's tags, under the store's `tags` lock, so a tag added by one process is never dropped by another's write. Locks are not re-entrant (taking one the thread already holds raises `LockReentryError`), a wait longer than 10 seconds is logged once, and spelling the persist directory with different letter case in two processes gives two locks, so use one spelling. The locks use `fcntl` and are verified on POSIX (Linux, macOS) only; on Windows they run unlocked across processes, with one logged warning per lock. Integration notes for `code-copilot-team` and `haa` are in [`docs/integration/harness-integration.md`](docs/integration/harness-integration.md).
 
 ### The session protocol as a component
 
