@@ -41,6 +41,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         document: a large artefact (spec, transcript, file) — the body is stored and
         chunk-indexed, get() returns a summary, ask(ref_id, question) reads the body.
         importance: 0..1, defaults per type. supersedes: ref_id this memory replaces.
+        Tags starting with wiki-path: or wiki-id: are reserved for wiki_import and refused.
         """
         svc = _service(ctx)
         ref_id = svc.retain(

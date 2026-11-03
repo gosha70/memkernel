@@ -42,10 +42,11 @@ RIGHT = "Deploys happen on Tuesdays before noon; never on Fridays."
 class Wiki:
     """One project: a memkernel store, its wiki and the curator's wiki-studio calls."""
 
-    def __init__(self, root: Path, svc: Any = None) -> None:
+    def __init__(self, root: Path, svc: Any = None, wiki_rel: str = "knowledge/wiki") -> None:
         self.root = root
-        self.wiki = root / "knowledge" / "wiki"
-        self.proposals = root / DEFAULT_PROPOSALS_SUBDIR
+        self.wiki = root / wiki_rel
+        proposals = DEFAULT_PROPOSALS_SUBDIR if wiki_rel == "knowledge/wiki" else DEFAULT_PROPOSALS_SUBDIR / wiki_rel
+        self.proposals = root / proposals
         self.paths = WikiPaths.for_root(root, wiki_dir=self.wiki, proposals_dir=self.proposals)
         api.init(self.paths)
         self.svc = svc if svc is not None else _service()
@@ -73,8 +74,8 @@ class Wiki:
         self.approve(rel)
         return rel, ref
 
-    def import_pages(self) -> Any:
-        return WikiImporter(self.svc, self.wiki, project_root=self.root).import_pages()
+    def import_pages(self, **adopt: Any) -> Any:
+        return WikiImporter(self.svc, self.wiki, project_root=self.root).import_pages(**adopt)
 
     def wiki_memories(self, include_superseded: bool = False) -> list[Any]:
         memories = self.svc.list_memories(tier=MemoryTier.LONG_TERM, include_superseded=include_superseded)
@@ -176,7 +177,12 @@ def test_a_memory_imported_before_0_6_is_matched_by_its_path(tmp_path: Path) -> 
         "an older import of this page", MemoryType.DECISION, source=rel, tags=["wiki", "page:old-slug"]
     )
 
-    assert w.import_pages().imported == [rel]
+    # memkernel-0-7-wiki-scope S4: a legacy memory joins the wiki only on the owner's word.
+    report = w.import_pages()
+    assert report.imported == [] and report.ambiguous == [
+        {"path": rel, "ref_ids": [old], "reason": "legacy owner unproven"}
+    ]
+    assert w.import_pages(adopt_legacy=True).imported == [rel]
 
     (current,) = w.wiki_memories()
     assert current.supersedes == old and current.source == rel

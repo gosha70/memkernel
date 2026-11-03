@@ -72,6 +72,59 @@ def wiki_key(wiki_id: str | None, wiki_dir: Path, project_root: Path) -> str:
     return hashlib.sha256((rel or ".").encode("utf-8")).hexdigest()
 
 
+class LedgerMigrationError(RuntimeError):
+    """The path-keyed ledger could not be moved to the ``wiki_id`` key; nothing was written (wiki-scope S6)."""
+
+
+def ledger_exists(state_dir: str, persisted: bool, project_id: str, key: str) -> bool:
+    """Whether project ``project_id`` has a ledger under ``key``, on disk or, for an in-memory store, in memory."""
+    if not persisted:
+        return (project_id, key) in _MEMORY_LEDGERS
+    return (Path(state_dir) / LEDGER_DIR / project_id / f"{key}.json").exists()
+
+
+@contextmanager
+def _file_lock(path: Path) -> Iterator[None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.parent / f"{path.name}.lock").open("a", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def migrate_ledger(state_dir: str, persisted: bool, project_id: str, path_key: str, id_key: str) -> None:
+    """Move a wiki's path-keyed ledger to its ``wiki_id`` key, when the wiki gained a manifest (wiki-scope S6).
+
+    Takes the path-hash file's lock, then the ``wiki_id`` file's: always that order. Nothing to move (only the
+    ``wiki_id`` ledger exists, or neither) is a completed migration. Both existing raises
+    :class:`LedgerMigrationError`, as does a failed rename; both files are then as they were.
+    """
+    if not persisted:
+        if (project_id, path_key) not in _MEMORY_LEDGERS:
+            return
+        if (project_id, id_key) in _MEMORY_LEDGERS:
+            raise LedgerMigrationError(f"both the path-keyed ledger {path_key} and the wiki_id ledger {id_key} exist")
+        _MEMORY_LEDGERS[(project_id, id_key)] = _MEMORY_LEDGERS.pop((project_id, path_key))
+        return
+    base = Path(state_dir) / LEDGER_DIR / project_id
+    source, target = base / f"{path_key}.json", base / f"{id_key}.json"
+    with _file_lock(source), _file_lock(target):
+        if not source.exists():
+            return
+        if target.exists():
+            raise LedgerMigrationError(
+                f"both {source} and {target} exist: delete the stale one; memkernel does not guess which is current"
+            )
+        try:
+            os.rename(source, target)
+        except OSError as exc:
+            raise LedgerMigrationError(f"the wiki sync ledger {source} could not be moved to {target}: {exc}") from exc
+
+
 class SyncLedger:
     """The ledger of one project's wiki; ``path`` None keeps it in memory, for an in-memory store."""
 

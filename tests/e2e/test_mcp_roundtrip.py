@@ -561,3 +561,51 @@ async def test_recall_order_newest_through_the_mcp_tool() -> None:
 
     assert [r["ref_id"] for r in newest] == [latest["ref_id"]]
     assert refused.isError and "only for checkpoint_only" in _text(refused)
+
+
+@pytest.mark.e2e
+async def test_wiki_import_reports_ambiguous_pages_and_adopts_on_request(tmp_path: object) -> None:
+    """memkernel-0-7-wiki-scope FR-004 through MCP: a pre-0.7 memory is listed under "ambiguous" until the
+    owner adopts it with adopt_legacy; reserved identity tags are refused by retain."""
+    from pathlib import Path
+
+    from memkernel.wiki import sync
+
+    wiki_dir = Path(str(tmp_path)) / "wiki"
+    (wiki_dir / "decisions").mkdir(parents=True)
+    rel = "decisions/pg.md"
+    (wiki_dir / rel).write_text(
+        "---\npage_type: decision\nslug: pg\ntitle: Use Postgres\nstatus: stable\n---\n\nBody.\n"
+    )
+    settings = MemKernelSettings(
+        project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}",
+        chroma_persist_path="",
+        wiki_dir=str(wiki_dir),
+        project_root=str(tmp_path),
+    )
+    server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
+    real = sync.gate_available
+    sync.gate_available = lambda: None  # type: ignore[assignment]  # the ungoverned path, wiki-studio or not
+    try:
+        async with create_connected_server_and_client_session(server) as client:
+            refused = await client.call_tool(
+                "retain", arguments={"content": "x", "type": "fact", "tags": ["wiki-id:abc"]}
+            )
+            assert refused.isError and "reserved" in _text(refused)
+            old = json.loads(
+                _text(
+                    await client.call_tool(
+                        "retain",
+                        arguments={"content": "an 0.6 import", "type": "decision", "source": rel, "tags": ["wiki"]},
+                    )
+                )
+            )["ref_id"]
+
+            first = json.loads(_text(await client.call_tool("wiki_import", arguments={})))
+            assert first["imported"] == [] and first["ambiguous"] == [
+                {"path": rel, "ref_ids": [old], "reason": "legacy owner unproven"}
+            ]
+            second = json.loads(_text(await client.call_tool("wiki_import", arguments={"adopt_legacy": True})))
+            assert second["imported"] == [rel] and "ambiguous" not in second
+    finally:
+        sync.gate_available = real

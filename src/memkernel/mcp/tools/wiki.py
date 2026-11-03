@@ -93,6 +93,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
     @server.tool()
     async def wiki_import(
         wiki_dir: str | None = None,
+        adopt_legacy: bool = False,
+        adopt_pages: list[dict[str, str]] | None = None,
+        adopt_manifest: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> str:
         """Index wiki pages under wiki_dir (default MEMKERNEL_WIKI_DIR) as long-term memories so
@@ -114,7 +117,12 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         "superseded" lists memories of superseded pages replaced by their successor page's memory;
         "pending" lists actions waiting (a successor with no memory yet); "sync_failed" lists failed
         actions, retried at the next import; "ledger_error" says the sync ledger was unreadable and
-        was rebuilt.
+        was rebuilt. Every imported memory carries its wiki's identity (wiki-path, and wiki-id with a
+        manifest); a page's previous memory is only this wiki's. "ambiguous" lists pages left untouched
+        ({"path", "ref_ids", "reason"}): a memory from before 0.7 is adopted only on the owner's word,
+        adopt_legacy=true (each page's sole such memory) or adopt_pages=[{"path", "ref_id"}, ...]
+        (exactly those, copied from "ambiguous"); adopt_manifest=true says a wiki that gained a manifest
+        is the same wiki.
         """
         app_ctx = _context(ctx)
         importer = WikiImporter(
@@ -122,7 +130,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
             _resolve_wiki_dir(wiki_dir, app_ctx.settings),
             project_root=Path(app_ctx.settings.project_root),
         )
-        report = importer.import_pages()
+        report = importer.import_pages(
+            adopt_legacy=adopt_legacy, adopt_pages=adopt_pages, adopt_manifest=adopt_manifest
+        )
         payload: dict[str, Any] = {"imported": report.imported, "skipped": report.skipped, "governed": report.governed}
         if report.import_error is not None:
             payload["import_error"] = report.import_error
@@ -138,6 +148,7 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
             "superseded",
             "pending",
             "sync_failed",
+            "ambiguous",
         ):
             value = getattr(report, key)
             if value:

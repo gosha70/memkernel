@@ -37,9 +37,15 @@ from memkernel.core.models import (
     REVIEW_REASON_KEY,
     REVIEW_REASON_MISSING,
     SUPERSEDED_BY_KEY,
+    WIKI_ID_TAG,
+    WIKI_IDENTITY_TAGS,
+    WIKI_IMPORT_TAG_PREFIXES,
+    WIKI_PATH_TAG,
+    WIKI_TAG,
     WITHDRAWN_AT_KEY,
     WITHDRAWN_REASON_KEY,
     WITHDRAWN_REASONS,
+    AmbiguousDedupError,
     Answer,
     ArtifactRef,
     HealthItem,
@@ -49,12 +55,16 @@ from memkernel.core.models import (
     MemoryType,
     ReasonerError,
     SearchQuery,
+    has_wiki_identity,
     tier_of,
 )
 from memkernel.memory.dedup import compute_content_hash
 from memkernel.memory.lifecycle import memory_is_expired
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+
     from memkernel.config import MemKernelSettings
     from memkernel.core.ports import (
         ChunkerPort,
@@ -268,6 +278,8 @@ class MemoryService:
         promoted_from: str | None = None,
         *,
         dedup_source: bool = False,
+        dedup_owner: Callable[[Memory], bool] | None = None,
+        wiki_identity: tuple[str, str | None] | None = None,
     ) -> str:
         """Store content and return its ref_id.
 
@@ -290,14 +302,33 @@ class MemoryService:
         ``dedup_source`` a single record's dedup hit also requires the same ``source``
         (memkernel-0-6 FR-012: one memory per wiki page, never merged with another
         page's or an agent's identical text).
+
+        ``wiki-path:`` and ``wiki-id:`` tags are reserved for the wiki import (memkernel-0-7-wiki-scope S8): a tag
+        with either prefix raises ``ValueError``. The import passes ``wiki_identity`` (path hash, wiki id or None),
+        written only on a new record, and ``dedup_owner``, the predicate a dedup hit must satisfy; two hits raise
+        ``AmbiguousDedupError``. Without ``dedup_owner``, a record with identity tags is never a dedup hit: the
+        content gets its own record (S2).
         """
+        reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
+        if reserved:
+            raise ValueError(f"tags {reserved} are reserved for the wiki import ({', '.join(WIKI_IDENTITY_TAGS)})")
         extra = _ExtraMeta(importance=importance, tags=tags or [], supersedes=supersedes, promoted_from=promoted_from)
         if type == MemoryType.DOCUMENT and self._document_store is not None:
             return self._retain_document(content, session_id, checkpoint, source, extra)
         if type == MemoryType.CODE:
             return self._retain_code(content, session_id, checkpoint, source, extra)
 
-        return self._retain_single(content, type, session_id, checkpoint, source, extra, dedup_source=dedup_source)
+        return self._retain_single(
+            content,
+            type,
+            session_id,
+            checkpoint,
+            source,
+            extra,
+            dedup_source=dedup_source,
+            dedup_owner=dedup_owner,
+            wiki_identity=wiki_identity,
+        )
 
     def _retain_code(
         self,
@@ -506,6 +537,32 @@ class MemoryService:
                 self._vector_store.update_metadata(chunk.ref_id, {SUPERSEDED_BY_KEY: by_ref})
         self._vector_store.update_metadata(target_ref, {SUPERSEDED_BY_KEY: by_ref})
 
+    def set_wiki_identity(self, ref_id: str, *, wiki_path: str, wiki_id: str | None = None) -> bool:
+        """Set an existing wiki memory's identity tags; nothing else changes (memkernel-0-7-wiki-scope S5).
+
+        Replaces any ``wiki-path:`` with ``wiki_path`` and adds ``wiki-id:`` when ``wiki_id`` is given and the record
+        has none. Returns False when nothing changed. Raises ``ValueError`` for a record that is not in this store
+        (unknown, or another project's), one that is not a wiki memory, and a ``wiki_id`` other than the one the
+        record carries: a memory is never moved to another wiki. Only the wiki import calls it.
+        """
+        memory = self._vector_store.get_by_id(ref_id)
+        if memory is None:
+            raise ValueError(f"{ref_id} is not a memory in this store")
+        if WIKI_TAG not in memory.tags:
+            raise ValueError(f"{ref_id} is not a wiki memory")
+        ids = [t for t in memory.tags if t.startswith(WIKI_ID_TAG)]
+        id_tag = f"{WIKI_ID_TAG}{wiki_id}" if wiki_id else None
+        if id_tag is not None and ids and ids != [id_tag]:
+            raise ValueError(f"{ref_id} belongs to wiki {', '.join(ids)}, not {id_tag}")
+        path_tag = f"{WIKI_PATH_TAG}{wiki_path}"
+        stale = [t for t in memory.tags if t.startswith(WIKI_PATH_TAG) and t != path_tag]
+        add = [path_tag, *([id_tag] if id_tag is not None and not ids else [])]
+        return self._vector_store.merge_tags(ref_id, add=add, remove=stale)
+
+    def exclusive(self, name: str) -> AbstractContextManager[None]:
+        """Hold the store's lock ``name`` for a block (memkernel-0-7-store-locks L2); the wiki import holds one."""
+        return self._vector_store.exclusive(name)
+
     def withdraw(self, ref_id: str, reason: str) -> bool:
         """Take the existing record ``ref_id`` out of the current answers, with no replacing record (memkernel-0-7).
 
@@ -604,12 +661,14 @@ class MemoryService:
         extra: _ExtraMeta | None = None,
         dedup: bool = True,
         dedup_source: bool = False,
+        dedup_owner: Callable[[Memory], bool] | None = None,
+        wiki_identity: tuple[str, str | None] | None = None,
     ) -> str:
         """Store a single content string and return its ref_id.
 
         ``dedup=False`` skips the content-hash check for records whose identity
         is not their text (document summaries); ``dedup_source`` scopes it to
-        records with the same ``source``.
+        records with the same ``source``; ``dedup_owner`` and ``wiki_identity`` as in ``retain``.
         """
         extra = extra or _ExtraMeta()
         resolved_session = session_id or self._settings.default_session_id
@@ -617,12 +676,16 @@ class MemoryService:
 
         # Dedup check: same hash + same type -> update metadata, return existing id
         scope = source if dedup_source else None
-        existing = self._vector_store.find_by_hash(content_hash, type.value, source=scope) if dedup else None
+        existing = self._dedup_hit(content_hash, type, scope, dedup_owner) if dedup else None
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             return existing.ref_id
 
         # New memory
+        if wiki_identity is not None:
+            path_hash, wiki_id = wiki_identity
+            identity = [f"{WIKI_PATH_TAG}{path_hash}", *([f"{WIKI_ID_TAG}{wiki_id}"] if wiki_id else [])]
+            extra = replace(extra, tags=[*extra.tags, *identity])
         ref_id = str(uuid4())
         embedding = self._embedding.embed([content])[0]
         metadata = self._new_metadata(content, type, resolved_session, checkpoint, source, extra)
@@ -630,6 +693,33 @@ class MemoryService:
         if extra.supersedes:
             self._mark_superseded(extra.supersedes, ref_id)
         return ref_id
+
+    def _dedup_hit(
+        self,
+        content_hash: str,
+        type: MemoryType,  # noqa: A002
+        source: str | None,
+        owner: Callable[[Memory], bool] | None,
+    ) -> Memory | None:
+        """The live record a retain dedups into (memkernel-0-7-wiki-scope S2), chosen among every match.
+
+        With ``owner``, the hit must satisfy it, and two or more such records raise ``AmbiguousDedupError``.
+        Without it, a record carrying a wiki identity tag is never a hit: the first match without one is.
+        """
+        conditions: list[dict[str, Any]] = [{"hash": content_hash}, {"type": type.value}]
+        if source is not None:
+            conditions.append({"source": source})
+        matches = [
+            m
+            for m in self._vector_store.list_all({"$and": conditions}, include_content=False)
+            if not m.retired() and m.parent_ref is None  # chunk records are never dedup hits
+        ]
+        if owner is None:
+            return next((m for m in matches if not has_wiki_identity(m.tags)), None)
+        hits = [m for m in matches if owner(m)]
+        if len(hits) > 1:
+            raise AmbiguousDedupError(sorted(m.ref_id for m in hits))
+        return hits[0] if hits else None
 
     def _new_metadata(
         self,
@@ -1054,7 +1144,10 @@ class MemoryService:
         source = self._vector_store.get_by_id(ref_id)
         if source is None:
             return None
-        merged_tags = list(dict.fromkeys([*source.tags, *(tags or [])]))
+        # A promoted copy is an ordinary memory: it never carries the wiki import's tags, so it is never a second
+        # record of a wiki page (memkernel-0-7-wiki-scope S8).
+        kept = [t for t in source.tags if t != WIKI_TAG and not t.startswith(WIKI_IMPORT_TAG_PREFIXES)]
+        merged_tags = list(dict.fromkeys([*kept, *(tags or [])]))
         return self.retain(
             content=content if content is not None else source.content,
             type=type,

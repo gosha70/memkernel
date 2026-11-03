@@ -27,11 +27,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from memkernel.core.models import (
+    PAGE_KEY_TAG,
+    PAGE_SHA_TAG,
+    STORE_LOCK_WIKI_IMPORT,
+    WIKI_ID_TAG,
+    WIKI_PAGE_TAG,
+    WIKI_PAGE_TYPE_TAG,
+    WIKI_PATH_TAG,
+    WIKI_TAG,
     WITHDRAWN_DELETED,
     WITHDRAWN_DEPRECATED,
     WITHDRAWN_SUPERSEDED,
+    AmbiguousDedupError,
     MemoryTier,
     MemoryType,
+    has_wiki_identity,
 )
 from memkernel.wiki.ledger import (
     ACTION_IMPORT,
@@ -43,7 +53,11 @@ from memkernel.wiki.ledger import (
     STATE_FAILED,
     STATE_PENDING,
     LedgerEntry,
+    LedgerMigrationError,
     SyncLedger,
+    ledger_exists,
+    migrate_ledger,
+    wiki_key,
 )
 from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
 from memkernel.wiki.studio import (
@@ -58,6 +72,7 @@ from memkernel.wiki.studio import (
     lint_wiki,
     load_studio,
     propose_and_promote,
+    read_wiki_id,
     review_pages,
     wiki_id,
 )
@@ -68,10 +83,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-WIKI_TAG = "wiki"
-PAGE_KEY_TAG = "page_key:"
 DEPRECATED_STATUS = "deprecated"
-PAGE_SHA_TAG = "page_sha:"
+# Why a page was left untouched (memkernel-0-7-wiki-scope S4): the ``reason`` of an ``ambiguous`` report entry.
+REASON_UNPROVEN = "legacy owner unproven"
+REASON_SEVERAL = "several legacy candidates"
+REASON_DUPLICATES = "duplicate records"
+REASON_CHANGED = "candidate changed"
+REASON_NOT_AMBIGUOUS = "not ambiguous"
 CORRECTS_KEY = "corrects"  # memkernel's frontmatter key (wiki-studio ADR-0002 registers it, keeps it byte for byte)
 _CORRECTS_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 INDEX_FILE = "index.md"
@@ -164,6 +182,8 @@ class ImportReport:
     pending: list[dict[str, str]] = field(default_factory=list)  # {"path", "action", "detail"}
     sync_failed: list[dict[str, Any]] = field(default_factory=list)  # {"path", "action", "error", "attempts"}
     ledger_error: str | None = None
+    # memkernel-0-7-wiki-scope S4: pages left untouched, {"path", "ref_ids", "reason"}.
+    ambiguous: list[dict[str, Any]] = field(default_factory=list)
 
 
 class WikiExporter:
@@ -361,47 +381,138 @@ def _log_scaffold() -> str:
 
 
 class WikiImporter:
-    """Index wiki pages as long-term memories: approved revisions only when wiki-studio is installed."""
+    """Index wiki pages as long-term memories: approved revisions only when wiki-studio is installed.
+
+    Every memory the import writes or finds current carries the wiki's identity (memkernel-0-7-wiki-scope S1):
+    ``wiki-path:<hash>`` and, with a manifest, ``wiki-id:<uuid>``. A page's previous memory, its corrections, its
+    supersession and its deprecation are this wiki's only; a legacy memory (0.6, no identity tag) joins it only
+    on the owner's word (``adopt_legacy``, ``adopt_pages``).
+    """
 
     def __init__(self, service: MemoryService, wiki_dir: Path, project_root: Path | None = None) -> None:
         self._service = service
         self._wiki_dir = Path(wiki_dir)
         self._project_root = Path(project_root) if project_root is not None else self._wiki_dir.parent
+        self._identity = WikiIdentity("", None)
+        self._adopt_legacy = False
+        self._adopt_pages: dict[str, str] = {}
+        self._named: set[str] = set()
 
-    def import_pages(self, session_id: str | None = None) -> ImportReport:
-        """Retain each importable page; return what was imported, skipped and why (memkernel-0-6 FR-010-FR-016)."""
+    def import_pages(
+        self,
+        session_id: str | None = None,
+        *,
+        adopt_legacy: bool = False,
+        adopt_pages: list[dict[str, str]] | None = None,
+        adopt_manifest: bool = False,
+    ) -> ImportReport:
+        """Retain each importable page; return what was imported, skipped and why (memkernel-0-6 FR-010-FR-016).
+
+        ``adopt_legacy`` adopts each page's sole legacy memory, ``adopt_pages`` (``{"path", "ref_id"}`` entries
+        from an ``ambiguous`` report) exactly the records named, and ``adopt_manifest`` the memories of a wiki
+        that gained a manifest: the owner's assertions, per call (memkernel-0-7-wiki-scope S4, S6).
+        """
         report = ImportReport()
         identity: str | None = None
         try:
             api = gate_available()
             reviews = review_pages(api, self._wiki_dir, self._project_root) if api is not None else None
-            if api is not None:
-                identity = wiki_id(api, self._wiki_dir, self._project_root)
+            identity = (
+                wiki_id(api, self._wiki_dir, self._project_root) if api is not None else read_wiki_id(self._wiki_dir)
+            )
         except GateError as exc:  # installed but broken, too old or failing: never fall back to the ungoverned path
             report.import_error = str(exc)
             logger.warning("wiki import from %s refused: %s", self._wiki_dir, exc)
             return report
-        live = [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if WIKI_TAG in m.tags]
-        if reviews is None:
-            self._import_files(report, live, session_id)
-        else:
-            report.governed = True
-            settings = self._service.settings
-            ledger = SyncLedger.for_wiki(
-                settings.state_dir,
-                bool(settings.chroma_persist_path.strip()),
-                self._service.project_id,
-                identity,
-                self._wiki_dir,
-                self._project_root,
+        self._identity = WikiIdentity(wiki_key(None, self._wiki_dir, self._project_root), identity)
+        self._adopt_legacy = adopt_legacy
+        self._adopt_pages = {entry["path"]: entry["ref_id"] for entry in adopt_pages or []}
+        self._named = set()
+        settings = self._service.settings
+        persisted = bool(settings.chroma_persist_path.strip())
+        project = self._service.project_id
+        # One import at a time per store (wiki-scope S8): the checks below and the writes they allow are one step.
+        with self._service.exclusive(STORE_LOCK_WIKI_IMPORT):
+            live = self._live()
+            path_ledger = reviews is not None and ledger_exists(
+                settings.state_dir, persisted, project, self._identity.path_hash
             )
-            with ledger.run():
-                if ledger.error is not None:
-                    report.ledger_error = ledger.error
-                    self._rebuild(ledger, live)
-                self._import_reviewed(reviews, report, live, session_id, ledger)
-                self._withdraw(reviews, report, ledger, session_id)
+            error = self._identity_error(live, adopt_manifest, path_ledger)
+            if error is not None:
+                report.import_error = error
+                logger.warning("wiki import from %s refused: %s", self._wiki_dir, error)
+                return report
+            if reviews is not None and identity is not None and adopt_manifest:
+                try:
+                    migrate_ledger(settings.state_dir, persisted, project, self._identity.path_hash, identity)
+                except LedgerMigrationError as exc:
+                    report.import_error = str(exc)
+                    return report
+            self._retag(live, adopt_manifest)
+            live = self._live()
+            if reviews is None:
+                self._import_files(report, live, session_id)
+            else:
+                report.governed = True
+                ledger = SyncLedger.for_wiki(
+                    settings.state_dir, persisted, project, identity, self._wiki_dir, self._project_root
+                )
+                with ledger.run():
+                    if ledger.error is not None:
+                        report.ledger_error = ledger.error
+                        self._rebuild(ledger, live)
+                    self._import_reviewed(reviews, report, live, session_id, ledger)
+                    self._withdraw(reviews, report, ledger, session_id)
+            for path in sorted(set(self._adopt_pages) - self._named):
+                self._ambiguous(report, path, [self._adopt_pages[path]], REASON_NOT_AMBIGUOUS)
         return report
+
+    def _live(self) -> list[Memory]:
+        return [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if WIKI_TAG in m.tags]
+
+    def _identity_error(self, live: list[Memory], adopt_manifest: bool, path_ledger: bool) -> str | None:
+        """The identity checks, before any write (wiki-scope S6): a conflicting identity at this path, and a
+        manifest added without the owner's ``adopt_manifest``."""
+        ident = self._identity
+        foreign = sorted(
+            {
+                tag
+                for m in live
+                if ident.path_tag in m.tags
+                for tag in m.tags
+                if tag.startswith(WIKI_ID_TAG) and tag != ident.id_tag
+            }
+        )
+        if foreign:
+            return (
+                f"memories at this wiki's path belong to another wiki ({', '.join(foreign)}): its manifest was "
+                "removed or replaced, or another directory now stands here. If the manifest was removed, restore "
+                "it; if it was replaced (a re-init), restore the earlier one; if that wiki moved, import it from "
+                "its new location first; if it is gone for good, forget its memories"
+            )
+        if ident.wiki_id is None or adopt_manifest:
+            return None
+        path_only = [m.ref_id for m in live if ident.path_tag in m.tags and not _ids(m)]
+        if path_only or path_ledger:
+            return (
+                f"this wiki gained a manifest (wiki_id {ident.wiki_id}) and its earlier memories carry only its "
+                "path: import with adopt_manifest=true if this directory is the same wiki it was before"
+            )
+        return None
+
+    def _retag(self, live: list[Memory], adopt_manifest: bool) -> None:
+        """Before any page write: a moved wiki's memories take its current path; with ``adopt_manifest``, the
+        path-only memories at this path take its ``wiki_id`` (wiki-scope S6). Per record and idempotent."""
+        ident = self._identity
+        if ident.wiki_id is None:
+            return
+        for memory in live:
+            moved = ident.id_tag in memory.tags and [t for t in memory.tags if t.startswith(WIKI_PATH_TAG)] != [
+                ident.path_tag
+            ]
+            adopted = adopt_manifest and ident.path_tag in memory.tags and not _ids(memory)
+            if moved or adopted:
+                self._service.set_wiki_identity(memory.ref_id, wiki_path=ident.path_hash, wiki_id=ident.wiki_id)
 
     def _import_files(self, report: ImportReport, live: list[Memory], session_id: str | None) -> None:
         """Without wiki-studio: every page file, drafts included (ungoverned, as before 0.6)."""
@@ -440,7 +551,7 @@ class WikiImporter:
             except Exception as exc:  # one page's failure is recorded and retried; the run goes on
                 self._failed(ledger, entry, prior, exc, report)
                 continue
-            if ref_id is None:  # skipped: nothing in the store to track
+            if ref_id is None:  # skipped or ambiguous: nothing in the store to track
                 self._restore(ledger, entry.page_key, prior)
                 continue
             entry.ref_id = ref_id
@@ -452,14 +563,14 @@ class WikiImporter:
         self, reviews: list[PageReview], report: ImportReport, ledger: SyncLedger, session_id: str | None
     ) -> None:
         """memkernel-0-7 FR-005: deletion (D3), supersession (D4) and deprecation (D5), in that order."""
-        live = [m for m in self._service.list_memories(tier=MemoryTier.LONG_TERM) if WIKI_TAG in m.tags]
+        live = self._live()
         listed_keys = {r.page_key for r in reviews}
         listed_paths = {r.path for r in reviews}
         by_path = {r.path: r for r in reviews}
         history = [
             m
             for m in self._service.list_memories(tier=MemoryTier.LONG_TERM, include_superseded=True)
-            if WIKI_TAG in m.tags and m.withdrawn_reason == WITHDRAWN_DEPRECATED
+            if WIKI_TAG in m.tags and m.withdrawn_reason == WITHDRAWN_DEPRECATED and self._identity.owns(m)
         ]
         for entry in list(ledger.entries.values()):  # D3: only memories this wiki's ledger recorded
             deletion_retry = entry.action == ACTION_WITHDRAW and entry.detail == WITHDRAWN_DELETED
@@ -476,9 +587,11 @@ class WikiImporter:
             page = parse_page(review.text) if review.text is not None else None
             if page is None or page.status != DEPRECATED_STATUS:
                 continue
-            previous = self._previous(review.path, review, live)
+            resolved, previous = self._resolve(review.path, review, live, report)
+            if not resolved:
+                continue  # ambiguous: no store write, no ledger mark (S3)
             if previous is None:
-                if self._previous(review.path, review, history) is None:  # never imported: nothing to withdraw
+                if not _lookup(review.path, review, history):  # never imported: nothing to withdraw
                     report.skipped.append(review.path)
                 continue  # already withdrawn as deprecated (FR-006): neither withdrawn again nor skipped
             entry = LedgerEntry(
@@ -496,16 +609,22 @@ class WikiImporter:
     ) -> None:
         """D4: supersede by the successor's memory when it exists; else withdraw and wait for it, reported."""
         prior = ledger.entries.get(review.page_key)
-        old = self._previous(review.path, review, live)
+        resolved, old = self._resolve(review.path, review, live, report)
+        if not resolved:
+            return  # ambiguous predecessor: no store write, no ledger mark (S3)
         old_ref = old.ref_id if old is not None else (prior.ref_id if prior is not None else "")
         if not old_ref:
             return  # never imported: nothing in the store to supersede
         successor = review.superseded_by or ""
+        succ_review = by_path.get(successor)
+        succ = None
+        if succ_review is not None:
+            resolved, succ = self._resolve(successor, succ_review, live, report)
+            if not resolved:
+                return  # ambiguous successor: no store write, no ledger mark (S3)
         entry = LedgerEntry(review.page_key, review.path, STATE_PENDING, ACTION_SUPERSEDE, ref_id=old_ref)
         entry.detail = successor
         entry.attempts = prior.attempts if prior is not None else 0
-        succ_review = by_path.get(successor)
-        succ = self._previous(successor, succ_review, live) if succ_review is not None else None
         try:
             if succ is None:
                 if old is not None:
@@ -559,11 +678,13 @@ class WikiImporter:
         else:
             ledger.entries[page_key] = prior
 
-    @staticmethod
-    def _rebuild(ledger: SyncLedger, live: list[Memory]) -> None:
-        """A corrupt ledger is rebuilt from the store's page_key tags, with origin ``rebuilt``: such entries never
-        make a memory eligible for deletion (D3), which needs proof an import run wrote it."""
+    def _rebuild(self, ledger: SyncLedger, live: list[Memory]) -> None:
+        """A corrupt ledger is rebuilt from this wiki's memories' page_key tags (wiki-scope S7), with origin
+        ``rebuilt``: such entries never make a memory eligible for deletion (D3), which needs proof an import run
+        wrote it. Legacy memories and other wikis' are never used."""
         for memory in live:
+            if not self._identity.owns(memory):
+                continue
             keys = [_tag_unsafe(t[len(PAGE_KEY_TAG) :]) for t in memory.tags if t.startswith(PAGE_KEY_TAG)]
             if len(keys) != 1:
                 continue
@@ -610,14 +731,17 @@ class WikiImporter:
         session_id: str | None,
         report: ImportReport,
     ) -> str | None:
-        """Retain one page; return its live memory's ref_id (new, or already current), or None when skipped."""
+        """Retain one page; return its live memory's ref_id (new, or already current), or None when skipped or
+        ambiguous (nothing written)."""
         memory_type = IMPORT_MAP.get(page.page_type) if page else None
         if page is None or memory_type is None or page.status == DEPRECATED_STATUS:
             report.skipped.append(rel)
             return None
+        resolved, previous = self._resolve(rel, review, live, report)  # before the early return below (S3, S5)
+        if not resolved:
+            return None
         content = f"{page.title}\n\n{page.body}".strip()
-        tags = [WIKI_TAG, f"page:{page.slug}", f"page_type:{page.page_type}"]
-        previous = self._previous(rel, review, live)
+        tags = [WIKI_TAG, f"{WIKI_PAGE_TAG}{page.slug}", f"{WIKI_PAGE_TYPE_TAG}{page.page_type}"]
         if review is not None:
             sha_tag = f"{PAGE_SHA_TAG}{review.sha256}"
             tags += [f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}", sha_tag]
@@ -629,44 +753,139 @@ class WikiImporter:
             # A revision that changes only frontmatter keeps the same content, so retain dedups and merges the new
             # tags into the existing record: the record then carries one page_sha tag per such revision.
         supersedes = previous.ref_id if previous is not None and previous.content != content else None
-        ref_id = self._service.retain(
-            content=content,
-            type=memory_type,
-            session_id=session_id,
-            source=rel,
-            importance=0.9 if page.status == "stable" else 0.7,
-            tags=tags,
-            supersedes=supersedes,
-            dedup_source=True,  # FR-012: one memory per page, never merged with identical text from elsewhere
-        )
+        try:
+            ref_id = self._service.retain(
+                content=content,
+                type=memory_type,
+                session_id=session_id,
+                source=rel,
+                importance=0.9 if page.status == "stable" else 0.7,
+                tags=tags,
+                supersedes=supersedes,
+                dedup_source=True,  # FR-012: one memory per page, never merged with identical text from elsewhere
+                dedup_owner=self._identity.owns,  # S2: only this wiki's record is a dedup hit
+                wiki_identity=(self._identity.path_hash, self._identity.wiki_id),
+            )
+        except AmbiguousDedupError as exc:
+            self._ambiguous(report, rel, exc.ref_ids, REASON_DUPLICATES)
+            return None
         report.imported.append(rel)
         return ref_id
 
-    def _is_this_pages(self, ref_id: str, rel: str, review: PageReview) -> bool:
-        """Whether ``ref_id`` is a memory imported from this page (any revision)."""
-        memory = self._service.get(ref_id, touch=False)
-        key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
-        return memory is not None and WIKI_TAG in memory.tags and (key_tag in memory.tags or memory.source == rel)
+    def _resolve(
+        self, rel: str, review: PageReview | None, live: list[Memory], report: ImportReport
+    ) -> tuple[bool, Memory | None]:
+        """The page's previous memory (wiki-scope S3, S4): ``(False, None)`` when the page is ambiguous (reported;
+        nothing may be written for it), else ``(True, memory or None)``.
+
+        This wiki's own memories first, by page key, else by path; an interrupted supersession among them is
+        completed from the replacement's ``supersedes``; two or more left are ``duplicate records``. Only when
+        the wiki has none are legacy memories consulted, and one is adopted only on the owner's word.
+        """
+        named = self._adopt_pages.get(rel)
+        if named is not None:
+            self._named.add(rel)
+        owned = self._recover(_lookup(rel, review, [m for m in live if self._identity.owns(m)]), live)
+        if len(owned) > 1:
+            self._ambiguous(report, rel, [m.ref_id for m in owned], REASON_DUPLICATES)
+            return False, None
+        legacy = [] if owned else _lookup(rel, review, [m for m in live if not has_wiki_identity(m.tags)], union=True)
+        if named is not None and not legacy:
+            if not owned and any(m.ref_id == named for m in _lookup(rel, review, live, union=True)):
+                # The named record is still at this page but now another wiki's (adopted meanwhile): S8.
+                self._ambiguous(report, rel, [named], REASON_CHANGED)
+                return False, None
+            self._ambiguous(report, rel, [named], REASON_NOT_AMBIGUOUS)
+        if owned or not legacy:
+            return True, owned[0] if owned else None
+        if len(legacy) > 1:
+            self._ambiguous(report, rel, [m.ref_id for m in legacy], REASON_SEVERAL)
+            return False, None
+        (candidate,) = legacy
+        if named is not None and named != candidate.ref_id:
+            self._ambiguous(report, rel, [candidate.ref_id], REASON_CHANGED)
+            return False, None
+        if named is None and not self._adopt_legacy:
+            self._ambiguous(report, rel, [candidate.ref_id], REASON_UNPROVEN)
+            return False, None
+        self._service.set_wiki_identity(
+            candidate.ref_id, wiki_path=self._identity.path_hash, wiki_id=self._identity.wiki_id
+        )
+        adopted = self._service.get(candidate.ref_id, touch=False)
+        if adopted is None:  # forgotten meanwhile: treated as never imported
+            return True, None
+        live[live.index(candidate)] = adopted
+        return True, adopted
+
+    def _recover(self, candidates: list[Memory], live: list[Memory]) -> list[Memory]:
+        """Complete an interrupted supersession (wiki-scope S3): a candidate whose ``supersedes`` names another
+        live candidate is that one's replacement, so the predecessor is marked and dropped."""
+        remaining = list(candidates)
+        for replacement in candidates:
+            predecessor = next((m for m in remaining if m.ref_id == replacement.supersedes), None)
+            if predecessor is None or replacement not in remaining:
+                continue
+            self._service.supersede(predecessor.ref_id, replacement.ref_id)
+            remaining.remove(predecessor)
+            live.remove(predecessor)
+        return remaining
 
     @staticmethod
-    def _previous(rel: str, review: PageReview | None, live: list[Memory]) -> Memory | None:
-        """The page's live memory: by page key, else by its wiki-relative path (never by slug).
+    def _ambiguous(report: ImportReport, path: str, ref_ids: list[str], reason: str) -> None:
+        entry = {"path": path, "ref_ids": sorted(ref_ids), "reason": reason}
+        if entry not in report.ambiguous:
+            report.ambiguous.append(entry)
 
-        The path fallback also covers a page whose key changed (a curator added a ``page_id``) and an edit read
-        without wiki-studio after a governed import, so a page never ends up with two live memories. A record
-        carrying several page keys (two pages merged by the unscoped dedup before FR-012's amendment) belongs to
-        the page whose path is its ``source``; for any other page it is never the previous memory, so that page
-        gets its own record and never supersedes the shared one.
-        """
-        if review is not None:
-            key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
-            for memory in live:
-                if key_tag in memory.tags and (memory.source == rel or not _shared(memory)):
-                    return memory
-        for memory in live:
-            if memory.source == rel:
-                return memory
-        return None
+    def _is_this_pages(self, ref_id: str, rel: str, review: PageReview) -> bool:
+        """Whether ``ref_id`` is a memory this wiki imported from this page (any revision; wiki-scope S3)."""
+        memory = self._service.get(ref_id, touch=False)
+        key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
+        return memory is not None and self._identity.owns(memory) and (key_tag in memory.tags or memory.source == rel)
+
+
+@dataclass(frozen=True)
+class WikiIdentity:
+    """A wiki's identity (memkernel-0-7-wiki-scope S1): its path hash and, with a manifest, its ``wiki_id``."""
+
+    path_hash: str
+    wiki_id: str | None
+
+    @property
+    def path_tag(self) -> str:
+        return f"{WIKI_PATH_TAG}{self.path_hash}"
+
+    @property
+    def id_tag(self) -> str | None:
+        return f"{WIKI_ID_TAG}{self.wiki_id}" if self.wiki_id else None
+
+    def owns(self, memory: Memory) -> bool:
+        """Membership: this wiki's ``wiki-id:``; or path-only at this path while the wiki has no manifest."""
+        ids = _ids(memory)
+        if ids:
+            return self.id_tag is not None and ids == [self.id_tag]
+        return self.wiki_id is None and self.path_tag in memory.tags
+
+
+def _ids(memory: Memory) -> list[str]:
+    return [tag for tag in memory.tags if tag.startswith(WIKI_ID_TAG)]
+
+
+def _lookup(rel: str, review: PageReview | None, memories: list[Memory], *, union: bool = False) -> list[Memory]:
+    """A page's memories among ``memories``: by page key, else by its wiki-relative path (never by slug).
+
+    The path fallback also covers a page whose key changed (a curator added a ``page_id``) and an edit read
+    without wiki-studio after a governed import. A record carrying several page keys (two pages merged by the
+    unscoped dedup before FR-012's amendment) belongs to the page whose path is its ``source``. With ``union``,
+    key and path matches together (the legacy candidates of S4).
+    """
+    by_key: list[Memory] = []
+    if review is not None:
+        key_tag = f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}"
+        by_key = [m for m in memories if key_tag in m.tags and (m.source == rel or not _shared(m))]
+        if by_key and not union:
+            return by_key
+    by_path = [m for m in memories if m.source == rel]
+    return list({m.ref_id: m for m in [*by_key, *by_path]}.values())
 
 
 def _shared(memory: Memory) -> bool:

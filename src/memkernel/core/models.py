@@ -115,6 +115,17 @@ NEEDS_REVIEW_KEY = "needs_review"
 REVIEW_REASON_KEY = "review_reason"
 REVIEW_REASON_CHANGED = "changed"
 REVIEW_REASON_MISSING = "missing"
+# Wiki-import tags (memkernel-0-6, memkernel-0-7-wiki-scope): what the wiki import writes on a memory. The two
+# identity tags name the wiki a memory belongs to; only the import sets them (S8).
+WIKI_TAG = "wiki"
+WIKI_PAGE_TAG = "page:"
+WIKI_PAGE_TYPE_TAG = "page_type:"
+PAGE_KEY_TAG = "page_key:"
+PAGE_SHA_TAG = "page_sha:"
+WIKI_PATH_TAG = "wiki-path:"
+WIKI_ID_TAG = "wiki-id:"
+WIKI_IDENTITY_TAGS = (WIKI_PATH_TAG, WIKI_ID_TAG)
+WIKI_IMPORT_TAG_PREFIXES = (WIKI_PAGE_TAG, WIKI_PAGE_TYPE_TAG, PAGE_KEY_TAG, PAGE_SHA_TAG, *WIKI_IDENTITY_TAGS)
 # Store locks (memkernel-0-7-store-locks L2): the names a caller may take with ``VectorStorePort.exclusive``.
 STORE_LOCK_WIKI_IMPORT = "wiki-import"
 STORE_LOCK_TAGS = "tags"  # held by ``merge_tags``, the only writer of a record's tags
@@ -223,6 +234,19 @@ class HealthReport(BaseModel):
 
 class ReasonerError(RuntimeError):
     """A ReasonerPort implementation ran but did not produce an answer (provider error, timeout, budget)."""
+
+
+class AmbiguousDedupError(ValueError):
+    """Two or more live records qualify as one retain's dedup hit (memkernel-0-7-wiki-scope S2): none is chosen."""
+
+    def __init__(self, ref_ids: list[str]) -> None:
+        super().__init__(f"several records qualify as the dedup hit: {', '.join(ref_ids)}")
+        self.ref_ids = ref_ids
+
+
+def has_wiki_identity(tags: list[str]) -> bool:
+    """Whether a memory carries a wiki identity tag (``wiki-path:`` or ``wiki-id:``)."""
+    return any(tag.startswith(WIKI_IDENTITY_TAGS) for tag in tags)
 
 
 class LockReentryError(RuntimeError):

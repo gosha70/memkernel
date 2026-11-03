@@ -161,8 +161,14 @@ extra, never a requirement.
 | `consolidate(session_id, limit, synthesize, revalidate)` | short/working | purge expired, return promotion candidates (+ health summary, optional revalidation) |
 | `ask(ref_id, question, mode)` | any | answer a question about one memory through the reasoner port |
 | `wiki_export(wiki_dir)` | long | compile long-term memories to draft wiki pages |
-| `wiki_import(wiki_dir)` | long | index wiki pages: approved revisions only with wiki-studio ≥ 0.7.0, every page without it; applies an approved page's `corrects` |
+| `wiki_import(wiki_dir, adopt_legacy, adopt_pages, adopt_manifest)` | long | index wiki pages: approved revisions only with wiki-studio ≥ 0.7.0, every page without it; applies an approved page's `corrects`; scoped to the wiki's identity (`wiki-path:`, `wiki-id:`), memories from before 0.7 adopted only on the owner's word |
 
+`MemoryService.set_wiki_identity(ref_id, *, wiki_path, wiki_id)` is a library method only the wiki import calls:
+it sets a wiki memory's identity tags (`wiki-path:`, `wiki-id:`) through `merge_tags`, nothing else, and refuses a
+different `wiki_id`. `retain(..., dedup_owner=, wiki_identity=)`: the import's dedup hit must satisfy
+`dedup_owner` (two raise `AmbiguousDedupError`), and `wiki_identity` is written only on a new record. Without
+`dedup_owner`, a record with identity tags is never a dedup hit; `retain` refuses those tags from callers
+(memkernel-0-7-wiki-scope).
 `VectorStorePort.merge_tags(ref_id, add, remove)` is the only writer of a record's tags: it reads and writes them
 under the store's `tags` lock, so a tag added meanwhile by another process is kept; `update_metadata` refuses a
 `tags` key and sends only the caller's keys (ChromaDB keeps the rest). `VectorStorePort.exclusive(name)` holds one
