@@ -46,8 +46,7 @@ def _make_service(settings: MemKernelSettings) -> MemoryService:
 def test_data_persists_across_client_restarts(tmp_path: Path) -> None:
     """Upserted data survives a full client teardown and re-open on the same path."""
     chroma_dir = str(tmp_path / "chroma")
-    # An injected persistent client must use the configured store directory (memkernel-0-7-store-locks L1).
-    settings = _make_settings(chroma_persist_path=chroma_dir)
+    settings = _make_settings()
     ref_id = "persist-ref-001"
     content = "Persisted memory across restarts"
     content_hash = "sha-persist-001"

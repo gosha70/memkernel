@@ -13,9 +13,8 @@ All notable changes to this project are documented here. The format follows
   tag another process added; `update_metadata` sends only the caller's keys and refuses `tags`. Locks are keyed by
   the store (lock files in the persist directory), are not re-entrant (`LockReentryError`) and log a wait longer
   than 10 seconds. POSIX only; on Windows they run unlocked with one warning.
-- **Breaking for library callers:** `build_service(chroma_client=...)` and `ChromaVectorStore(settings, client=...)`
-  refuse a `PersistentClient` for a directory other than a non-empty `MEMKERNEL_CHROMA_PERSIST_PATH`; set the
-  setting to the client's directory, or to empty.
+- An injected `PersistentClient` (`build_service(chroma_client=...)`) is refused when an explicitly set
+  `MEMKERNEL_CHROMA_PERSIST_PATH` names another directory; with the default setting nothing changes.
 
 - **What the session hooks inject** (#59, D5–D8; specs/memkernel-0-7-hooks):
   - every memory line ends with its `ref_id`, and the checkpoint's age line carries it too;

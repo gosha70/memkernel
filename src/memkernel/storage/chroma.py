@@ -87,6 +87,7 @@ LOCK_WAIT_LOG_SECONDS = 10.0  # a take waiting longer than this logs one info li
 _LOCK_POLL_SECONDS = 0.05
 _STORE_KEY_HASH_CHARS = 16
 TAGS_KEY = "tags"
+PERSIST_PATH_FIELD = "chroma_persist_path"  # set explicitly (env or argument), it binds an injected client
 
 _thread_locks: dict[tuple[str, str], threading.Lock] = {}  # serialises threads of this process, per store and name
 _thread_locks_guard = threading.Lock()
@@ -235,15 +236,17 @@ class ChromaVectorStore:
         else:
             self._client = client if client is not None else chromadb.EphemeralClient()
             self._collection = self._open_collection(collection_name)
-        self._lock_dir, self._store_key = self._lock_identity(collection_name, persist_path, client is not None)
+        configured = persist_path if PERSIST_PATH_FIELD in settings.model_fields_set else ""
+        self._lock_dir, self._store_key = self._lock_identity(collection_name, configured, client is not None)
 
-    def _lock_identity(self, collection_name: str, persist_path: str, injected: bool) -> tuple[Path | None, str]:
+    def _lock_identity(self, collection_name: str, configured: str, injected: bool) -> tuple[Path | None, str]:
         """The store's own lock identity (store-locks L1): its directory and a key, never a setting.
 
         A persistent client's locks live in its resolved directory, named by tenant, database and collection. An
         in-memory store's locks are process-wide per tenant, database and collection: separately built
-        ``EphemeralClient`` objects share one data set. An injected persistent client must use the configured
-        directory when one is configured.
+        ``EphemeralClient`` objects share one data set. An injected persistent client must use the directory
+        ``MEMKERNEL_CHROMA_PERSIST_PATH`` names when that was set explicitly (``configured``); the default is no
+        constraint.
         """
         client_settings = self._client.get_settings()
         tenant = str(getattr(self._client, "tenant", DEFAULT_TENANT))
@@ -253,10 +256,10 @@ class ChromaVectorStore:
         if not client_settings.is_persistent:
             return None, f"memory:{name_key}"
         directory = Path(os.path.realpath(str(client_settings.persist_directory)))
-        if injected and persist_path and directory != Path(os.path.realpath(persist_path)):
+        if injected and configured and directory != Path(os.path.realpath(configured)):
             raise ValueError(
                 f"the injected client's store {directory} is not the configured MEMKERNEL_CHROMA_PERSIST_PATH "
-                f"{persist_path}"
+                f"{configured}"
             )
         return directory, f"{directory}:{name_key}"
 
@@ -265,9 +268,9 @@ class ChromaVectorStore:
         """Hold the store's lock ``name`` until the block exits (store-locks L2, L4).
 
         Raises ``ValueError`` for a name outside ``STORE_LOCK_NAMES`` and ``LockReentryError`` when this thread
-        already holds the lock. Other threads of this process wait on an in-process lock; other processes wait on
-        an ``flock`` file in the store's directory. Without ``fcntl`` the cross-process part runs unlocked, with
-        one warning per process and lock name.
+        already holds the lock (re-entry is per thread: another thread waits). Other threads of this process wait
+        on an in-process lock; other processes wait on an ``flock`` file in the store's directory. Without
+        ``fcntl`` the cross-process part runs unlocked, with one warning per process and lock name.
         """
         if name not in STORE_LOCK_NAMES:
             raise ValueError(f"unknown store lock {name!r}; expected one of {sorted(STORE_LOCK_NAMES)}")

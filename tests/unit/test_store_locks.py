@@ -219,6 +219,33 @@ def test_an_injected_persistent_client_must_use_the_configured_directory(tmp_pat
         ChromaVectorStore(_settings(chroma_persist_path=str(tmp_path / "configured")), client=client)
 
 
+def test_an_injected_persistent_client_is_refused_when_the_environment_names_another_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MEMKERNEL_CHROMA_PERSIST_PATH", str(tmp_path / "configured"))
+    settings = MemKernelSettings(project_id=f"locks-{uuid.uuid4().hex[:8]}")
+    with pytest.raises(ValueError, match="not the configured MEMKERNEL_CHROMA_PERSIST_PATH"):
+        ChromaVectorStore(settings, client=chromadb.PersistentClient(path=str(tmp_path / "elsewhere")))
+
+
+def test_with_the_default_setting_an_injected_persistent_client_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MEMKERNEL_CHROMA_PERSIST_PATH", raising=False)
+    settings = MemKernelSettings(project_id=f"locks-{uuid.uuid4().hex[:8]}")
+    assert "chroma_persist_path" not in settings.model_fields_set and settings.chroma_persist_path
+    directory = tmp_path / "elsewhere"
+    store = ChromaVectorStore(settings, client=chromadb.PersistentClient(path=str(directory)))
+    with store.exclusive(STORE_LOCK_WIKI_IMPORT):
+        pass
+    assert list(directory.glob(f"{STORE_LOCK_FILE_PREFIX}{STORE_LOCK_WIKI_IMPORT}-*.lock"))
+
+
+def test_another_thread_waits_instead_of_raising(store: ChromaVectorStore) -> None:
+    """Re-entry is per thread: a second thread of the same process waits for the lock."""
+    assert _blocks_until_released(store, store, STORE_LOCK_TAGS)
+
+
 def test_an_injected_persistent_client_keys_its_locks_by_its_own_directory(tmp_path: Path) -> None:
     directory = tmp_path / "store"
     for configured in ("", str(directory)):
