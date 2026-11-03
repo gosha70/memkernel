@@ -21,6 +21,7 @@ origin:
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-review-84-6-windows.md
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-split-s8.md
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-windows-dedup.md
+    - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-adopt-legacy.md
   origin_claim: |
     #80: wiki_import matches a page's previous memory across wikis, so importing
     wiki B can supersede, deprecate or withdraw wiki A's memory at the same

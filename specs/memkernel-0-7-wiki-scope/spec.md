@@ -10,13 +10,13 @@ Origin: #80 and the owner's go of 2026-10-31 (`origin/2026-10-31-issue-80.md`). 
   another wiki, needs a manifest.**
 - **US2:** a project with one wiki and a store written by 0.6 upgrades. Its first import under 0.7 writes
   nothing for pages that have legacy memories and no record of this wiki, and reports them under `ambiguous`. One
-  import that names those pages and their records in `adopt_pages` attaches them to the wiki (S4); from then on, imports behave as before, without
-  duplicates.
+  import with `adopt_legacy=True` attaches every page's sole legacy record to the wiki (S4); pages with several
+  stay `ambiguous` for the owner to resolve. From then on, imports behave as before, without duplicates.
 
 **Owner decision required before build:** US1's manifestless-move exclusion, US2's adoption step, and S4's and
-S6's `adopt_pages` / `adopt_manifest` change #80's acceptance as first written; they stay recommendations
-until the owner confirms them. S8's Windows behavior is the owner's
-decision of 2026-11-03: only adoption refuses there; ordinary imports run unlocked like #69.
+S6's `adopt_legacy` / `adopt_pages` / `adopt_manifest` change #80's acceptance as first written; they stay
+recommendations until the owner confirms them. S8's Windows behavior is the owner's decision of 2026-11-03:
+everything, adoption included, runs unlocked there with one warning, like #69.
 
 **Depends on:** `specs/memkernel-0-7-store-locks/` (store locks and the single tag writer). Its build lands first.
 
@@ -96,20 +96,28 @@ decision of 2026-11-03: only adoption refuses there; ordinary imports run unlock
   adopts on its own.
 - **By default**, a page with no owned candidate (S3) and any legacy live candidate gets **nothing written**: no import, no
   supersession, no withdrawal. It is reported under a new `ambiguous` key (`{"path", "ref_ids", "reason"}`)
-  with the remedy: import again naming the page in `adopt_pages` if these are this wiki's memories, or `forget`
-  the ones that are not.
-- **`adopt_pages`** (`wiki_import(adopt_pages=[...])`, `WikiImporter.import_pages(..., adopt_pages=...)`): a
+  with the remedy: import again with `adopt_legacy=True` (or name the page in `adopt_pages`) if these are this
+  wiki's memories, or `forget` the ones that are not.
+- **`adopt_legacy=True`** (`wiki_import(adopt_legacy=true)`, `WikiImporter.import_pages(..., adopt_legacy=True)`;
+  the owner's decision of 2026-11-03, the upgrade path): the owner's wiki-wide assertion that this wiki's legacy
+  records are its own. It applies only where a page has no owned candidate and **exactly one** legacy candidate:
+  that record is adopted (S5) and a new revision supersedes it, as today. A page with two or more legacy
+  candidates stays `ambiguous` (`several legacy candidates`), nothing written. The risk is the owner's: if
+  another wiki's sole legacy record sits at one of this wiki's page keys or paths, it is adopted, so the README
+  tells a project with several wikis to use `adopt_pages` instead. Per call, never a setting.
+- **`adopt_pages`** (selective cases; `wiki_import(adopt_pages=[...])`, `WikiImporter.import_pages(..., adopt_pages=...)`): a
   list of `{"path", "ref_id"}` entries, copied from the `ambiguous` report. Each entry is the owner's assertion
   that **this record** is this page's. It is adopted only if, at import time, the page still has no owned
   candidate and its **sole** legacy candidate is exactly that `ref_id`; it then gains this wiki's tags (S5), and a
   new revision supersedes it, as today. If the candidate was removed or replaced, or another appeared, nothing is
   written and the page is reported with `candidate changed`, so a record the owner never saw is never adopted.
   Two or more legacy candidates stay `ambiguous`. Pages not named are untouched, so the owner confirms each
-  record, never the whole store.
+  record. With `adopt_legacy=True` in the same call, a page named in `adopt_pages` follows `adopt_pages`'s rule.
 - **The `reason` values,** one per cause, so a caller can tell "adopt me" from a defect. A page carries exactly
   one: S3's order checks owned candidates first and consults legacy ones only when there is no owned candidate,
   so `duplicate records` and the legacy reasons never apply to one page together.
-  - `legacy owner unproven`: one legacy candidate, page not named in `adopt_pages` (remedy: name it, or `forget`);
+  - `legacy owner unproven`: one legacy candidate, no `adopt_legacy` and page not named in `adopt_pages` (remedy:
+    `adopt_legacy=True`, name it, or `forget`);
   - `several legacy candidates`: two or more, named or not (remedy: `forget` the ones that aren't this page's);
   - `duplicate records`: two or more of this wiki's records match the page (S3) or dedup it (S2). `ref_ids`
     lists the records found; in both cases they are this page's records (dedup is scoped by the page's
@@ -118,7 +126,7 @@ decision of 2026-11-03: only adoption refuses there; ordinary imports run unlock
     (remedy: review the new report entry and name its record);
   - `not ambiguous`: an `adopt_pages` entry for a page with an owned candidate, or no legacy candidate (nothing
     to do).
-- `adopt_pages` is per call, not a setting, so it is never on by accident.
+- `adopt_legacy` and `adopt_pages` are per call, not settings, so they are never on by accident.
 - **Rejected:** adopting on a matching `page_sha:` or on "no other wiki known" (the first draft): neither proves
   ownership, so either could make one wiki supersede another's record, which US1 forbids.
 
@@ -195,7 +203,7 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
 `VectorStorePort.merge_tags(ref_id, add, remove, *, required)`, `update_metadata` refusing `tags`, and
 `LockUnavailableError`. This spec uses them:
 - **One import at a time per store.** Every import, governed and ungoverned, holds
-  `exclusive("wiki-import", ...)` for its whole run (required only for adoption; see below). Different wikis' ledger locks don't serialize each
+  `exclusive("wiki-import", required=False)` for its whole run (unlocked where there is no lock; see below). Different wikis' ledger locks don't serialize each
   other, and the ungoverned import has no ledger, so only this lock makes S3's and S4's checks and their writes
   one step. Two wikis adopting the same `ref_id` run one after the other: the second sees the record already
   owned and reports `candidate changed`. Lock order, always: the import lock, then the path-hash ledger, then the
@@ -212,34 +220,27 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
 - **`promote` never creates a wiki candidate.** Promoting a wiki memory drops every wiki-import tag from the copy:
   `wiki`, `page:`, `page_type:`, `page_key:`, `page_sha:`, `wiki-path:` and `wiki-id:`. The importer's candidates
   are wiki-tagged live memories (`sync.py:384`), so the copy is an ordinary memory, linked by `promoted_from`.
-- **Without a lock (Windows and other non-POSIX platforms): the owner's decision of 2026-11-03.** "On Windows:
-  refuse only adopt_pages (and anything else that tags an existing unowned record); ordinary wiki imports degrade
-  like #69 (no lock, one warning)." It rests on this analysis of unlocked races between two imports:
+- **Without a lock (Windows and other non-POSIX platforms): the owner's decision of 2026-11-03.** "On Windows,
+  let adoption run unlocked with one warning (the race needs my own contradictory assertion), documented." With
+  the earlier decision that ordinary imports degrade like #69, nothing in the wiki import requires the lock:
+  every import holds `exclusive("wiki-import", required=False)`, and `set_wiki_identity` writes through
+  `merge_tags(..., required=False)`; without a lock both run unlocked and the store-locks spec logs one warning.
+  What unlocked races between two imports can do:
   - same wiki, two ledger saves: the last save wins and entries are lost, so fewer deletions are provable; the
     next run records every page again. Repaired.
-  - same wiki, two ledger migrations: one rename fails (`import_error`), the other completes. Repaired. (A
-    migration happens only with `adopt_manifest`, which refuses here anyway.)
+  - same wiki, two ledger migrations (`adopt_manifest`): one rename fails (`import_error`), the other completes.
+    Repaired.
   - same wiki, a move's retag run twice: idempotent. Repaired.
   - same wiki, one page imported twice, or one predecessor superseded twice: two owned records with correct
-    identity tags; S3 reports `duplicate records` and writes nothing for that page until the owner `forget`s one.
-    Not repaired, but identity stays right; the owner accepts this without a lock.
-  - two wikis tagging the same unowned record (`adopt_pages` naming one legacy `ref_id`, or `adopt_manifest`
-    over path-only records): the later tag write wins, so a record can end tagged for one wiki while the other
-    supersedes it. **Identity permanently wrong**, so these refuse.
+    identity tags; S3 reports `duplicate records` until the owner `forget`s one. Not repaired; accepted.
+  - two wikis adopting the same unowned record at once (`adopt_legacy`, `adopt_pages` or `adopt_manifest` in
+    both): the later tag write wins, so a record can end tagged for one wiki while the other supersedes it.
+    Identity can be permanently wrong, but only after the owner asserts the same record for two wikis, which is
+    already wrong with a lock. Accepted and documented.
 
-  So, without a lock:
-  - an import with a non-empty `adopt_pages` or `adopt_manifest=True` holds `exclusive("wiki-import",
-    required=True)`, so it refuses with `import_error` before any write, naming the reason: "adopting records
-    needs the store lock; adoption is POSIX-only until a Windows contention test exists". The same import
-    without those arguments runs;
-  - every other import holds `exclusive("wiki-import", required=False)`: no lock, one logged warning (per the
-    store-locks spec), as #69 does for opening the store;
-  - `set_wiki_identity` uses `merge_tags(..., required=True)` when the record isn't this wiki's yet (adoption),
-    and `required=False` on the wiki's own records (a move's retag);
-  - `retain(wiki_identity=...)` writes a new record, which no other writer can touch before it exists, so it
-    needs no lock;
-  - the README says adoption is POSIX-only and ordinary imports run unlocked on Windows; the CHANGELOG lists the
-    adoption restriction under **Changed**. A later Windows-tested lock can lift it.
+  `retain(wiki_identity=...)` writes a new record, which no other writer can touch before it exists. The README
+  lists these races under Windows; the CHANGELOG says the import runs unlocked there, as 0.6 did. A later
+  Windows-tested lock can close them.
 - **Not changed:** the ledger stays under `MEMKERNEL_STATE_DIR`. Two processes that share a store but not a state
   directory keep separate ledgers, so each can prove fewer deletions; the import lock still serializes them. The
   README says: give processes that share a store the same `MEMKERNEL_STATE_DIR`.
@@ -257,23 +258,23 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
 - **FR-003a (S3):** owned candidates first, an interrupted supersession completed from the replacement's
   `supersedes`, duplicates detected before the early return and before `retain`, and in D4 and D5, with no store
   or ledger write; legacy candidates only when no owned candidate exists. `AmbiguousDedupError` as S2's backstop.
-- **FR-004 (S4, S6):** no legacy adoption unless a `{path, ref_id}` entry in `adopt_pages` names the page's
-  current sole legacy candidate exactly; otherwise `candidate changed`. Otherwise no write and an `ambiguous` report entry. `wiki_import` and `import_pages` gain
-  `adopt_pages` (default empty) and `adopt_manifest` (default false); the response and `ImportReport` gain
+- **FR-004 (S4, S6):** no legacy adoption without the owner's assertion: `adopt_legacy=True` adopts each page's
+  sole legacy candidate; an `adopt_pages` `{path, ref_id}` entry adopts exactly that record, else
+  `candidate changed`. Otherwise no write and an `ambiguous` report entry. `wiki_import` and `import_pages` gain
+  `adopt_legacy` (default false), `adopt_pages` (default empty) and `adopt_manifest` (default false); the response and `ImportReport` gain
   `ambiguous`, absent when empty.
 - **FR-005 (S5):** `MemoryService.set_wiki_identity` with its refusals, called before the early return for a
   current revision.
 - **FR-006 (S7):** the scoped rebuild.
-- **FR-008 (S8):** the import under `exclusive("wiki-import", ...)` with the fixed lock order, required only with
-  `adopt_pages` or `adopt_manifest`; reserved identity tags (`retain`, the MCP tool, `retain(wiki_identity=)`);
-  `promote` dropping every wiki-import tag; `set_wiki_identity` requiring the lock only for adoption; the named
-  `import_error` for adoption without a lock.
+- **FR-008 (S8):** the import under `exclusive("wiki-import", required=False)` with the fixed lock order;
+  `set_wiki_identity` through `merge_tags(..., required=False)`; reserved identity tags (`retain`, the MCP tool,
+  `retain(wiki_identity=)`); `promote` dropping every wiki-import tag.
 - **FR-009 (S2):** an ordinary `retain` (no `dedup_owner`) never dedups onto a record with identity tags; it
   writes its own record, on every platform.
 - **FR-007:** README (the rule that a movable or multi-wiki setup needs a manifest, the rule that processes
   sharing a store share `MEMKERNEL_STATE_DIR`, the reserved `wiki-path:` and `wiki-id:` tags, the wiki import
-  adoption being POSIX-only while ordinary imports run unlocked on Windows, an ordinary `retain` never merging
-  into a wiki memory, identity tags, membership, `adopt_pages`, `adopt_manifest` and the upgrade step, the
+  running unlocked on Windows with its documented races, an ordinary `retain` never merging
+  into a wiki memory, identity tags, membership, `adopt_legacy` as the upgrade step, `adopt_pages` for several wikis, `adopt_manifest`, the
   identity changes and their remedies, the manifestless-move and copied-wiki limits, the `ambiguous` key), `memory-tiers.md`
   (`set_wiki_identity`, `dedup_owner`, reserved identity tags) and CHANGELOG `[Unreleased]` (the upgrade step; the
   Windows regression under **Changed**).
@@ -288,6 +289,8 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
 ## Key Entities
 - **`wiki-path:<hash>`, `wiki-id:<uuid>` tags:** the wiki an imported memory belongs to (S1). Absent on legacy
   memories (0.6 and earlier).
+- **`adopt_legacy`:** the owner's per-call, wiki-wide assertion that each page's sole legacy record is this
+  wiki's (S4).
 - **`adopt_pages`:** the owner's per-call assertion, per `{path, ref_id}`, that this record is this page's (S4).
 - **`adopt_manifest`:** the owner's per-call assertion that a wiki which gained a manifest is the same wiki (S6).
 - **`ambiguous` report entry:** a page left untouched because a legacy record's ownership is unproven (S4), or
@@ -300,7 +303,10 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
   - Each wiki has its own record with only its own identity tags; identical pages are two records.
   - B's `corrects` never treats A's correction as its own.
 - **SC-2 (S4, migration):**
-  - **A single-wiki 0.6 store, governed:** by default, the import writes nothing for those pages and reports
+  - **A single-wiki 0.6 store, governed, upgraded with `adopt_legacy=True`:** every page with one legacy record
+    adopts it (a current one `unchanged`, tagged, no new record; a changed page supersedes it with a tagged
+    record); a page with two stays `ambiguous`; a second import without `adopt_legacy` behaves as before.
+  - **The same store, selectively:** by default, the import writes nothing for those pages and reports
     them `ambiguous`; the store is unchanged. Naming one `{path, ref_id}` in `adopt_pages` adopts only that
     record; the others stay `ambiguous`. For a named page, a legacy record with the current
     `page_sha:` is adopted (`unchanged`, tagged, no new record), and a changed page supersedes its legacy record
@@ -355,9 +361,8 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
   - **`promote`:** promoting an imported wiki memory yields a copy with no wiki-import tag; a following import,
     governed and ungoverned, reports the page `unchanged` (or supersedes its own record), never `ambiguous`, and
     leaves the copy untouched.
-  - **Non-POSIX** (`fcntl` patched away): an import with `adopt_pages`, and one with `adopt_manifest=True`,
-    refuses before any write with the named reason; an ordinary import, governed and ungoverned, runs and logs
-    one warning; a manifested move's retag runs.
+  - **Non-POSIX** (`fcntl` patched away): an ordinary import, and imports with `adopt_legacy`, `adopt_pages`
+    and `adopt_manifest`, governed and ungoverned, run and log one warning; a manifested move's retag runs.
   - **Ordinary retain onto a wiki memory (every platform):** `retain` (library and MCP) with content matching an
     imported wiki memory writes its own record and returns its new `ref_id`; the wiki memory's tags and fields
     are unchanged; a following import still reports the page `unchanged`. With several matches, a record
