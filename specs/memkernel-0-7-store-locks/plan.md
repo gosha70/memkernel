@@ -3,7 +3,7 @@ spec_mode: full
 feature_id: memkernel-0-7-store-locks
 risk_category: bugfix
 justification: "Changes a core port (VectorStorePort gains merge_tags and exclusive; update_metadata refuses tags), the ChromaDB adapter's concurrency and lock identity, and behavior on non-POSIX platforms: a cross-cutting storage contract, so a full spec."
-status: draft
+status: approved
 date: 2026-11-03
 collaboration_mode: single
 origin:
@@ -13,6 +13,7 @@ origin:
   transcripts:
     - specs/memkernel-0-7-store-locks/origin/2026-11-03-split.md
     - specs/memkernel-0-7-store-locks/origin/2026-11-03-reentry.md
+    - specs/memkernel-0-7-store-locks/origin/2026-11-03-approval.md
   origin_claim: |
     The owner, 2026-11-03: "split S8." S8 was the concurrency and tag-integrity
     section of the #80 spec (memkernel-0-7-wiki-scope, PR #84), added over three
