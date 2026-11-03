@@ -13,14 +13,13 @@ Origin: #80 and the owner's go of 2026-10-31 (`origin/2026-10-31-issue-80.md`). 
   import with `adopt_legacy=True` attaches every page's sole legacy record to the wiki (S4); pages with several
   stay `ambiguous` for the owner to resolve. From then on, imports behave as before, without duplicates.
 
-**Owner decision required before build:** US1's manifestless-move exclusion, US2's adoption step, and S4's and
-S6's `adopt_legacy` / `adopt_pages` / `adopt_manifest` change #80's acceptance as first written; they stay
-recommendations until the owner confirms them. S8's Windows behavior is the owner's decision of 2026-11-03:
-everything, adoption included, runs unlocked there with one warning, like #69.
+**Confirmed by the owner, 2026-11-03:** US1 and US2 as amended (the manifestless-move exclusion,
+`adopt_legacy`, `adopt_pages`, `adopt_manifest`), and S8's Windows rule (every import, adoption included,
+unlocked there with one warning, like #69). These change #80's acceptance as first written, deliberately.
 
 **Depends on:** `specs/memkernel-0-7-store-locks/` (store locks and the single tag writer). Its build lands first.
 
-## Decisions (recommendations for the owner to confirm; revised after the two reviews of `1499944`)
+## Decisions (confirmed by the owner, 2026-11-03)
 **Terms.** A memory's **identity tags** are `wiki-path:` and `wiki-id:`. A **legacy** memory carries neither
 (0.6 memories carry the generic `wiki` tag, which says nothing about which wiki). A **path-only** memory carries a
 `wiki-path:` and no `wiki-id:`.
@@ -199,11 +198,11 @@ belong to this wiki (S1), never from legacy or other wikis' memories.
 
 **S8. Concurrency for wiki identity (depends on `memkernel-0-7-store-locks`).** The store locks and the single
 tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (the owner's "split S8",
-2026-11-03): store-keyed lock identity, `VectorStorePort.exclusive(name, *, required)`,
-`VectorStorePort.merge_tags(ref_id, add, remove, *, required)`, `update_metadata` refusing `tags`, and
-`LockUnavailableError`. This spec uses them:
+2026-11-03): store-keyed lock identity, `VectorStorePort.exclusive(name)`,
+`VectorStorePort.merge_tags(ref_id, add, remove)`, `update_metadata` refusing `tags`, and `LockReentryError`. This
+spec uses them:
 - **One import at a time per store.** Every import, governed and ungoverned, holds
-  `exclusive("wiki-import", required=False)` for its whole run (unlocked where there is no lock; see below). Different wikis' ledger locks don't serialize each
+  `exclusive("wiki-import")` for its whole run (unlocked where there is no lock; see below). Different wikis' ledger locks don't serialize each
   other, and the ungoverned import has no ledger, so only this lock makes S3's and S4's checks and their writes
   one step. Two wikis adopting the same `ref_id` run one after the other: the second sees the record already
   owned and reports `candidate changed`. Lock order, always: the import lock, then the path-hash ledger, then the
@@ -222,9 +221,9 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
   are wiki-tagged live memories (`sync.py:384`), so the copy is an ordinary memory, linked by `promoted_from`.
 - **Without a lock (Windows and other non-POSIX platforms): the owner's decision of 2026-11-03.** "On Windows,
   let adoption run unlocked with one warning (the race needs my own contradictory assertion), documented." With
-  the earlier decision that ordinary imports degrade like #69, nothing in the wiki import requires the lock:
-  every import holds `exclusive("wiki-import", required=False)`, and `set_wiki_identity` writes through
-  `merge_tags(..., required=False)`; without a lock both run unlocked and the store-locks spec logs one warning.
+  the earlier decision that ordinary imports degrade like #69, nothing in the wiki import refuses without the lock:
+  every import holds `exclusive("wiki-import")`, and `set_wiki_identity` writes through
+  `merge_tags`; without a lock both run unlocked and the store-locks spec logs one warning.
   What unlocked races between two imports can do:
   - same wiki, two ledger saves: the last save wins and entries are lost, so fewer deletions are provable; the
     next run records every page again. Repaired.
@@ -266,8 +265,8 @@ tag writer are their own prerequisite spec, `specs/memkernel-0-7-store-locks/` (
 - **FR-005 (S5):** `MemoryService.set_wiki_identity` with its refusals, called before the early return for a
   current revision.
 - **FR-006 (S7):** the scoped rebuild.
-- **FR-008 (S8):** the import under `exclusive("wiki-import", required=False)` with the fixed lock order;
-  `set_wiki_identity` through `merge_tags(..., required=False)`; reserved identity tags (`retain`, the MCP tool,
+- **FR-008 (S8):** the import under `exclusive("wiki-import")` with the fixed lock order;
+  `set_wiki_identity` through `merge_tags`; reserved identity tags (`retain`, the MCP tool,
   `retain(wiki_identity=)`); `promote` dropping every wiki-import tag.
 - **FR-009 (S2):** an ordinary `retain` (no `dedup_owner`) never dedups onto a record with identity tags; it
   writes its own record, on every platform.

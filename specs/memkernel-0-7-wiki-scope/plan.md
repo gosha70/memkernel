@@ -3,7 +3,7 @@ spec_mode: full
 feature_id: memkernel-0-7-wiki-scope
 risk_category: bugfix
 justification: "Changes which memories the wiki import treats as a page's previous memory (supersession, deprecation and withdrawal all depend on it), adds a tag to every imported memory, and must keep stores written by 0.6 working: the import's identity rule and a cross-version contract, so a full spec."
-status: draft
+status: approved
 date: 2026-10-31
 collaboration_mode: single
 origin:
@@ -22,6 +22,7 @@ origin:
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-split-s8.md
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-windows-dedup.md
     - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-adopt-legacy.md
+    - specs/memkernel-0-7-wiki-scope/origin/2026-11-03-approval.md
   origin_claim: |
     #80: wiki_import matches a page's previous memory across wikis, so importing
     wiki B can supersede, deprecate or withdraw wiki A's memory at the same
