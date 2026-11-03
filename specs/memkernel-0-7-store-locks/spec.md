@@ -33,14 +33,23 @@ is a context manager holding the store's lock `name` (L1) until it exits. `name`
 constants (`wiki-import`, `tags`); any other value raises `ValueError`. It blocks until acquired, with no timeout,
 deliberately: `flock` is released when the holder exits or dies, and a hung holder is a defect to fix, not one to
 time out around. #80's wiki
-import holds `exclusive("wiki-import", ...)` for its whole run: required when it adopts records, not
-otherwise (#80's decision).
+import holds `exclusive("wiki-import", required=False)` for its whole run (#80's decision).
+- **Not re-entrant.** A process holds each store lock at most once. Taking a lock name the same process already
+  holds, for the same store, raises a new `LockReentryError` (a `RuntimeError` subclass in `core/models.py`)
+  before acquiring anything, so a nested take fails loudly instead of deadlocking (a second `flock` on a new file
+  handle blocks against the first, even in one process). A process-wide registry of held (store key, name)
+  pairs, guarded by a `threading.Lock`, tracks this; it applies with and without `fcntl`. `merge_tags` takes
+  `tags` itself, so a caller holding `exclusive("tags")` can't call it: the error says so.
+- **Long waits are logged.** A take that waits longer than `LOCK_WAIT_LOG_SECONDS` (a named constant, 10 seconds)
+  logs one info line naming the lock and the store, then keeps waiting.
 
 **L3. Tags have one writer.**
 - `update_metadata` sends only the caller's keys; Chroma merges the rest (`plan.md`). That merge is an assumption
   about chromadb (`>=1.0,<2`), not something memkernel can enforce; a test pins it, so a chromadb change that
   breaks it fails CI before any release. With it, no `update_metadata` call can write `tags`, so `merge_tags`'s
-  lock needs no coordination with them.
+  lock needs no coordination with them. If a chromadb release stopped merging keys, an unlocked
+  `update_metadata` could write back a stale `tags` value between `merge_tags`'s read and write; the pinning
+  test fails on that release, before memkernel could ship with it.
 - `update_metadata` refuses a `tags` key with `ValueError`, in the port contract and the adapter.
 - A new port method, `VectorStorePort.merge_tags(ref_id, add, remove, *, required=False) -> bool`, reads the
   record's tags and writes the result inside the store's lock `tags` (L1), so a tag added meanwhile is never
@@ -53,14 +62,15 @@ otherwise (#80's decision).
 - `exclusive(..., required=True)` and `merge_tags(..., required=True)` raise a new `LockUnavailableError`
   (a `RuntimeError` subclass in `core/models.py`), naming the platform, before any read or write;
 - with `required=False` they run unlocked, and the first such call per process and lock name logs one warning;
-- the README describes the locks and what happens without them; no operation in this spec requires a lock,
-  and #80's README change names wiki adoption (`adopt_pages`, `adopt_manifest`) as the first that does. Callers decide what requires it.
+- the README describes the locks and what happens without them. No operation in this spec or in #80 uses
+  `required=True`: #80's import and identity writes use `required=False`, locked on POSIX and unlocked with one
+  warning elsewhere, as decided there. `required=True` exists for a caller that must not run unlocked.
 
 The existing store-open and ledger locks keep their behavior; this spec doesn't change them.
 
 ## Requirements
 - **FR-001 (L1):** store-keyed lock identity, persistent and in-memory, and the injected-client check.
-- **FR-002 (L2):** `VectorStorePort.exclusive`.
+- **FR-002 (L2):** `VectorStorePort.exclusive`; `LockReentryError` on a nested take; the long-wait log line.
 - **FR-003 (L3):** `update_metadata` with the caller's keys only, refusing `tags`; `VectorStorePort.merge_tags`;
   `_refresh_existing` and the code-chunk sync moved to it.
 - **FR-004 (L4):** `LockUnavailableError`; `required` behavior; one warning when unlocked.
@@ -76,15 +86,21 @@ The existing store-open and ledger locks keep their behavior; this spec doesn't 
 ## Key Entities
 - **Store lock:** a lock named per purpose (`wiki-import`, `tags`), identified by the store (L1).
 - **`LockUnavailableError`:** an operation that requires a lock on a platform without one.
+- **`LockReentryError`:** a process taking a store lock it already holds.
 
 ## Success Criteria
 - **SC-1 (L1, L2):**
   - two processes on one persist directory with different `MEMKERNEL_STATE_DIR` serialize under `exclusive`;
-  - two processes, each injecting its own `PersistentClient` for one directory, serialize;
+  - two processes, each injecting its own `PersistentClient` for one directory, serialize; the test first
+    asserts that a record written through one client is read through the other;
   - an injected client whose directory differs from a non-empty `chroma_persist_path` is refused;
   - two adapters on one `EphemeralClient`, and two separately constructed `EphemeralClient`s, serialize; the
     second case first asserts that the two clients see each other's records, so it can't pass vacuously; two
     collections don't block each other.
+- **SC-1a (L2):** a nested `exclusive` of the same name on the same store raises `LockReentryError` before
+  acquiring, with and without `fcntl`; the outer lock is still held and released normally; `merge_tags` inside
+  `exclusive("tags")` raises it; two different names, or two stores, nest fine. A take that waits past
+  `LOCK_WAIT_LOG_SECONDS` (patched short in the test) logs one info line and then acquires.
 - **SC-2 (L3):**
   - a `merge_tags` in one process and a dedup refresh in another, on one record, interleaved at the read: every
     added tag survives; the same with a `get` touch. The interleaving is forced, not timed: the test patches
