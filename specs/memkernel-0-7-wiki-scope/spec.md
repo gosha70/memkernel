@@ -112,6 +112,10 @@ unlocked there with one warning, like #69). These change #80's acceptance as fir
   written and the page is reported with `candidate changed`, so a record the owner never saw is never adopted.
   Two or more legacy candidates stay `ambiguous`. Pages not named are untouched, so the owner confirms each
   record. With `adopt_legacy=True` in the same call, a page named in `adopt_pages` follows `adopt_pages`'s rule.
+- **A named record now another wiki's** (confirmed by the owner, 2026-11-03, from the build of #89): when an
+  `adopt_pages` entry names a record that is still at the page but now carries another wiki's identity (another
+  wiki adopted it first, SC-8), the page is reported `candidate changed` and nothing is written for it. A named
+  record that is gone is `not ambiguous`.
 - **The `reason` values,** one per cause, so a caller can tell "adopt me" from a defect. A page carries exactly
   one: S3's order checks owned candidates first and consults legacy ones only when there is no owned candidate,
   so `duplicate records` and the legacy reasons never apply to one page together.
@@ -178,8 +182,10 @@ unlocked there with one warning, like #69). These change #80's acceptance as fir
   case US1 excludes; a manifest avoids it.
 - **The governed ledger** (the ungoverned import has none). Its key is the `wiki_id` when the wiki has a
   manifest, else the path hash. A migration happens only on manifest added with `adopt_manifest=True`, before any
-  memory write, holding both files' locks for the whole run. The locks are always taken in the same order (the
-  path-hash file's, then the `wiki_id` file's), so two imports never deadlock. The states:
+  memory write, holding both files' locks while it moves the ledger. The locks are always taken in the same order
+  (the path-hash file's, then the `wiki_id` file's), so two imports never deadlock. The whole run is serialized by
+  the store's `wiki-import` lock (S8), so the two ledger locks are not held beyond the migration (confirmed by the
+  owner, 2026-11-03, from the build of #89). The states:
   - only the path-hash file exists: it is renamed to the `wiki_id` file;
   - both files exist (for example add, remove, re-add): the import stops with `import_error` naming both files,
     nothing written. The owner deletes the stale one; memkernel doesn't guess which ledger is authoritative;

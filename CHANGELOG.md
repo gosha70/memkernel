@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The wiki import keeps to its own wiki** (#80; specs/memkernel-0-7-wiki-scope): every imported memory carries
+  `wiki-path:` and, with a manifest, `wiki-id:`; a page's previous memory, its corrections, supersession and
+  deprecation are only its wiki's, so two wikis can share page paths and `page_id`s in one store. The import's
+  dedup is scoped the same way; an ordinary `retain` matching a wiki memory gets its own record; `retain` refuses
+  the two tags; `promote` drops wiki tags from its copy. Identity changes (a manifest added, removed or replaced,
+  a moved wiki) stop the import before any write, with a remedy; one import runs at a time per store.
+- **Upgrade step for a 0.6 store:** memories imported before 0.7 have no identity, so the first import lists their
+  pages under the new `ambiguous` key and writes nothing for them. Run `wiki_import(adopt_legacy=true)` once (or
+  name records with `adopt_pages`, for several wikis in one store); a wiki that gained a manifest needs
+  `adopt_manifest=true` once.
+- On Windows the wiki import runs without the store lock, as in 0.6, with one logged warning; the README lists
+  what two concurrent imports can do there.
+
 - **Store locks and a single tag writer** (specs/memkernel-0-7-store-locks): a record's tags are now written only
   under the store's `tags` lock (`VectorStorePort.merge_tags`), so a dedup refresh in one process no longer drops a
   tag another process added; `update_metadata` sends only the caller's keys and refuses `tags`. Locks are keyed by

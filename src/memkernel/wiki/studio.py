@@ -16,9 +16,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shlex
+import stat
 import sys
+import uuid
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -306,6 +309,53 @@ def wiki_id(api: Any, wiki_dir: Path, project_root: Path) -> str | None:
         raise GateError(f"wiki-studio could not read the wiki manifest: {exc}") from exc
     value = getattr(manifest, "wiki_id", None)
     return value if isinstance(value, str) and value else None
+
+
+# The manifest's identity fields, as wiki-studio's ``parse_manifest`` checks them (memkernel-0-7-wiki-scope S1).
+MANIFEST_FILE = ".wiki-studio.json"
+MANIFEST_VERSION_KEY = "manifest_version"
+MANIFEST_WIKI_ID_KEY = "wiki_id"
+SUPPORTED_MANIFEST_VERSION = 1
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def read_wiki_id(wiki_dir: Path) -> str | None:
+    """The manifest's ``wiki_id`` without wiki-studio, for the ungoverned import (memkernel-0-7-wiki-scope S1).
+
+    None when the wiki has no manifest. Validates the identity fields as wiki-studio does, so both import paths
+    derive one identity: opened without following a symlink, a regular file, a UTF-8 JSON object,
+    ``manifest_version`` a positive integer no newer than 1, ``wiki_id`` a UUID string. Any failure raises
+    :class:`GateError`, which stops the import. The contract fields (schema, fingerprint, policy) are left to
+    wiki-studio: they do not affect identity.
+    """
+    path = Path(wiki_dir) / MANIFEST_FILE
+    if not os.path.lexists(path):
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW)
+    except OSError as exc:
+        raise GateError(f"the wiki manifest {path} cannot be opened (a symlink is refused): {exc}") from exc
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise GateError(f"the wiki manifest {path} is not a regular file")
+        data = handle.read()
+    try:
+        obj = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise GateError(f"the wiki manifest {path} is not a UTF-8 JSON document: {exc}") from exc
+    if not isinstance(obj, dict):
+        raise GateError(f"the wiki manifest {path} must be a JSON object")
+    version = obj.get(MANIFEST_VERSION_KEY)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise GateError(f"the wiki manifest {path}: {MANIFEST_VERSION_KEY} must be a positive integer")
+    if version > SUPPORTED_MANIFEST_VERSION:
+        raise GateError(f"the wiki manifest {path}: {MANIFEST_VERSION_KEY} {version} is newer than memkernel reads")
+    value = obj.get(MANIFEST_WIKI_ID_KEY)
+    try:
+        uuid.UUID(value)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise GateError(f"the wiki manifest {path}: {MANIFEST_WIKI_ID_KEY} must be a UUID string") from exc
+    return str(value)
 
 
 def propose_and_promote(
