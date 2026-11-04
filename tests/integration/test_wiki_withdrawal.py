@@ -272,6 +272,7 @@ def test_a_rename_that_kept_its_page_id_is_not_a_deletion(tmp_path: Path) -> Non
     w.update(rel, lambda t: t.replace("status: stable", f"status: stable\npage_id: {page_id}", 1))
     w.approve(rel)
     w.import_pages()
+    (before,) = w.wiki_memories()
     renamed = rel.replace(".md", "-renamed.md")
     (w.wiki / renamed).write_bytes((w.wiki / rel).read_bytes())
     (w.wiki / rel).unlink()
@@ -279,7 +280,9 @@ def test_a_rename_that_kept_its_page_id_is_not_a_deletion(tmp_path: Path) -> Non
     report = w.import_pages()
 
     assert report.withdrawn == []
-    assert any(m.source == rel for m in w.wiki_memories())  # the page's memory is still live
+    # the page's memory is still live, now at its new path (memkernel-0-7-governed G5: a move keeps its lineage)
+    (after,) = w.wiki_memories()
+    assert after.source == renamed and after.supersedes == before.ref_id
 
 
 # ── Review of #78 ─────────────────────────────────────────────────────────────

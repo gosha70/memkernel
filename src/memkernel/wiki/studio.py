@@ -14,6 +14,7 @@ to a copilot CLI, and memkernel runs inside one.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -41,6 +42,22 @@ GATE_RATIONALE = "memkernel export"
 GATE_MIN_VERSION = (0, 7, 0)  # 0.7.0 adds review state, which the governed import reads
 # Every wiki-studio call the bridge makes; an installed wiki-studio without one of them is refused.
 REQUIRED_CALLS = ("init", "propose", "promote", "PageEdit", "review_state", "read_page")
+# MEMKERNEL_WIKI_MODE (Release B part 2c G1), and the path a wiki_export or wiki_import ran ("mode" in its response).
+WIKI_MODE_AUTO, WIKI_MODE_GOVERNED, WIKI_MODE_UNGATED = "auto", "governed", "ungated"
+PATH_GATED, PATH_UNGATED = "gated", "ungated"
+# Every wiki-studio capability the bridge uses; the governed preflight refuses a build without one (G1). Changes
+# only with GATE_MIN_VERSION.
+GOVERNED_CAPABILITIES = (
+    "wiki-lock",
+    "receipts",
+    "root-manifest",
+    "page-id",
+    "approval-record",
+    "superseded-by",
+    "findings",
+)
+GOVERNED_WIKI = "governed"  # wiki-studio's manifest mode for a wiki whose policy sets approval_required
+PROPOSAL_PREVIEW_DIR = "preview"  # the patch-set's copy of each edit's content (wiki-studio docs/patch-set-format.md)
 STUDIO_DISTRIBUTION = "wiki-studio"
 RECEIPT_FILE = "receipt.json"
 RECEIPT_COMMITTING = "committing"
@@ -239,6 +256,64 @@ def gate_available() -> Any | None:
     return api
 
 
+def studio_installed() -> bool:
+    """Whether the ``wiki_studio`` package can be found, without importing it."""
+    try:
+        return importlib.util.find_spec("wiki_studio") is not None
+    except (ImportError, ValueError):  # a broken entry in sys.modules: installed, as gate_available will report
+        return True
+
+
+def governed_preflight(wiki_dir: Path, project_root: Path) -> Any:
+    """``MEMKERNEL_WIKI_MODE=governed``'s checks, before any page is written or read (G1): return ``wiki_studio.api``.
+
+    Raises :class:`GateError` naming the refusal: wiki-studio absent, broken or older than 0.7.0; a capability of
+    :data:`GOVERNED_CAPABILITIES` missing; a wiki that is not ``governed`` (a ``managed`` or ``legacy`` one), with
+    the remedy; schema drift. Reads only.
+    """
+    api = gate_available()
+    if api is None:
+        raise GateError(f"MEMKERNEL_WIKI_MODE=governed needs wiki-studio, which is not installed; {INSTALL_HINT}")
+    try:
+        from wiki_studio.paths import WikiPaths
+
+        info = api.info(WikiPaths.for_root(project_root, wiki_dir=wiki_dir))
+        capabilities = set(info.capabilities)
+        wiki_mode = str(info.manifest.mode)
+        warnings = [str(warning) for warning in info.warnings]
+    except Exception as exc:  # any failure of the installed wiki-studio is reported, never raised raw
+        logger.warning("wiki-studio could not describe %s: %s", wiki_dir, exc)
+        raise GateError(f"wiki-studio could not describe the wiki: {exc}") from exc
+    missing = [name for name in GOVERNED_CAPABILITIES if name not in capabilities]
+    if missing:
+        raise GateError(
+            f"MEMKERNEL_WIKI_MODE=governed: this wiki-studio lacks the capabilities {', '.join(missing)}; upgrade it"
+        )
+    if wiki_mode != GOVERNED_WIKI:
+        raise GateError(
+            f"MEMKERNEL_WIKI_MODE=governed: the wiki {wiki_dir} is {wiki_mode}, not governed; run wiki-studio init "
+            "if it has no manifest, then set approval_required: true in the manifest's policy"
+        )
+    if warnings:
+        raise GateError(f"MEMKERNEL_WIKI_MODE=governed: the wiki's schema has drifted: {'; '.join(warnings)}")
+    return api
+
+
+def curation_findings(api: Any, wiki_dir: Path, project_root: Path) -> tuple[dict[str, int], list[tuple[str, str]]]:
+    """wiki-studio's ``findings`` for the whole wiki: the nonzero counts by kind, and each finding's kind with its
+    first page (G2). Raises :class:`GateError` on any failure of the installed wiki-studio."""
+    try:
+        from wiki_studio.paths import WikiPaths
+
+        result = api.findings(WikiPaths.for_root(project_root, wiki_dir=wiki_dir))
+        counts = {str(kind): int(count) for kind, count in result.counts.items() if int(count) > 0}
+        examples = [(str(f.kind), str(f.pages[0]) if f.pages else "") for f in result.findings]
+    except Exception as exc:  # any failure of the installed wiki-studio is reported, never raised raw
+        logger.warning("wiki-studio findings failed for %s: %s", wiki_dir, exc)
+        raise GateError(f"wiki-studio findings failed: {exc}") from exc
+    return counts, examples
+
+
 APPROVED_STATE = "approved"
 SUPERSEDED_STATE = "superseded"  # the page names its successor in its ``superseded_by`` frontmatter (memkernel-0-7 D4)
 SUPERSEDED_BY_FIELD = "superseded_by"
@@ -401,7 +476,10 @@ def propose_and_promote(
             )
         paths = WikiPaths.for_root(project_root, wiki_dir=wiki_dir, proposals_dir=proposals_dir)
         api.init(paths)
-        proposal = api.propose(edits, paths, name=name, source="memkernel wiki_export", backend=GATE_BACKEND)
+        proposal = api.propose(
+            edits, paths, name=name, source="memkernel wiki_export", backend=GATE_BACKEND, assign_page_ids=True
+        )
+        pages = _as_proposed(pages, Path(proposal))
         result = api.promote(proposal, paths)
     except Exception as exc:  # any rejection or failure of the installed gate is reported, never raised raw
         if proposal is not None:
@@ -411,6 +489,21 @@ def propose_and_promote(
         logger.warning("wiki-studio gate rejected the export to %s: %s", wiki_dir, exc)
         raise GateError(f"wiki-studio gate rejected the export: {exc}") from exc
     return _gate_result(result, name, paths)
+
+
+def _as_proposed(pages: list[GatedPage], proposal_dir: Path) -> list[GatedPage]:
+    """``pages`` with the content the proposal holds: ``assign_page_ids`` adds a ``page_id`` (G5), so FR-009's byte
+    comparison must use what wiki-studio will write. A page whose preview cannot be read keeps memkernel's content,
+    which can only make an outcome uncertain, never committed."""
+    proposed: list[GatedPage] = []
+    for page in pages:
+        try:
+            content = (proposal_dir / PROPOSAL_PREVIEW_DIR / page.path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("could not read the proposed %s (%s); FR-009 compares memkernel's own bytes", page.path, exc)
+            content = page.content
+        proposed.append(GatedPage(page.path, content, page.index_line, page.log_line))
+    return proposed
 
 
 def _finish_hint(paths: Any, proposal_dir: Path, what: str) -> str:

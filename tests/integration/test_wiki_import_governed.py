@@ -9,6 +9,7 @@ loop test drives it: a guarded update from draft to stable, then ``approve``.
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -456,7 +457,7 @@ def test_an_invalid_corrects_value_imports_the_page_and_applies_nothing(
 
 def _twin(w: Wiki, rel: str) -> str:
     """Create and approve a second page with ``rel``'s title and body under another path and slug."""
-    text = api.read_page(rel, w.paths).text
+    text = re.sub(r"^page_id: .*\n", "", api.read_page(rel, w.paths).text, count=1, flags=re.M)  # a page of its own
     old_slug = rel.rsplit("/", 1)[1].removesuffix(".md")
     twin = rel.replace(old_slug, f"{old_slug}-twin")
     edits = [

@@ -11,8 +11,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP  # noqa: TC002 — runtime import required by FastMCP introspection
 from mcp.server.fastmcp.server import Context  # noqa: TC002
 
-from memkernel.wiki.studio import INSTALL_HINT
-from memkernel.wiki.sync import WikiExporter, WikiImporter
+from memkernel.wiki.studio import INSTALL_HINT, WIKI_MODE_UNGATED
+from memkernel.wiki.sync import UNGATED_LINT_HINT, WikiExporter, WikiImporter
 
 
 def _context(ctx: Context[Any, Any, Any] | None) -> Any:
@@ -54,6 +54,13 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         wiki keeps the index.md and log.md init created). If wiki-studio failed during its commit and
         its receipt shows neither a commit nor a rollback, "gate_error" comes with "uncertain_outcome"
         and "proposal": the pages may be on disk; compare the wiki with the named receipt.json.
+        At most MEMKERNEL_WIKI_EXPORT_BATCH new pages are written per call (default 10, most important
+        first); "remaining" counts the eligible memories still without a page (null when the outcome is
+        uncertain, or when governed refused before reading the wiki). Each page carries memkernel_sha256
+        and, for a clean tracked source file, the commit it is grounded at. "mode" is the path that ran
+        (gated or ungated) and "configured_mode" the MEMKERNEL_WIKI_MODE setting: governed refuses,
+        writing nothing, unless wiki-studio and a governed wiki pass its checks; ungated never loads
+        wiki-studio.
         """
         app_ctx = _context(ctx)
         proposals = app_ctx.settings.wiki_proposals_dir
@@ -64,7 +71,13 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
             proposals_dir=Path(proposals) if proposals else None,
         )
         report = exporter.export()
-        payload: dict[str, Any] = {"written": report.written, "skipped": report.skipped}
+        payload: dict[str, Any] = {
+            "written": report.written,
+            "skipped": report.skipped,
+            "remaining": report.remaining,
+            "mode": report.mode,
+            "configured_mode": report.configured_mode,
+        }
         if report.gate_error is not None:
             payload["gate_error"] = report.gate_error
         if report.uncertain_outcome is not None:
@@ -87,7 +100,7 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
             payload["lint_error"] = report.lint_error
         else:
             payload["lint"] = None
-            payload["lint_hint"] = INSTALL_HINT
+            payload["lint_hint"] = UNGATED_LINT_HINT if report.configured_mode == WIKI_MODE_UNGATED else INSTALL_HINT
         return json.dumps(payload)
 
     @server.tool()
@@ -122,7 +135,9 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         ({"path", "ref_ids", "reason"}): a memory from before 0.7 is adopted only on the owner's word,
         adopt_legacy=true (each page's sole such memory) or adopt_pages=[{"path", "ref_id"}, ...]
         (exactly those, copied from "ambiguous"); adopt_manifest=true says a wiki that gained a manifest
-        is the same wiki.
+        is the same wiki. "mode" is the path that ran (gated or ungated) and "configured_mode" the
+        MEMKERNEL_WIKI_MODE setting: governed refuses, importing nothing, unless wiki-studio and a
+        governed wiki pass its checks; ungated never loads wiki-studio and reads the files.
         """
         app_ctx = _context(ctx)
         importer = WikiImporter(
@@ -133,7 +148,13 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         report = importer.import_pages(
             adopt_legacy=adopt_legacy, adopt_pages=adopt_pages, adopt_manifest=adopt_manifest
         )
-        payload: dict[str, Any] = {"imported": report.imported, "skipped": report.skipped, "governed": report.governed}
+        payload: dict[str, Any] = {
+            "imported": report.imported,
+            "skipped": report.skipped,
+            "governed": report.governed,
+            "mode": report.mode,
+            "configured_mode": report.configured_mode,
+        }
         if report.import_error is not None:
             payload["import_error"] = report.import_error
         if report.ledger_error is not None:

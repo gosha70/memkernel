@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import tomllib
 import types
@@ -342,7 +343,14 @@ def test_gated_export_matches_the_direct_writer_in_pages_and_entries(
 
     assert gated.gated is True and direct.gated is False and gated.gate_error is None
     assert gated.written == direct.written and len(gated.written) == 3
-    assert _pages_and_entries(gated_wiki) == _pages_and_entries(direct_wiki)
+    gated_pages = _pages_and_entries(gated_wiki)
+    ids = {rel: re.findall(r"^page_id: pg-[0-9a-f]{32}\n", str(text), flags=re.M) for rel, text in gated_pages.items()}
+    assert all(len(ids[rel]) == 1 for rel in gated.written)  # G5: every created page carries wiki-studio's page_id
+    without_ids = {
+        rel: re.sub(r"^page_id: .*\n", "", text, flags=re.M) if isinstance(text, str) else text
+        for rel, text in gated_pages.items()
+    }
+    assert without_ids == _pages_and_entries(direct_wiki)
     # the scaffold of a new wiki is wiki-studio's on the gated path, memkernel's on the direct one (FR-002)
     assert "title: Wiki\nstatus: stable" in (gated_wiki / "index.md").read_text(encoding="utf-8")
     assert "title: Wiki Index\nstatus: draft" in (direct_wiki / "index.md").read_text(encoding="utf-8")

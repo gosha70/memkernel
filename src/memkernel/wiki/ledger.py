@@ -18,6 +18,8 @@ import hashlib
 import json
 import logging
 import os
+import threading
+import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -40,6 +42,9 @@ STATE_PENDING, STATE_APPLIED, STATE_FAILED = "pending", "applied", "failed"
 ACTION_IMPORT, ACTION_WITHDRAW, ACTION_SUPERSEDE = "import", "withdraw", "supersede"
 ORIGIN_IMPORT, ORIGIN_REBUILT = "import", "rebuilt"
 _MEMORY_LEDGERS: dict[tuple[str, str], dict[str, LedgerEntry]] = {}  # in-memory stores (empty persist path)
+# One lock per in-memory ledger, held by SyncLedger.run() and tried by the curation debt's snapshot (2c G2).
+_MEMORY_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_MEMORY_LOCKS_GUARD = threading.Lock()
 
 
 @dataclass
@@ -74,6 +79,77 @@ def wiki_key(wiki_id: str | None, wiki_dir: Path, project_root: Path) -> str:
 
 class LedgerMigrationError(RuntimeError):
     """The path-keyed ledger could not be moved to the ``wiki_id`` key; nothing was written (wiki-scope S6)."""
+
+
+class LedgerUnavailableError(RuntimeError):
+    """A read-only snapshot could not count the ledger: an import holds it, it is corrupt, or time ran out."""
+
+
+def ledger_path(state_dir: str, project_id: str, key: str) -> Path:
+    return Path(state_dir) / LEDGER_DIR / project_id / f"{key}.json"
+
+
+def _memory_lock(memory_key: tuple[str, str]) -> threading.Lock:
+    with _MEMORY_LOCKS_GUARD:
+        return _MEMORY_LOCKS.setdefault(memory_key, threading.Lock())
+
+
+def _count_unfinished(entries: Any) -> tuple[int, int]:
+    states = [entry["state"] for entry in entries]
+    return states.count(STATE_PENDING), states.count(STATE_FAILED)
+
+
+def snapshot_unfinished(state_dir: str, project_id: str, key: str) -> tuple[int, int]:
+    """The (pending, failed) counts of a ledger on disk, read under a non-blocking shared lock (2c G2).
+
+    Never creates, renames or saves a ledger file. No ledger directory for the project: no import ever wrote one,
+    so (0, 0) and nothing is created. Otherwise the lock file ``run()`` takes is opened (created empty if missing,
+    as ``run()`` does) and locked shared without waiting before ``<key>.json`` is read. Raises
+    :class:`LedgerUnavailableError` when an import holds the lock or the ledger is corrupt.
+    """
+    path = ledger_path(state_dir, project_id, key)
+    if not path.parent.is_dir():  # the linearization point: an import that creates it started after this
+        return 0, 0
+    with (path.parent / f"{path.name}.lock").open("a", encoding="utf-8") as handle:
+        if fcntl is not None:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise LedgerUnavailableError("an import holds the sync ledger") from exc
+        try:
+            if not path.exists():
+                return 0, 0
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                return _count_unfinished(raw["entries"].values())
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                raise LedgerUnavailableError(f"the sync ledger could not be read ({exc}): {path}") from exc
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def snapshot_unfinished_in_memory(project_id: str, key: str, deadline: float, check_every: int) -> tuple[int, int]:
+    """The (pending, failed) counts of an in-memory ledger, under its lock taken without waiting (2c G2).
+
+    Checks the monotonic ``deadline`` before the first entry, every ``check_every`` entries, and after the last. Raises
+    :class:`LedgerUnavailableError` when an import holds the ledger or the deadline passes; the lock is released.
+    """
+    lock = _memory_lock((project_id, key))
+    if not lock.acquire(blocking=False):
+        raise LedgerUnavailableError("an import holds the sync ledger")
+    try:
+        pending = failed = 0
+        for index, entry in enumerate(_MEMORY_LEDGERS.get((project_id, key), {}).values()):
+            if index % check_every == 0 and time.monotonic() > deadline:  # before the first entry, then per block
+                raise LedgerUnavailableError("timed out")
+            pending += entry.state == STATE_PENDING
+            failed += entry.state == STATE_FAILED
+        if time.monotonic() > deadline:  # after the last, partial block
+            raise LedgerUnavailableError("timed out")
+        return pending, failed
+    finally:
+        lock.release()
 
 
 def ledger_exists(state_dir: str, persisted: bool, project_id: str, key: str) -> bool:
@@ -139,15 +215,16 @@ class SyncLedger:
         cls, state_dir: str, persisted: bool, project_id: str, wiki_id: str | None, wiki_dir: Path, project_root: Path
     ) -> SyncLedger:
         key = wiki_key(wiki_id, wiki_dir, project_root)
-        path = Path(state_dir) / LEDGER_DIR / project_id / f"{key}.json" if persisted else None
+        path = ledger_path(state_dir, project_id, key) if persisted else None
         return cls(path, (project_id, key))
 
     @contextmanager
     def run(self) -> Iterator[SyncLedger]:
         """Hold the ledger's lock for a whole import run, load it, and save it at the end (also after an error)."""
         if self._path is None:
-            self.entries = _MEMORY_LEDGERS.setdefault(self._memory_key, {})
-            yield self
+            with _memory_lock(self._memory_key):
+                self.entries = _MEMORY_LEDGERS.setdefault(self._memory_key, {})
+                yield self
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with (self._path.parent / f"{self._path.name}.lock").open("a", encoding="utf-8") as handle:

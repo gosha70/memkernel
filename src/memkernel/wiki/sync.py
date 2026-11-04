@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import re
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -61,7 +63,11 @@ from memkernel.wiki.ledger import (
 )
 from memkernel.wiki.pages import WikiPage, parse_page, render_page, slugify
 from memkernel.wiki.studio import (
+    PATH_GATED,
+    PATH_UNGATED,
     SUPERSEDED_STATE,
+    WIKI_MODE_GOVERNED,
+    WIKI_MODE_UNGATED,
     GatedPage,
     GateError,
     GateUncertainError,
@@ -69,11 +75,13 @@ from memkernel.wiki.studio import (
     LintSummary,
     PageReview,
     gate_available,
+    governed_preflight,
     lint_wiki,
     load_studio,
     propose_and_promote,
     read_wiki_id,
     review_pages,
+    studio_installed,
     wiki_id,
 )
 
@@ -125,6 +133,15 @@ PAGE_SECTIONS: dict[str, list[str]] = {
 }
 
 PLACEHOLDER = "_Not recorded in memory — curate before marking this page stable._"
+UNGATED_LINT_HINT = "MEMKERNEL_WIKI_MODE=ungated: wiki-studio is never loaded, so there is no lint"
+UNGOVERNED_INDEX_REFUSAL = (
+    "MEMKERNEL_WIKI_MODE=governed: update_index=False is refused, since pages without index entries cannot pass "
+    "the gate and the direct writer is never used"
+)
+# The commit a page's ``path:`` source is grounded at (G4): wiki-studio's citation rule, read-only git, optional.
+GIT_TIMEOUT_SECONDS = 2.0  # per call; after one timeout the export stops asking git
+SOURCE_SHA_KEY = "sha"
+MEMKERNEL_SHA256_KEY = "memkernel_sha256"
 
 
 def _today() -> str:
@@ -155,6 +172,9 @@ class ExportReport:
     archive_hint: str | None = None
     receipt_error: str | None = None
     uncertain_outcome: str | None = None  # FR-009: pages may be on disk; compare the wiki with the receipt by hand
+    mode: str = PATH_UNGATED  # the path that ran: gated (wiki-studio's gate) or ungated (G1)
+    configured_mode: str = ""  # MEMKERNEL_WIKI_MODE
+    remaining: int | None = 0  # eligible memories still without a page (G3); None when the outcome is uncertain
 
 
 @dataclass
@@ -184,6 +204,8 @@ class ImportReport:
     ledger_error: str | None = None
     # memkernel-0-7-wiki-scope S4: pages left untouched, {"path", "ref_ids", "reason"}.
     ambiguous: list[dict[str, Any]] = field(default_factory=list)
+    mode: str = PATH_UNGATED  # the path that ran: gated (wiki-studio's review state) or ungated (G1)
+    configured_mode: str = ""  # MEMKERNEL_WIKI_MODE
 
 
 class WikiExporter:
@@ -217,8 +239,23 @@ class WikiExporter:
         for the whole wiki as it is after the export; a lint failure is reported
         in ``lint_error`` and never fails the export.
         """
-        report = ExportReport()
+        settings = self._service.settings
+        report = ExportReport(configured_mode=settings.wiki_mode)
+        governed_api = None
+        if settings.wiki_mode == WIKI_MODE_GOVERNED:  # before any read of the wiki (G1)
+            report.mode = PATH_GATED
+            try:
+                if not update_index:
+                    raise GateError(UNGOVERNED_INDEX_REFUSAL)
+                governed_api = governed_preflight(self._wiki_dir, self._project_root)
+            except GateError as exc:  # before api.init: a refusal writes, reads and lints nothing
+                report.gate_error = str(exc)
+                report.remaining = None  # eligibility was never checked against the wiki
+                logger.warning("wiki export to %s refused: %s", self._wiki_dir, exc)
+                return report
         candidates = memories if memories is not None else self._service.list_memories(tier=MemoryTier.LONG_TERM)
+        # G3: the most important first, then the oldest, then by ref_id, so a batch is deterministic
+        candidates = sorted(candidates, key=lambda m: (-m.importance, m.timestamp, m.ref_id))
         planned: list[tuple[str, WikiPage]] = []
         for memory in candidates:
             mapping = EXPORT_MAP.get(memory.type)
@@ -232,30 +269,42 @@ class WikiExporter:
                 report.skipped += 1
                 continue
             planned.append((rel, page))
+        eligible = len(planned)
+        if settings.wiki_export_batch > 0:
+            planned = planned[: settings.wiki_export_batch]
+        git = _Git(self._project_root)
+        for _, page in planned:
+            self._ground(page, git)
 
-        # Pages without index entries are orphans, which the gate rejects by design; update_index=False
-        # therefore always takes the direct writer.
         api = None
-        try:
-            api = gate_available() if planned and update_index else None
-        except GateError as exc:  # wiki-studio installed but broken: never fall back to unchecked writes
-            report.gate_error = str(exc)
-            report.skipped += len(planned)
-            planned = []
-        if self._proposals_requested and api is None and report.gate_error is None:
-            if planned and not update_index:
-                logger.warning(
-                    "wiki gate requested (proposals directory set) but update_index=False bypasses it: "
-                    "pages without index entries cannot pass the gate; writing directly"
-                )
-            else:
-                # logs once that the requested gate is unavailable; a broken installation with nothing
-                # to write is reported by the lint pass below
-                with contextlib.suppress(LintError):
-                    load_studio(require_studio=True)
+        if settings.wiki_mode == WIKI_MODE_UNGATED:  # wiki-studio is never loaded (G1)
+            pass
+        elif settings.wiki_mode == WIKI_MODE_GOVERNED:
+            api = governed_api if planned else None
+        else:
+            # Pages without index entries are orphans, which the gate rejects by design; update_index=False
+            # therefore always takes the direct writer.
+            report.mode = PATH_GATED if update_index and studio_installed() else PATH_UNGATED
+            try:
+                api = gate_available() if planned and update_index else None
+            except GateError as exc:  # wiki-studio installed but broken: never fall back to unchecked writes
+                report.gate_error = str(exc)
+                report.skipped += len(planned)
+                planned = []
+            if self._proposals_requested and api is None and report.gate_error is None:
+                if planned and not update_index:
+                    logger.warning(
+                        "wiki gate requested (proposals directory set) but update_index=False bypasses it: "
+                        "pages without index entries cannot pass the gate; writing directly"
+                    )
+                else:
+                    # logs once that the requested gate is unavailable; a broken installation with nothing
+                    # to write is reported by the lint pass below
+                    with contextlib.suppress(LintError):
+                        load_studio(require_studio=True)
         if api is not None:
             self._export_gated(api, planned, report)
-        else:
+        elif report.gate_error is None:
             for rel, page in planned:
                 target = self._wiki_dir / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -264,10 +313,12 @@ class WikiExporter:
                 if update_index:
                     self._append_index(rel, page)
                     self._append_log(page, "created")
-        try:
-            report.lint = lint_wiki(self._wiki_dir, self._project_root)
-        except LintError as exc:
-            report.lint_error = str(exc)
+        report.remaining = None if report.uncertain_outcome is not None else eligible - len(report.written)
+        if settings.wiki_mode != WIKI_MODE_UNGATED:
+            try:
+                report.lint = lint_wiki(self._wiki_dir, self._project_root)
+            except LintError as exc:
+                report.lint_error = str(exc)
         return report
 
     def _export_gated(self, api: object, planned: list[tuple[str, WikiPage]], report: ExportReport) -> None:
@@ -344,8 +395,22 @@ class WikiExporter:
             last_reviewed=_today(),
             sources=sources,
             body="\n".join(body_lines),
-            extra={"memkernel_ref": memory.ref_id, "memory_type": memory.type.value},
+            extra={
+                "memkernel_ref": memory.ref_id,
+                "memory_type": memory.type.value,
+                MEMKERNEL_SHA256_KEY: memory.content_hash,
+            },
         )
+
+    @staticmethod
+    def _ground(page: WikiPage, git: _Git) -> None:
+        """G4: a ``path:`` source of a file git tracks, unmodified, gains the commit it is grounded at."""
+        for source in page.sources:
+            path = source.get("path")
+            if path:
+                sha = git.source_commit(path)
+                if sha is not None:
+                    source[SOURCE_SHA_KEY] = sha
 
     def _append_index(self, rel: str, page: WikiPage) -> None:
         index = self._wiki_dir / INDEX_FILE
@@ -364,6 +429,75 @@ class WikiExporter:
             log.write_text(_log_scaffold(), encoding="utf-8")
         with log.open("a", encoding="utf-8") as fh:
             fh.write(self._log_line(page, verb) + "\n")
+
+
+class _Git:
+    """Read-only git in one project root for one export; after a timeout it is not asked again (G4)."""
+
+    def __init__(self, project_root: Path) -> None:
+        self._given = project_root
+        self._root = project_root.resolve()
+        self._timed_out = False
+
+    def run(self, *args: str) -> str | None:
+        """``git <args>`` with pathspecs taken literally; None when git is missing, fails or timed out."""
+        if self._timed_out:
+            return None
+        try:
+            done = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["git", "--literal-pathspecs", "-C", str(self._root), *args],  # noqa: S607 — git from PATH, optional
+                capture_output=True,
+                text=True,
+                timeout=GIT_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self._timed_out = True
+            logger.warning(
+                "git did not answer within %ss in %s; exported pages get no sha:", GIT_TIMEOUT_SECONDS, self._root
+            )
+            return None
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout if done.returncode == 0 else None
+
+    def _lexical(self, source: str) -> str | None:
+        """``source`` relative to the project root without following symlinks; None when it leaves the root."""
+        path = os.path.normpath(source)
+        if os.path.isabs(path):
+            for base in (os.path.abspath(self._given), str(self._root)):
+                try:
+                    rel = os.path.relpath(path, base)
+                except ValueError:  # another drive
+                    continue
+                if not rel.startswith(os.pardir):
+                    path = rel
+                    break
+            else:
+                return None
+        if path in (os.curdir, "") or path.startswith(os.pardir) or os.path.isabs(path):
+            return None
+        return Path(path).as_posix()
+
+    def source_commit(self, source: str) -> str | None:
+        """The commit ``source`` is grounded at, as wiki-studio's citation rules define it (``git log -1
+        --format=%h``), only when the project's ``git ls-files`` lists exactly that path and ``git status`` shows no
+        change to it. A file outside the project, untracked, modified or staged, inside a submodule, or no git:
+        None."""
+        rel_posix = self._lexical(source)
+        if rel_posix is None:
+            return None
+        try:  # containment on the resolved path; git is asked about the source's own path (a symlink is its own file)
+            (self._root / rel_posix).resolve().relative_to(self._root)
+        except (OSError, ValueError):
+            return None
+        listed = self.run("ls-files", "-z", "--", rel_posix)
+        if listed is None or listed.split("\0")[:-1] != [rel_posix]:
+            return None
+        if self.run("status", "--porcelain", "--", rel_posix) != "":
+            return None
+        sha = (self.run("log", "-1", "--format=%h", "--", rel_posix) or "").strip()
+        return sha or None
 
 
 def _index_scaffold() -> str:
@@ -412,10 +546,18 @@ class WikiImporter:
         from an ``ambiguous`` report) exactly the records named, and ``adopt_manifest`` the memories of a wiki
         that gained a manifest: the owner's assertions, per call (memkernel-0-7-wiki-scope S4, S6).
         """
-        report = ImportReport()
+        configured = self._service.settings.wiki_mode
+        report = ImportReport(configured_mode=configured)
         identity: str | None = None
         try:
-            api = gate_available()
+            if configured == WIKI_MODE_UNGATED:  # wiki-studio is never loaded (G1)
+                api = None
+            else:
+                report.mode = PATH_GATED if configured == WIKI_MODE_GOVERNED or studio_installed() else PATH_UNGATED
+                if configured == WIKI_MODE_GOVERNED:
+                    api = governed_preflight(self._wiki_dir, self._project_root)
+                else:
+                    api = gate_available()
             reviews = review_pages(api, self._wiki_dir, self._project_root) if api is not None else None
             identity = (
                 wiki_id(api, self._wiki_dir, self._project_root) if api is not None else read_wiki_id(self._wiki_dir)
@@ -745,14 +887,17 @@ class WikiImporter:
         if review is not None:
             sha_tag = f"{PAGE_SHA_TAG}{review.sha256}"
             tags += [f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}", sha_tag]
-            if previous is not None and sha_tag in previous.tags:
-                # This approved revision is already the page's live memory. Its corrections are still reconciled
+            if previous is not None and sha_tag in previous.tags and previous.source == rel:
+                # This approved revision is already the page's live memory (at this path: a page moved with
+                # identical bytes still needs its record at the new path, G5). Its corrections are still reconciled
                 # (idempotent), so a reference that resolves only later, or one a failed import left, takes effect.
                 report.unchanged.append(rel)
                 return previous.ref_id
             # A revision that changes only frontmatter keeps the same content, so retain dedups and merges the new
             # tags into the existing record: the record then carries one page_sha tag per such revision.
-        supersedes = previous.ref_id if previous is not None and previous.content != content else None
+        # A page renamed under its page_id (G5) is found by key at its old path: its new record supersedes it.
+        changed = previous is not None and (previous.content != content or previous.source != rel)
+        supersedes = previous.ref_id if previous is not None and changed else None
         try:
             ref_id = self._service.retain(
                 content=content,

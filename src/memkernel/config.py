@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
 if TYPE_CHECKING:
@@ -83,6 +84,10 @@ class MemKernelSettings(BaseSettings):
     # Where wiki-studio patch-sets are written before promote (memkernel[wiki], ADR-010).
     # Empty = <project_root>/.memkernel/wiki-proposals; set it to request the gate explicitly.
     wiki_proposals_dir: str = ""
+    # Release B part 2c (G1): auto = the gate when wiki-studio is installed, the direct writer otherwise; governed =
+    # wiki-studio and a governed wiki required, refused otherwise; ungated = wiki-studio is never loaded.
+    wiki_mode: Literal["auto", "governed", "ungated"] = "auto"
+    wiki_export_batch: int = Field(default=10, ge=0)  # new pages per wiki_export, most important first (G3); 0 = none
 
     # Server
     transport: Literal["stdio", "streamable-http"] = "stdio"
