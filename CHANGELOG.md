@@ -24,8 +24,9 @@ All notable changes to this project are documented here. The format follows
 
 - `wiki_export` now writes at most 10 new pages per call by default, where it wrote every eligible memory: set
   `MEMKERNEL_WIKI_EXPORT_BATCH=0` for the earlier behaviour. Pages created through the gate carry a `page_id`.
-- The import supersedes a page's memory when the page was renamed under its `page_id`; before, the renamed page
-  got a second live memory.
+- The import supersedes a page's memory when the page was renamed or moved under its `page_id`, also with
+  unchanged bytes; before, a renamed page got a second live memory, and a page moved unchanged kept its memory at
+  the old path, where a later page could take it over.
 
 - **The wiki import keeps to its own wiki** (#80; specs/memkernel-0-7-wiki-scope): every imported memory carries
   `wiki-path:` and, with a manifest, `wiki-id:`; a page's previous memory, its corrections, supersession and

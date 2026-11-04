@@ -887,8 +887,9 @@ class WikiImporter:
         if review is not None:
             sha_tag = f"{PAGE_SHA_TAG}{review.sha256}"
             tags += [f"{PAGE_KEY_TAG}{_tag_safe(review.page_key)}", sha_tag]
-            if previous is not None and sha_tag in previous.tags:
-                # This approved revision is already the page's live memory. Its corrections are still reconciled
+            if previous is not None and sha_tag in previous.tags and previous.source == rel:
+                # This approved revision is already the page's live memory (at this path: a page moved with
+                # identical bytes still needs its record at the new path, G5). Its corrections are still reconciled
                 # (idempotent), so a reference that resolves only later, or one a failed import left, takes effect.
                 report.unchanged.append(rel)
                 return previous.ref_id

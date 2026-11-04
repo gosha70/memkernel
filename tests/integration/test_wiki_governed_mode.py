@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -421,6 +423,82 @@ def test_a_renamed_page_keeps_its_memory(tmp_path: Path) -> None:
     (after,) = w.wiki_memories()
     assert report.import_error is None and report.withdrawn == []
     assert after.supersedes == before.ref_id and after.source == renamed  # one live memory, its history kept
+
+
+def _move_unchanged(w: Wiki) -> tuple[str, str, Any, bytes]:
+    """Publish and import a page, then move it to another directory with identical bytes; return (old path, new
+    path, the memory before the move, the bytes)."""
+    rel, _ = w.publish(DECISION)
+    w.import_pages()
+    (before,) = w.wiki_memories()
+    moved = f"decisions/archive/{rel.rsplit('/', 1)[1]}"
+    data = (w.wiki / rel).read_bytes()
+    (w.wiki / moved).parent.mkdir(parents=True)
+    (w.wiki / moved).write_bytes(data)
+    (w.wiki / rel).unlink()
+    index = w.wiki / "index.md"
+    index.write_text(index.read_text(encoding="utf-8").replace(f"]({rel})", f"]({moved})"), encoding="utf-8")
+    return rel, moved, before, data
+
+
+def _new_page_at(w: Wiki, rel: str, data: bytes) -> None:
+    """A new page (no page_id, other content) at ``rel``, linked from the index."""
+    text = data.decode("utf-8").replace("Because of concurrent writes.", "Because of a new requirement.", 1)
+    (w.wiki / rel).write_text(re.sub(r"^page_id: .*\n", "", text, count=1, flags=re.M), encoding="utf-8")
+    index = w.wiki / "index.md"
+    index.write_text(index.read_text(encoding="utf-8") + f"- [New]({rel}) — a new page at the old path.\n")
+
+
+def test_a_page_moved_with_identical_bytes_keeps_its_memory(tmp_path: Path) -> None:
+    """G5: wiki-studio's approval follows the page_id and the bytes, so a page moved to another directory unchanged
+    is approved there without a new approval (approve itself would refuse the move: a decision belongs under
+    decisions/). Its memory moves with it. A new page at the old path shares the moved page's slug, which
+    wiki-studio refuses to approve, so it is not imported."""
+    w = _wiki(tmp_path)
+    rel, moved, before, data = _move_unchanged(w)
+    assert {s.path: (s.state, s.reason) for s in api.review_state(w.paths)}[moved] == (
+        "approved",
+        "record_matches_live",
+    )
+
+    after_move = w.import_pages()
+    (kept,) = w.wiki_memories()
+    assert after_move.imported == [moved] and after_move.unchanged == []
+    assert kept.source == moved and kept.supersedes == before.ref_id
+
+    _new_page_at(w, rel, data)
+    with pytest.raises(Exception, match="duplicate slug"):
+        w.approve(rel)
+    after_new = w.import_pages()
+    assert [entry["path"] for entry in after_new.not_approved] == [rel]
+    assert [m.ref_id for m in w.wiki_memories()] == [kept.ref_id]  # the moved page keeps its memory
+
+
+def test_a_new_page_at_a_moved_pages_old_path_never_takes_its_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same move, with the new page at the old path reported approved (wiki-studio refuses that approval while
+    the slugs collide, so its review is added here): it gets a memory of its own; the moved page keeps its own."""
+    w = _wiki(tmp_path)
+    rel, moved, before, data = _move_unchanged(w)
+    w.import_pages()
+    (kept,) = w.wiki_memories()
+    _new_page_at(w, rel, data)
+    real = sync.review_pages
+
+    def with_new_page_approved(*args: Any) -> list[Any]:
+        text = (w.wiki / rel).read_text(encoding="utf-8")
+        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        reviews = [r for r in real(*args) if r.path != rel]
+        return [*reviews, studio.PageReview(rel, rel, "approved", "record_matches_live", text, sha)]
+
+    monkeypatch.setattr(sync, "review_pages", with_new_page_approved)
+    report = w.import_pages()
+
+    live = {m.source: m for m in w.wiki_memories()}
+    assert report.imported == [rel] and report.import_error is None
+    assert live[moved].ref_id == kept.ref_id and kept.supersedes == before.ref_id
+    assert live[rel].ref_id not in (kept.ref_id, before.ref_id) and live[rel].supersedes is None
 
 
 # ── SC-2: curation debt ───────────────────────────────────────────────────────

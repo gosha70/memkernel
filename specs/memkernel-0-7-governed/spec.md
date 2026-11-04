@@ -133,7 +133,7 @@ are in `plan.md`.
 The response gains `remaining`: the eligible memories still without a page after this call's successful writes.
 A rejected batch writes none, so all remain: a 10-page batch from 12 that the gate rejects reports
 `remaining: 12`. A `governed` refusal by the preflight reads nothing of the wiki, so `remaining` is `null` there
-too (amended during the build, 2026-11-04, awaiting the owner's confirmation). A negative batch is refused as a setting. When the gate's outcome is
+too (amended during the build; confirmed by the owner on 2026-11-04). A negative batch is refused as a setting. When the gate's outcome is
 uncertain (`uncertain_outcome` is set, `GateUncertainError`: some
 pages may be on disk), `remaining` is `null`: unknown, so nothing invites a blind retry; the
 `uncertain_outcome` hint says how to reconcile. One reviewable batch per curator
@@ -159,7 +159,14 @@ memkernel creates carries wiki-studio's stable `page_id`. The import keys pages 
   confirmation):** this spec said a later rename already kept the page's memory. Against the real wiki-studio it
   did not: a renamed page keeps its content, so the import found no dedup hit at the new path and wrote a second
   live memory. The import now also supersedes when the page's previous memory, found by `page_key`, is at another
-  path, so a rename leaves one live memory with its history.
+  path, so a rename leaves one live memory with its history. At the owner's request (2026-11-04) the import also
+  skips its "already current" early return when that memory's `source` is another path: a page moved with
+  identical bytes (wiki-studio's approval follows the `page_id` and the bytes, so the moved page is approved
+  without a new approval) gets its record at the new path, and the old path no longer finds it. A new page at the
+  old path therefore never takes the moved page's memory; wiki-studio itself refuses to approve one while the
+  moved page keeps the same slug. One more existing assertion changed with it (awaiting the owner):
+  `test_a_rename_that_kept_its_page_id_is_not_a_deletion` asserted the memory stayed at the old path; it now asserts
+  the one live memory is at the new path and supersedes the old record, and still that nothing is withdrawn.
 
 **G6. The gate checklist items only the bridge can tick.**
 - **Receipts:** consumed since 0.6 (`proposal`, `submission_digest`, `archived_dir`); nothing to build.
@@ -204,7 +211,7 @@ memkernel creates carries wiki-studio's stable `page_id`. The import keys pages 
   - `auto`: with wiki-studio present the responses say `"mode": "gated", "configured_mode": "auto"`, and a
     `managed` wiki is exported, imported and given a curation debt section as today's gated path allows; with it
     absent, `"mode": "ungated", "configured_mode": "auto"`. Every existing test passes; **amended during the build
-    (2026-11-04, awaiting the owner's confirmation):** three test helpers changed because gated pages now carry a
+    (2026-11-04; confirmed by the owner on 2026-11-04):** three test helpers changed because gated pages now carry a
     `page_id` (G5), with no assertion weakened: a copied twin page drops its `page_id`, a hand-made duplicate record
     uses the page's key, and the gated-versus-direct comparison ignores the `page_id` line and asserts it is there.
 - **SC-2 (G2):**
