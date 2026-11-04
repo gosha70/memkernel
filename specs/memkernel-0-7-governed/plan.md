@@ -3,7 +3,7 @@ spec_mode: full
 feature_id: memkernel-0-7-governed
 risk_category: feature
 justification: "Adds a deployment setting that changes which wiki writer and reader memkernel may use (refusing the unchecked ones), a new section in every session-start block within the fixed 9,000-character budget, an export batch limit, and new frontmatter on exported pages: several modules, a setting, and the contract with wiki-studio, so a full spec."
-status: draft
+status: approved
 date: 2026-11-03
 collaboration_mode: single
 origin:
