@@ -364,6 +364,13 @@ With wiki-studio 0.7.0 or later installed, `wiki_export` writes through wiki-stu
 
 **wiki-studio's files beside the wiki, its ingest log, and wiki-studio 0.8.** When memkernel exports through the gate, wiki-studio creates its lock file, `.<wiki-dir>.wiki-studio.lock`, beside the wiki directory, and from 0.8 a curator's `find` or `query` adds a search cache, `.<wiki-dir>.wiki-studio.search.sqlite`, there too: for a wiki kept in git, ignore both with `.<wiki-dir>.wiki-studio.*` (for `knowledge/wiki`, `knowledge/.wiki.wiki-studio.*`). memkernel creates no file of its own there. memkernel reads no wiki-studio ingest log, so the log's `hash_recipe` has no consumer in memkernel. From wiki-studio 0.8.0 a page that is not valid UTF-8 fails lint for the whole wiki, so every promote, memkernel's gated export included, is refused with a `gate_error` naming that page until it is re-encoded or removed. From 0.8.0 an unknown `WIKI_STUDIO_RANKER` value makes wiki-studio's `info` fail, so a `governed` export or import, a gated import and the curation debt refuse with wiki-studio's message naming the variable. memkernel needs wiki-studio 0.7.0 or later and is tested at 0.7.0; an informational CI job runs the wiki tests against the newest release below 1.0 on every pull request and weekly.
 
+wiki-studio's MCP server (`wiki-studio-mcp`, from wiki-studio 0.8.0) needs `mcp>=2.3`, which memkernel's `mcp<2` excludes. Run it in its own environment, at the same wiki-studio version as memkernel's:
+
+1. In memkernel's environment, read the version: `python -c "import importlib.metadata as m; print(m.version('wiki-studio'))"`. If it is below 0.8.0, upgrade it there first: `pip install 'wiki-studio>=0.8,<1'`.
+2. Install exactly that version for the server, for example `pipx install 'wiki-studio[mcp]==0.8.1'`, and register it beside memkernel's server.
+
+On one machine and one filesystem, wiki-studio's lock serializes the two servers' writes to the same wiki. It does not coordinate other hosts, and network filesystems are outside its scope.
+
 Rationale: [`docs/adr/ADR-008-llm-wiki-as-semantic-layer.md`](docs/adr/ADR-008-llm-wiki-as-semantic-layer.md) and [`docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md`](docs/adr/ADR-010-wiki-studio-as-wiki-maintainer.md).
 
 ### Revalidation and store health
