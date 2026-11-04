@@ -14,8 +14,7 @@ are in `plan.md`.
 - **US4:** a curator reviews exports in small batches, and each exported page says which revision of its source
   file it was grounded at.
 
-## Decisions (recommendations for the owner to confirm; revised after the three reviews of 2026-11-03, whose own
-recommendations are marked as the reviewer's)
+## Decisions (confirmed by the owner on 2026-11-04; revised after review)
 **G1. One setting picks the wiki mode: `MEMKERNEL_WIKI_MODE` = `auto` (default) | `governed` | `ungated`.**
 - **`auto`** is today's behavior, unchanged: the gate and the governed import when wiki-studio >= 0.7.0 is
   installed, the direct writer and the file-reading import when it is absent, a refusal when it is installed but
@@ -104,10 +103,13 @@ recommendations are marked as the reviewer's)
   spawn context): detecting wiki-studio (`gate_available`), in `governed` the preflight, `findings`, and the
   on-disk ledger snapshot. The parent only checks the settings (wiki directory set, mode not `ungated`) before
   starting it.
-  - **One deadline.** The parent takes a monotonic deadline, `CURATION_DEBT_TIMEOUT_SECONDS = 2.0`, before the
-    in-memory snapshot and before `Process.start()`. A start that raises is the unavailable line, and the cleanup below still runs (both pipe
+  - **One deadline.** The parent takes a monotonic deadline, `CURATION_DEBT_TIMEOUT_SECONDS = 2.0`, once
+    `Process.start()` returns, before the in-memory snapshot (amended, below). A start that raises is the unavailable line, and the cleanup below still runs (both pipe
     ends closed; a process object that reports itself alive goes through the bounded reap), so a partial start
-    leaks nothing.
+    leaks nothing. **Amended during the build (2026-11-04, the owner's decision):** `Process.start()` runs on the
+    calling thread and cannot be interrupted, so the deadline is taken once it returns: the 2.5 seconds bound the
+    check, not a fork or exec the operating system holds up. Allocating the pipe and every cleanup step are inside
+    the no-raise boundary, and each cleanup step runs whatever the one before it did.
   - **The result** is one plain, bounded dict (the counts as integers, at most `CURATION_DEBT_MAX_LINES` example
     pairs, each string cut to `CURATION_DEBT_FIELD_CHARS = 200`, or an error string), sent over a one-way
     `multiprocessing.Pipe(duplex=False)`, never a `Queue`. The parent keeps the read end and closes its copy of
@@ -118,7 +120,7 @@ recommendations are marked as the reviewer's)
   - **Every wait is bounded, with the grace split in two.** Past the deadline: `terminate()`, then
     `join(CURATION_DEBT_TERM_GRACE_SECONDS)` (0.3); if the child is still alive, `kill()`, then
     `join(CURATION_DEBT_KILL_GRACE_SECONDS)` (0.2). Each interval is its own, so the post-kill reap always has its
-    0.2 seconds. The debt's total time is at most 2.0 + 0.3 + 0.2 = 2.5 seconds, the in-memory snapshot
+    0.2 seconds. The debt's total time once the child has started is at most 2.0 + 0.3 + 0.2 = 2.5 seconds, the in-memory snapshot
     included, whatever the child does. A child still alive after that is left to the operating system, reported
     as the unavailable line (`not reaped`), and not closed (`Process.close()` refuses a live process).
   - **Cleanup on every path:** both pipe ends are closed in a `finally`; a reaped child gets `Process.close()`. So
@@ -130,7 +132,9 @@ recommendations are marked as the reviewer's)
 `timestamp`, oldest first, then by `ref_id`, so the order is deterministic.
 The response gains `remaining`: the eligible memories still without a page after this call's successful writes.
 A rejected batch writes none, so all remain: a 10-page batch from 12 that the gate rejects reports
-`remaining: 12`. When the gate's outcome is uncertain (`uncertain_outcome` is set, `GateUncertainError`: some
+`remaining: 12`. A `governed` refusal by the preflight reads nothing of the wiki, so `remaining` is `null` there
+too (amended during the build, 2026-11-04, awaiting the owner's confirmation). A negative batch is refused as a setting. When the gate's outcome is
+uncertain (`uncertain_outcome` is set, `GateUncertainError`: some
 pages may be on disk), `remaining` is `null`: unknown, so nothing invites a blind retry; the
 `uncertain_outcome` hint says how to reconcile. One reviewable batch per curator
 pass, and a small gate proposal.
@@ -149,8 +153,13 @@ pass, and a small gate proposal.
 - **Rejected:** a `sha256:` key inside a source entry. wiki-studio's citation rules do not define it.
 
 **G5. `page_id` on created pages.** The gated export passes `assign_page_ids=True` to `api.propose`, so every page
-memkernel creates carries wiki-studio's stable `page_id`. The import already keys pages by `page_key`, which is
-the `page_id` when present, so a later rename keeps the page's memory.
+memkernel creates carries wiki-studio's stable `page_id`. The import keys pages by `page_key`, which is the
+`page_id` when present.
+- **Amended during the build (2026-11-04; accepted in the reviewer's build review, awaiting the owner's
+  confirmation):** this spec said a later rename already kept the page's memory. Against the real wiki-studio it
+  did not: a renamed page keeps its content, so the import found no dedup hit at the new path and wrote a second
+  live memory. The import now also supersedes when the page's previous memory, found by `page_key`, is at another
+  path, so a rename leaves one live memory with its history.
 
 **G6. The gate checklist items only the bridge can tick.**
 - **Receipts:** consumed since 0.6 (`proposal`, `submission_digest`, `archived_dir`); nothing to build.
@@ -194,7 +203,10 @@ the `page_id` when present, so a later rename keeps the page's memory.
     no curation debt, and the responses say `"mode": "ungated", "configured_mode": "ungated"`.
   - `auto`: with wiki-studio present the responses say `"mode": "gated", "configured_mode": "auto"`, and a
     `managed` wiki is exported, imported and given a curation debt section as today's gated path allows; with it
-    absent, `"mode": "ungated", "configured_mode": "auto"`. Every existing test passes unchanged.
+    absent, `"mode": "ungated", "configured_mode": "auto"`. Every existing test passes; **amended during the build
+    (2026-11-04, awaiting the owner's confirmation):** three test helpers changed because gated pages now carry a
+    `page_id` (G5), with no assertion weakened: a copied twin page drops its `page_id`, a hand-made duplicate record
+    uses the page's key, and the gated-versus-direct comparison ignores the `page_id` line and asserts it is there.
 - **SC-2 (G2):**
   - a wiki with an unapproved and a stale page, and a failed ledger entry: the startup block shows one counts
     line, the examples and the hint, and stays under 9,000 characters with every other section full; the context

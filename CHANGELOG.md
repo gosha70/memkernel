@@ -6,7 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Wiki modes** (#48 Release B part 2c; specs/memkernel-0-7-governed): `MEMKERNEL_WIKI_MODE` = `auto` (the
+  default, unchanged), `governed` (export and import refuse, writing nothing, unless wiki-studio has every
+  capability memkernel uses and the wiki is governed without schema drift) or `ungated` (wiki-studio is never
+  loaded). `wiki_export` and `wiki_import` responses report `mode` and `configured_mode`.
+- **Curation debt at session start:** a `### Curation debt` section with wiki-studio's findings counts, the sync
+  ledger's unfinished actions, up to three examples and a hint, within 500 characters lent from the context share;
+  checked in a child process bounded to 2.5 seconds once started, reading the ledger without changing it.
+- **Export batches:** `MEMKERNEL_WIKI_EXPORT_BATCH` (default 10) new pages per `wiki_export`, most important first;
+  the response's `remaining` counts the rest.
+- Exported pages carry `memkernel_sha256`, and a clean tracked `path:` source its git commit (`sha:`); pages
+  created through the gate carry wiki-studio's `page_id`.
+
 ### Changed
+
+- `wiki_export` now writes at most 10 new pages per call by default, where it wrote every eligible memory: set
+  `MEMKERNEL_WIKI_EXPORT_BATCH=0` for the earlier behaviour. Pages created through the gate carry a `page_id`.
+- The import supersedes a page's memory when the page was renamed under its `page_id`; before, the renamed page
+  got a second live memory.
 
 - **The wiki import keeps to its own wiki** (#80; specs/memkernel-0-7-wiki-scope): every imported memory carries
   `wiki-path:` and, with a manifest, `wiki-id:`; a page's previous memory, its corrections, supersession and

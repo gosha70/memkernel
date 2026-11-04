@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from memkernel import session_spool
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
+from memkernel.wiki.curation import curation_debt_lines
 
 if TYPE_CHECKING:
     from memkernel.core.models import ArtifactRef, Memory
@@ -67,8 +68,8 @@ POST_COMPACT_CONTEXT_TOP_K = 5
 # Startup context without a query (memkernel-0-7-hooks H1): these types first, in this order, then the rest.
 CONTEXT_TYPE_ORDER = (MemoryType.DECISION, MemoryType.CONVENTION, MemoryType.PROCEDURE, MemoryType.FACT)
 # Output budget (FR-003): Claude Code caps injected hook output at 10,000 characters; each hook's block stays under
-# TOTAL_BUDGET, with these shares. The remainder covers headings, health, the wiki pointer and the footer. Release
-# B part 2c's curation debt must take its share from here, never add to the total.
+# TOTAL_BUDGET, with these shares. The remainder covers headings, health, the wiki pointer and the footer. The
+# curation debt (Release B part 2c G2) takes what its section uses from CONTEXT_BUDGET, never adds to the total.
 TOTAL_BUDGET = 9_000
 CHECKPOINT_BUDGET = 3_500
 CONTEXT_BUDGET = 2_500
@@ -98,7 +99,8 @@ class MemoryLifecycle:
 
         ``resume`` and ``fork``: an empty string (the context already holds it). ``compact``: the recovery block of
         :meth:`_compact_recovery`. Anything else, ``None`` included: consolidate with revalidation and return the
-        checkpoint, context, candidates, review list and wiki pointer. ``clear`` gets that full block on purpose: it
+        checkpoint, context, candidates, review list, wiki pointer and curation debt (whose length the context
+        share gives up). ``clear`` gets that full block on purpose: it
         empties the conversation like a new session.
         """
         if source in SOURCES_ALREADY_IN_CONTEXT:
@@ -109,6 +111,7 @@ class MemoryLifecycle:
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
         context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
+        debt = curation_debt_lines(self._settings, self._service.settings, self._service.project_id)
         lines = [
             HEADING_SESSION_START,
             "",
@@ -117,7 +120,7 @@ class MemoryLifecycle:
             *_previous_sessions_block(drained),
             "",
             HEADING_CONTEXT,
-            *(self._memory_lines(context) or ["No prior memories found."]),
+            *(self._memory_lines(context, CONTEXT_BUDGET - len("\n".join(debt))) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
         lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
@@ -131,6 +134,7 @@ class MemoryLifecycle:
                     f"Curated knowledge lives in {wiki_index}; read it before re-deriving project context.",
                 ]
             )
+        lines.extend(debt)
         lines.extend(
             [
                 "",
@@ -276,10 +280,10 @@ class MemoryLifecycle:
         )
         return [age, _truncate(checkpoint.content, CHECKPOINT_BUDGET, checkpoint.ref_id)]
 
-    def _memory_lines(self, memories: list[Memory]) -> list[str]:
+    def _memory_lines(self, memories: list[Memory], budget: int = CONTEXT_BUDGET) -> list[str]:
         preview = self._service.settings.preview_length
         lines = [f"- [{m.type}] {' '.join(m.content.split())[:preview]} ({m.ref_id})" for m in memories]
-        return _fit(lines, CONTEXT_BUDGET)
+        return _fit(lines, budget)
 
     def _latest_checkpoint(self) -> str | None:
         """The newest live checkpoint's content (by time over every live checkpoint, never a relevance window).

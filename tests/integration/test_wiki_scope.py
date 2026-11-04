@@ -20,6 +20,7 @@ from memkernel.core.services import MemoryService
 from memkernel.wiki import ledger as ledger_module
 from memkernel.wiki import sync
 from memkernel.wiki.ledger import wiki_key
+from memkernel.wiki.pages import parse_page
 from memkernel.wiki.studio import MANIFEST_FILE
 from memkernel.wiki.sync import WikiImporter
 from tests.integration.test_wiki_import_governed import DECISION, OTHER, WRONG, Wiki, _correct
@@ -59,7 +60,8 @@ def _make_legacy(svc: MemoryService, ref: str) -> None:
 def _owned_duplicate(w: Wiki, rel: str, text: str = "a second record of this page") -> str:
     """A second live record of this wiki for one page (same page key and path), as an earlier defect left."""
     path_hash = wiki_key(None, w.wiki, w.root)
-    tags = ["wiki", f"page_key:{rel}"]
+    page = parse_page((w.wiki / rel).read_text(encoding="utf-8"))
+    tags = ["wiki", f"page_key:{(page.extra.get('page_id') if page is not None else None) or rel}"]
     return w.svc.retain(text, MemoryType.DECISION, source=rel, tags=tags, wiki_identity=(path_hash, _manifest_id(w)))
 
 
