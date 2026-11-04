@@ -77,8 +77,11 @@ pins `1110a243…`). Only base wiki-studio: memkernel needs `mcp<2` (#95), and t
      (memkernel-0-7 D3), the same as for the other three;
    - the curation debt shows no unapproved page.
 
-**Retries.** Each is injected in the run script's own process, never by patching the installed packages'
-files. Each must converge, which the run checks as follows:
+**Retries.** Each session is a process that `run.py` starts (`run.py session-2 …`); that process imports
+memkernel and installs any wrapper a retry needs before it calls the import. Faults are injected only that way,
+never by patching the installed packages' files. Each retry must converge. The expected end state is written
+into the script: which pages are live, and which records are withdrawn or superseded. It is not taken from a
+second run. The run checks:
 - the same live pages, live memories (by page key and content) and withdrawn or superseded records as a
   fault-free run;
 - no page key with two live memories;
@@ -88,24 +91,37 @@ files. Each must converge, which the run checks as follows:
 `ref_id`s and timestamps differ between runs, so the run compares this summary, not a byte hash.
 - **R1, an interrupted promote:** a promote interrupted after its commit resolves from its receipt (wiki-studio's
   rule, as in SC-8).
-- **R2, an interrupted import:** session 2's import process is killed (`os._exit`, so no `finally` saves the
-  ledger) right after its first store write. The run script wraps `MemoryService.retain` in that process, so
-  the kill falls exactly after the first write returns, never by timing. Re-running it completes. It relies on memkernel-0-7 FR-004:
-  - each import action is idempotent, and the retain deduplicates on this wiki's page key and path;
-  - the ledger is rewritten whole at the end of a run, so a killed run leaves the previous ledger, and the next
-    run redoes its entries.
+- **R2, an interrupted supersession** (wiki-scope S3; the owner's choice, 2026-11-04):
+  - after session 2, the curator edits one page that is already imported, and approves the new revision;
+  - the next import writes that page's replacement memory, then must mark its predecessor `superseded_by` it;
+  - the run kills that import process (`os._exit`, so no `finally` saves anything) between those two steps.
+    It does this by wrapping `MemoryService._mark_superseded` in the run's own process, and only for that
+    predecessor's `ref_id`, so the kill never falls on another supersession and never depends on timing;
+  - after the kill, the run checks that the predecessor and its replacement are both live. Chroma commits each
+    write to SQLite before returning, but if the kill ever lost the replacement's write, this check fails the
+    run visibly rather than letting the retry pass by accident;
+  - re-running the import must complete the supersession from the replacement's `supersedes` (wiki-scope
+    `_recover`), leaving one live memory for the page and the predecessor kept as superseded.
 
-  An exception would not test this, because the ledger is saved in a `finally`.
+  `_mark_superseded` is a private method, so the run is tied to the memkernel 0.7.x it records. memkernel's
+  `test_an_interrupted_supersession_is_completed_by_the_next_import` makes the same cut, with an exception
+  instead of a kill.
 - **R3, everything twice:** export and import each run a second time and change nothing.
-- **R4, two imports at once:** two session-2 processes share one store. The first pauses inside its import, on
-  a marker file, after its first store write. The second then starts and must not write until the first is
-  released, which shows the store's import lock serialized them rather than luck. That lock is
+- **R4, two imports at once:** two session-2 processes share one store.
+  - In the first, a wrapper around `MemoryService.retain` pauses on a marker file after its first write.
+  - The second then starts, with a wrapper that records the time of its first write.
+  - The first is released by the marker after a fixed hold.
+  - The check is that the second's first write comes after the release, which shows the store's import lock
+    serialized the two rather than luck. That lock is
   `exclusive("wiki-import")`, held from the identity checks to the last write, alongside the ledger's file lock.
-  memkernel's `tests/integration/test_wiki_scope_processes.py` steers processes the same way. Both must succeed, the second finding everything current, and the convergence checks above
+  memkernel's `tests/integration/test_wiki_scope_processes.py` steers processes the same way. Like R2, R4
+  depends on how 0.7.x implements this (the import lock and the ledger's lock), so it is tied to the release it
+  records. Both must succeed, the second finding everything current, and the convergence checks above
   must pass, the ledger's included.
 
-**Checks.** Each one is named in the output, as wiki-studio's demo does, and the run fails at the first one that
-fails.
+**Checks.** Each one is named in the output, as wiki-studio's demo does, and the run stops at the first one
+that fails. The manifest of a failed attempt lists every check that ran, with its result, the failing one
+included.
 
 ## Recording
 The recording follows wiki-studio's protocol (`examples/correction-loop/README.md`):
@@ -155,6 +171,9 @@ No test opens a store that memkernel 0.6.0 itself wrote, and the run above leave
 is the subject of E7.
 
 ## Decisions for the owner
+Confirmed by the owner on 2026-11-04: E1–E6 as recommended, E7 as a separate upgrade run, R2 at the
+interrupted supersession, and E5 with a path filter.
+
 - **E1. Order.** Release memkernel 0.7.0 first, so the run uses released wheels as #48 asks: script PR, then the
   0.7.0 release, then the recorded run. Recommended. The alternative records against a built wheel of `main`,
   which would not be "released".
@@ -166,16 +185,32 @@ is the subject of E7.
   `ungated` mode.
 - **E4. Retries R1–R4.** As above. R4 needs fcntl, so it is POSIX only, as CI is.
 - **E5. CI.** An informational workflow, `.github/workflows/release-b-exit.yml`, runs `run.py` against a wheel
-  built from the PR and the newest wiki-studio release in range. It runs on `pull_request` to `main`, weekly by
-  `schedule`, and by `workflow_dispatch`, as `wiki-studio-latest.yml` does. It is not a required check. A change
-  on wiki-studio's side shows up in the weekly run, which installs wiki-studio's newest release. The recorded run stays a manual owner step.
+  built from the PR and the newest wiki-studio release in range. It runs on `pull_request` to `main` only when
+  the PR changes `src/memkernel/**`, `eval/release-b-exit/**` or the workflow file itself (the owner's path
+  filter), weekly by `schedule`, and by `workflow_dispatch`. It is not a required check. A change
+  on wiki-studio's side shows up in the weekly run, which installs wiki-studio's newest release. A green
+  workflow run is a signal on a wheel built from the PR. The exit evidence is only the recorded run on released
+  wheels. The recorded run stays a manual owner step.
 - **E6. Closing.** After the recorded run merges, a comment on #48 with the run directory's link and manifest
   hash, ticking the exit evidence. On the owner's go.
-- **E7. An upgrade step (optional; the owner may drop it).** Before session 1, a session 0 runs memkernel 0.6.0 from PyPI on the same
-  store and wiki: retain, export, approve, import. The environment then upgrades to 0.7.0, and session 2 must
-  report those pages `ambiguous`, adopt them with `adopt_legacy=true`, and carry on to the same end state. This
-  would be the first test on a real 0.6.0 store. It costs one more clean install in the run. Recommended if the
-  0.7.0 release notes keep the upgrade step; otherwise the simulated tests above stand.
+- **E7. The upgrade run** (the owner's decision: a separate run with its own directory, not before session 1).
+  `run.py --upgrade` records its own attempt, under
+  `runs/<date>-upgrade-memkernel-0.6.0-to-<0.7.x>-wiki-studio-<v>/`, in a fresh environment:
+  1. **On memkernel 0.6.0 from PyPI:** retain, export through the gate, then the curator marks the pages stable
+     and approves them, and a 0.6 import brings them in. This is a store that 0.6.0 itself wrote.
+  2. **Upgrade** the same environment to the released 0.7.x wheel, with sha256 checked, and set
+     `MEMKERNEL_WIKI_MODE=governed`.
+  3. **The first 0.7 import** lists every page under `ambiguous` (`legacy owner unproven`) and writes nothing.
+     The check is that no memory is written or changed: the same records, tags and markers before and after. Chroma's files are not compared byte for byte, because SQLite may rewrite them.
+  4. **`wiki_import(adopt_legacy=true)`** adopts each page's record, which then carries the wiki's identity. The
+     check is that it adopts and does not duplicate.
+  5. **One correction through the 0.7 loop:** correct, approve, import, then recall in a new session. The check
+     is that the adopted store behaves as a 0.7 store.
+
+  After steps 4 and 5, the upgrade run applies the same convergence checks as the main run: no page key with two
+  live memories, no duplicate page or receipt, and no unfinished ledger entry.
+
+  The upgrade run is recorded by the same protocol and under the same rules as the main run.
 
 ## Out of scope
 Model backends (none on any path), the MCP server processes, human timing (machine time only), Windows, and the
