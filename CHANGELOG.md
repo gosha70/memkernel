@@ -6,84 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
+## [0.7.0] - 2026-11-05
 
-- wiki-studio 0.8: an informational CI workflow (`wiki-studio-latest.yml`, on pull requests and weekly) runs the
-  wiki tests against the newest wiki-studio in range, while `poetry.lock` and the minimum stay at 0.7.0; the README
-  ignore pattern becomes `.<wiki-dir>.wiki-studio.*` (lock file and 0.8's search cache) and notes 0.8's refusal of
-  non-UTF-8 pages and of an unknown `WIKI_STUDIO_RANKER`.
+Release B's last two parts for the wiki bridge (#48): withdrawal (2b) and governed mode with curation debt at
+session start (2c), on top of the wiki import keeping to its own wiki (#80), store locks with a single tag
+writer, and the session-hook follow-ups (#59, D5–D9). wiki-studio's Release B loop test
+(`tests/integration/test_release_b_loop.py`) passes 6 of 6 against memkernel `main` at `c6d1f5e`, which this
+release contains, run from wiki-studio `8902957`, the first commit that fixes gosha70/wiki-studio#53 (memkernel-0-6
+SC-8). Release B's exit evidence is not recorded yet: the exit run and the upgrade run (`eval/release-b-exit/`)
+are recorded against this release once it is on PyPI.
 
-- **Wiki modes** (#48 Release B part 2c; specs/memkernel-0-7-governed): `MEMKERNEL_WIKI_MODE` = `auto` (the
-  default, unchanged), `governed` (export and import refuse, writing nothing, unless wiki-studio has every
-  capability memkernel uses and the wiki is governed without schema drift) or `ungated` (wiki-studio is never
-  loaded). `wiki_export` and `wiki_import` responses report `mode` and `configured_mode`.
-- **Curation debt at session start:** a `### Curation debt` section with wiki-studio's findings counts, the sync
-  ledger's unfinished actions, up to three examples and a hint, within 500 characters lent from the context share;
-  checked in a child process bounded to 2.5 seconds once started, reading the ledger without changing it.
-- **Export batches:** `MEMKERNEL_WIKI_EXPORT_BATCH` (default 10) new pages per `wiki_export`, most important first;
-  the response's `remaining` counts the rest.
-- Exported pages carry `memkernel_sha256`, and a clean tracked `path:` source its git commit (`sha:`); pages
-  created through the gate carry wiki-studio's `page_id`.
+### Upgrading from 0.6
 
-### Changed
-
-- `wiki_export` now writes at most 10 new pages per call by default, where it wrote every eligible memory: set
-  `MEMKERNEL_WIKI_EXPORT_BATCH=0` for the earlier behaviour. Pages created through the gate carry a `page_id`.
-- The import supersedes a page's memory when the page was renamed or moved under its `page_id`, also with
-  unchanged bytes; before, a renamed page got a second live memory, and a page moved unchanged kept its memory at
-  the old path, where a later page could take it over.
-
-- **The wiki import keeps to its own wiki** (#80; specs/memkernel-0-7-wiki-scope): every imported memory carries
-  `wiki-path:` and, with a manifest, `wiki-id:`; a page's previous memory, its corrections, supersession and
-  deprecation are only its wiki's, so two wikis can share page paths and `page_id`s in one store. The import's
-  dedup is scoped the same way; an ordinary `retain` matching a wiki memory gets its own record; `retain` refuses
-  the two tags; `promote` drops wiki tags from its copy. Identity changes (a manifest added, removed or replaced,
-  a moved wiki) stop the import before any write, with a remedy; one import runs at a time per store.
-- **Upgrade step for a 0.6 store:** memories imported before 0.7 have no identity, so the first import lists their
-  pages under the new `ambiguous` key and writes nothing for them. Run `wiki_import(adopt_legacy=true)` once (or
-  name records with `adopt_pages`, for several wikis in one store); a wiki that gained a manifest needs
-  `adopt_manifest=true` once.
-- On Windows the wiki import runs without the store lock, as in 0.6, with one logged warning; the README lists
-  what two concurrent imports can do there.
-
-- **Store locks and a single tag writer** (specs/memkernel-0-7-store-locks): a record's tags are now written only
-  under the store's `tags` lock (`VectorStorePort.merge_tags`), so a dedup refresh in one process no longer drops a
-  tag another process added; `update_metadata` sends only the caller's keys and refuses `tags`. Locks are keyed by
-  the store (lock files in the persist directory), are not re-entrant (`LockReentryError`) and log a wait longer
-  than 10 seconds. POSIX only; on Windows they run unlocked with one warning.
-- An injected `PersistentClient` (`build_service(chroma_client=...)`) is refused when an explicitly set
-  `MEMKERNEL_CHROMA_PERSIST_PATH` names another directory; with the default setting nothing changes.
-
-- **What the session hooks inject** (#59, D5–D8; specs/memkernel-0-7-hooks):
-  - every memory line ends with its `ref_id`, and the checkpoint's age line carries it too;
-  - at session start, the long-term context is chosen without a query (decisions, conventions, procedures,
-    facts, then the rest; by importance, then recency), and after a compaction it is recalled with the
-    checkpoint's text; injecting no longer counts as an access;
-  - each block stays under 9,000 characters (Claude Code caps hook output at 10,000), with named section
-    shares; a cut checkpoint says which `get(ref_id)` holds the rest;
-  - an item equal to the checkpoint or an earlier item, or the source of a promotion also shown, appears once.
-- The agent instructions, the Kiro steering file and the Kiro hook prompt find the latest checkpoint with
-  `recall(…, checkpoint_only=true, order="newest", top_k=1)`, and the instructions say to skip the session-start
-  recalls when the hooks are installed. Copy the templates again. The 0.5 lifecycle suite's arms keep the 0.5
-  block, now checked against a frozen copy (`eval/lifecycle-suite/arms/minimal-block-0.5.md`).
+- **Adopt the wiki memories a 0.6 import wrote.** Memories imported before 0.7 carry no wiki identity, so the
+  first 0.7 `wiki_import` lists their pages under the new `ambiguous` key (`legacy owner unproven`) and writes
+  nothing for them. Run `wiki_import(adopt_legacy=true)` once. With several wikis in one store, name the records
+  instead, with `adopt_pages=[{"path", "ref_id"}, ...]` copied from `ambiguous`. A wiki that gained a manifest
+  since needs `adopt_manifest=true` once.
+- **Windows: no locks, as in 0.6.** The new store locks are POSIX only. On Windows, the wiki import and the tag
+  writer run unlocked, with one logged warning. The README lists what two concurrent imports can do there.
+- **`wiki_export` now writes at most 10 new pages per call** (`MEMKERNEL_WIKI_EXPORT_BATCH`, most important
+  first; `remaining` counts the rest). Set `MEMKERNEL_WIKI_EXPORT_BATCH=0` for 0.6's behaviour.
+- **Keep the new state directory out of git.** `MEMKERNEL_STATE_DIR` (default `.memkernel/state`) holds the wiki
+  sync ledger and the session spool. Ignore wiki-studio's files beside the wiki with `.<wiki-dir>.wiki-studio.*`.
+- **Copy the templates again, and register `session-end.py`** under `SessionEnd`.
 
 ### Added
-
-- `templates/hooks/session-end.py` (#59, D9): a SessionEnd hook that only appends a line to a session spool
-  in `MEMKERNEL_STATE_DIR` (no store, no model, within SessionEnd's 1.5-second budget); `session-start.py` adds a
-  `started` line for every `source` and no longer opens the store on `resume` or `fork`. At the next startup,
-  a session that saved no checkpoint between its first start and its last end gets one line under
-  `### Previous sessions`. Register `session-end.py` under `SessionEnd`; `on_session_end` is unchanged.
-- The session spool drops a session that never recorded an end once its newest line is 7 days old
-  (`SPOOL_UNENDED_MAX_AGE`), never the current one, so the file stays bounded; the next startup says how many,
-  with a hint that `session-end.py` may not be registered.
-- The lc-wiki wiring check (`eval/lifecycle-suite/wiring/wiring_check.py`, task 18a) takes `--wiki-path
-  auto|governed|ungoverned|both` (#81): `governed` marks the exported page stable and approves it with
-  wiki-studio before the import, as a curator would; `ungoverned` hides wiki-studio from the server with a stub
-  package; `auto` (default) keeps a run without the `wiki` extra unchanged. The check now passes where
-  wiki-studio 0.7 is installed. The 0.5 records keep the 0.5 check's sha256.
-- `recall(order="newest")` (MCP tool and `MemoryService.recall`): with `checkpoint_only=true`, the latest
-  checkpoints by time instead of by relevance; refused without `checkpoint_only`. The tool count is unchanged.
 
 - **Withdrawal in the governed `wiki_import`** (#48, Release B part 2b;
   specs/memkernel-0-7). A page's memory leaves the current answers, its record
@@ -101,6 +49,67 @@ All notable changes to this project are documented here. The format follows
   persist path; keep it out of git), with `pending` / `applied` / `failed`
   entries and a retry path; held under a lock for the whole import run.
 - `MemoryService.settings`, the settings a service was built with.
+- **Wiki modes** (#48 Release B part 2c; specs/memkernel-0-7-governed): `MEMKERNEL_WIKI_MODE` = `auto` (the
+  default, unchanged), `governed` (export and import refuse, writing nothing, unless wiki-studio has every
+  capability memkernel uses and the wiki is governed without schema drift) or `ungated` (wiki-studio is never
+  loaded). `wiki_export` and `wiki_import` responses report `mode` and `configured_mode`.
+- **Curation debt at session start:** a `### Curation debt` section with wiki-studio's findings counts, the sync
+  ledger's unfinished actions, up to three examples and a hint, within 500 characters lent from the context share;
+  checked in a child process bounded to 2.5 seconds once started, reading the ledger without changing it.
+- **Export batches:** `MEMKERNEL_WIKI_EXPORT_BATCH` (default 10) new pages per `wiki_export`, most important first;
+  the response's `remaining` counts the rest.
+- Exported pages carry `memkernel_sha256`, and a clean tracked `path:` source its git commit (`sha:`); pages
+  created through the gate carry wiki-studio's `page_id`.
+- `templates/hooks/session-end.py` (#59, D9): a SessionEnd hook that only appends a line to a session spool
+  in `MEMKERNEL_STATE_DIR` (no store, no model, within SessionEnd's 1.5-second budget); `session-start.py` adds a
+  `started` line for every `source` and no longer opens the store on `resume` or `fork`. At the next startup,
+  a session that saved no checkpoint between its first start and its last end gets one line under
+  `### Previous sessions`. Register `session-end.py` under `SessionEnd`; `on_session_end` is unchanged.
+- The session spool drops a session that never recorded an end once its newest line is 7 days old
+  (`SPOOL_UNENDED_MAX_AGE`), never the current one, so the file stays bounded; the next startup says how many,
+  with a hint that `session-end.py` may not be registered.
+- The lc-wiki wiring check (`eval/lifecycle-suite/wiring/wiring_check.py`, task 18a) takes `--wiki-path
+  auto|governed|ungoverned|both` (#81): `governed` marks the exported page stable and approves it with
+  wiki-studio before the import, as a curator would; `ungoverned` hides wiki-studio from the server with a stub
+  package; `auto` (default) keeps a run without the `wiki` extra unchanged. The check now passes where
+  wiki-studio 0.7 is installed. The 0.5 records keep the 0.5 check's sha256.
+- `recall(order="newest")` (MCP tool and `MemoryService.recall`): with `checkpoint_only=true`, the latest
+  checkpoints by time instead of by relevance; refused without `checkpoint_only`. The tool count is unchanged.
+- wiki-studio 0.8: an informational CI workflow (`wiki-studio-latest.yml`, on pull requests and weekly) runs the
+  wiki tests against the newest wiki-studio in range, while `poetry.lock` and the minimum stay at 0.7.0; the README
+  ignore pattern becomes `.<wiki-dir>.wiki-studio.*` (lock file and 0.8's search cache) and notes 0.8's refusal of
+  non-UTF-8 pages and of an unknown `WIKI_STUDIO_RANKER`.
+
+### Changed
+
+- **The wiki import keeps to its own wiki** (#80; specs/memkernel-0-7-wiki-scope): every imported memory carries
+  `wiki-path:` and, with a manifest, `wiki-id:`; a page's previous memory, its corrections, supersession and
+  deprecation are only its wiki's, so two wikis can share page paths and `page_id`s in one store. The import's
+  dedup is scoped the same way; an ordinary `retain` matching a wiki memory gets its own record; `retain` refuses
+  the two tags; `promote` drops wiki tags from its copy. Identity changes (a manifest added, removed or replaced,
+  a moved wiki) stop the import before any write, with a remedy; one import runs at a time per store.
+- **Store locks and a single tag writer** (specs/memkernel-0-7-store-locks): a record's tags are now written only
+  under the store's `tags` lock (`VectorStorePort.merge_tags`), so a dedup refresh in one process no longer drops a
+  tag another process added; `update_metadata` sends only the caller's keys and refuses `tags`. Locks are keyed by
+  the store (lock files in the persist directory), are not re-entrant (`LockReentryError`) and log a wait longer
+  than 10 seconds. POSIX only; on Windows they run unlocked with one warning.
+- An injected `PersistentClient` (`build_service(chroma_client=...)`) is refused when an explicitly set
+  `MEMKERNEL_CHROMA_PERSIST_PATH` names another directory; with the default setting nothing changes.
+- The import supersedes a page's memory when the page was renamed or moved under its `page_id`, also with
+  unchanged bytes; before, a renamed page got a second live memory, and a page moved unchanged kept its memory at
+  the old path, where a later page could take it over.
+- **What the session hooks inject** (#59, D5–D8; specs/memkernel-0-7-hooks):
+  - every memory line ends with its `ref_id`, and the checkpoint's age line carries it too;
+  - at session start, the long-term context is chosen without a query (decisions, conventions, procedures,
+    facts, then the rest; by importance, then recency), and after a compaction it is recalled with the
+    checkpoint's text; injecting no longer counts as an access;
+  - each block stays under 9,000 characters (Claude Code caps hook output at 10,000), with named section
+    shares; a cut checkpoint says which `get(ref_id)` holds the rest;
+  - an item equal to the checkpoint or an earlier item, or the source of a promotion also shown, appears once.
+- The agent instructions, the Kiro steering file and the Kiro hook prompt find the latest checkpoint with
+  `recall(…, checkpoint_only=true, order="newest", top_k=1)`, and the instructions say to skip the session-start
+  recalls when the hooks are installed. Copy the templates again. The 0.5 lifecycle suite's arms keep the 0.5
+  block, now checked against a frozen copy (`eval/lifecycle-suite/arms/minimal-block-0.5.md`).
 
 ## [0.6.0] - 2026-10-30
 
@@ -460,7 +469,8 @@ until that is fixed, this is memkernel-0-6 SC-8's interim result.
   tree-sitter AST chunking; episode TTL; dedup by content hash; FastAPI admin
   API; Claude Code hook templates.
 
-[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/gosha70/memkernel/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gosha70/memkernel/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gosha70/memkernel/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gosha70/memkernel/compare/v0.4.0...v0.4.1
