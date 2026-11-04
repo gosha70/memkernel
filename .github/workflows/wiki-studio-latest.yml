@@ -1,0 +1,46 @@
+name: wiki-studio latest
+
+# Informational: the wiki tests against the newest wiki-studio that memkernel's range admits (>=0.7.0,<1).
+# poetry.lock stays at the floor, 0.7.0, which the required CI jobs test. This workflow is not a required check;
+# a failure here says a newer wiki-studio, which users installing memkernel[wiki] get, breaks the bridge.
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"  # weekly, Monday 06:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: wiki-studio-latest-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wiki-tests:
+    name: Wiki tests (newest wiki-studio)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+      - name: Free runner disk space
+        # torch pulls ~6 GB of CUDA wheels; the default runner image leaves
+        # too little room for download + install. Drop toolchains we never use.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | tail -1
+      - run: poetry install --no-interaction
+      - name: Upgrade wiki-studio to the newest release in range
+        run: |
+          poetry run pip install --upgrade "wiki-studio>=0.7.0,<1"
+          poetry run python -c "import importlib.metadata as m; print('wiki-studio', m.version('wiki-studio'))"
+      - name: Wiki tests
+        run: |
+          poetry run pytest -m "not slow" -q -p no:cacheprovider \
+            tests/unit/test_wiki*.py tests/unit/test_lifecycle_curation.py tests/integration/test_wiki_*.py
