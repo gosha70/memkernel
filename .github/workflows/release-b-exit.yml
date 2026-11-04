@@ -1,0 +1,80 @@
+name: Release B exit run
+
+# Informational (specs/memkernel-0-7-release-b-exit E5): the exit run and the upgrade run against a wheel built
+# from the pull request and the newest wiki-studio below 1.0. Not a required check; the exit evidence is the
+# recorded runs on released wheels (eval/release-b-exit/README.md).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/memkernel/**"
+      - "eval/release-b-exit/**"
+      - ".github/workflows/release-b-exit.yml"
+  schedule:
+    - cron: "41 6 * * 1"  # weekly, Monday 06:41 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: release-b-exit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+  EMBEDDING_REVISION: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+
+jobs:
+  exit-run:
+    name: Exit run (${{ matrix.run }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [main, upgrade]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - name: Build the wheel from this commit
+        run: poetry build --format wheel
+      - name: A fresh environment (CPU torch; memkernel 0.6.0 for the upgrade run)
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+          if [ "${{ matrix.run }}" = upgrade ]; then
+            "$RUNNER_TEMP/venv/bin/pip" install --quiet "memkernel==0.6.0" "wiki-studio>=0.7.0,<1"
+          else
+            "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl "wiki-studio>=0.7.0,<1"
+          fi
+          "$RUNNER_TEMP/venv/bin/python" -c "import importlib.metadata as m; print('memkernel', m.version('memkernel'), 'wiki-studio', m.version('wiki-studio'))"
+      - name: The embedding model at its pinned revision
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -c "import sys; from huggingface_hub import snapshot_download; print(snapshot_download(sys.argv[1], revision=sys.argv[2]))" "$EMBEDDING_MODEL" "$EMBEDDING_REVISION" > "$RUNNER_TEMP/snapshot.txt"
+          cat "$RUNNER_TEMP/snapshot.txt"
+      - name: Run
+        run: |
+          export MEMKERNEL_EMBEDDING_MODEL="$(cat "$RUNNER_TEMP/snapshot.txt")" HF_HUB_OFFLINE=1
+          if [ "${{ matrix.run }}" = upgrade ]; then
+            "$RUNNER_TEMP/venv/bin/python" eval/release-b-exit/run.py --upgrade --upgrade-to "$(ls dist/*.whl)" \
+              --workdir "$RUNNER_TEMP/work" --summary "$RUNNER_TEMP/summary.json"
+          else
+            "$RUNNER_TEMP/venv/bin/python" eval/release-b-exit/run.py \
+              --workdir "$RUNNER_TEMP/work" --summary "$RUNNER_TEMP/summary.json"
+          fi
+      - name: Keep the summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-b-exit-${{ matrix.run }}-summary
+          path: ${{ runner.temp }}/summary.json
+          if-no-files-found: ignore
