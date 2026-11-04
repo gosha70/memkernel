@@ -109,8 +109,10 @@ second run. The run checks:
 - **R3, everything twice:** export and import each run a second time and change nothing.
 - **R4, two imports at once:** two session-2 processes share one store.
   - In the first, a wrapper around `MemoryService.retain` pauses on a marker file after its first write.
-  - The second then starts, with a wrapper that records the time of its first write.
-  - The first is released by the marker after a fixed hold.
+  - The second then starts. Right before it calls the import, it writes a marker that it reached the import. A
+    wrapper in it records the time of its first write.
+  - The run releases the first only after the second's marker exists, plus a fixed hold, so the second is
+    known to be waiting on the lock during that hold (the owner's amendment, 2026-11-04).
   - The check is that the second's first write comes after the release, which shows the store's import lock
     serialized the two rather than luck. That lock is
   `exclusive("wiki-import")`, held from the identity checks to the last write, alongside the ledger's file lock.

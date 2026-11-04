@@ -7,7 +7,7 @@
 | # | [P] | Task | File(s) | Owner | Done |
 |---|-----|------|---------|-------|------|
 | 1 | | Sessions 1–3 and the curator step, the named checks (FR-001) | `eval/release-b-exit/run.py` | build | [ ] |
-| 2 | | Retries R1–R4 (FR-002): the in-session wrappers for R2 (`_mark_superseded`, one ref_id) and R4 (`retain`, the marker and timestamps), the expected end state and the convergence checks | `eval/release-b-exit/run.py` | build | [ ] |
+| 2 | | Retries R1–R4 (FR-002): the in-session wrappers for R2 (`_mark_superseded`, one ref_id) and R4 (`retain`, the second's reached-the-import marker, the hold, then the release and timestamps), the expected end state and the convergence checks | `eval/release-b-exit/run.py` | build | [ ] |
 | 2a | | The upgrade run, `--upgrade` (FR-005, E7) | `eval/release-b-exit/run.py` | build | [ ] |
 | 3 | | The recorder and its protocol README (FR-003) | `eval/release-b-exit/record.py`, `README.md` | build | [ ] |
 | 4 | | The informational workflow with its path filter (FR-004) | `.github/workflows/release-b-exit.yml` | build | [ ] |
