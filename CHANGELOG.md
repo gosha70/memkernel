@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- wiki-studio 0.8: an informational CI workflow (`wiki-studio-latest.yml`, on pull requests and weekly) runs the
+  wiki tests against the newest wiki-studio in range, while `poetry.lock` and the minimum stay at 0.7.0; the README
+  ignore pattern becomes `.<wiki-dir>.wiki-studio.*` (lock file and 0.8's search cache) and notes 0.8's refusal of
+  non-UTF-8 pages and of an unknown `WIKI_STUDIO_RANKER`.
+
 - **Wiki modes** (#48 Release B part 2c; specs/memkernel-0-7-governed): `MEMKERNEL_WIKI_MODE` = `auto` (the
   default, unchanged), `governed` (export and import refuse, writing nothing, unless wiki-studio has every
   capability memkernel uses and the wiki is governed without schema drift) or `ungated` (wiki-studio is never
