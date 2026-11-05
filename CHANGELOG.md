@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-11-05
+## [0.7.0] - 2026-11-04
 
 Release B's last two parts for the wiki bridge (#48): withdrawal (2b) and governed mode with curation debt at
 session start (2c), on top of the wiki import keeping to its own wiki (#80), store locks with a single tag

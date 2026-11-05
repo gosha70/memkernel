@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-11-05. Ordered by dependency, not by date.
+Updated 2026-11-04. Ordered by dependency, not by date.
 
 ## 0.2 — tiered memory (this branch)
 
