@@ -1,7 +1,7 @@
 ---
 feature_id: memkernel-0-7-release-b-exit
 spec_mode: lightweight
-status: draft
+status: approved
 date: 2026-11-04
 collaboration_mode: single
 origin:
