@@ -65,22 +65,38 @@ This follows wiki-studio's protocol (`examples/correction-loop/README.md` at wik
 2. **A clean tree.** `record.py` refuses unless `git status --porcelain` is empty. It records `HEAD`'s full SHA,
    extracts that commit, and runs only from it; it refuses if the running `record.py` differs from the committed
    one.
-3. **Released wheels.** `record.py --memkernel X --wiki-studio Y [--upgrade]` downloads the wheels from PyPI and
-   refuses any whose sha256 differs from the one PyPI publishes. The upgrade run also downloads memkernel 0.6.0.
-   It installs them into a fresh virtual environment and records `pip freeze`. Then it pins the embedding model
-   (`sentence-transformers/all-MiniLM-L6-v2` at `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`) and runs once,
-   never retrying, with the hub offline.
+3. **Released wheels, Python 3.11.** `record.py --memkernel X --wiki-studio Y [--upgrade]` runs only under
+   Python 3.11 and refuses any other interpreter. It downloads the wheels from PyPI and refuses any whose sha256
+   differs from the one PyPI publishes; the upgrade run also downloads memkernel 0.6.0. It installs them into a
+   fresh virtual environment and records `pip freeze`: `environment.txt` for the main run;
+   `environment-before.txt`, `environment-after.txt` and a post-upgrade `pip check` for the upgrade run. A failed
+   `pip check` is the named check `pip-check-after-upgrade` in the manifest's checks, and fails the attempt (exit
+   code 1) even when every check of the run passed; a run that already failed keeps its own, higher exit code. The
+   embedding model is pinned in `record.py` (`sentence-transformers/all-MiniLM-L6-v2` at
+   `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`); no option overrides it, and any other snapshot is refused. The run
+   happens once, never retried, with the hub offline.
 4. **A failed attempt is kept.** `manifest.json` exists from the moment `--out` is created, with `outcome:
-   running` and the stage. It ends as `completed`, with the run's exit code, every check and the convergence
-   summary, or as `failed`, with the stage and the error. A second attempt is a new directory.
-   The two recorded runs, from the repository root, once the versions are on PyPI:
+   running` and the stage. Every rewrite is atomic (a temporary file, fsynced, then renamed), so an interruption
+   leaves the previous manifest whole. It ends as `completed`, with the run's exit code, every check and the
+   convergence summary, or as `failed`, with the stage and the error. A second attempt is a new directory.
+
+   The two recorded runs, from the repository root, once the versions are on PyPI. The recorder refuses an
+   unclean tree, so each run is committed before the next one starts:
 
    ```bash
-   python eval/release-b-exit/record.py --out eval/release-b-exit/runs/<date>-memkernel-0.7.0-wiki-studio-0.8.1 \
+   # 1. The main run, then read its manifest.json and transcript.txt.
+   python3.11 eval/release-b-exit/record.py --out eval/release-b-exit/runs/<date>-memkernel-0.7.0-wiki-studio-0.8.1 \
      --memkernel 0.7.0 --wiki-studio 0.8.1
-   python eval/release-b-exit/record.py --upgrade \
+   git add eval/release-b-exit/runs/<date>-memkernel-0.7.0-wiki-studio-0.8.1
+   git commit -m "Release B exit run: memkernel 0.7.0, wiki-studio 0.8.1"
+   git status --porcelain   # must print nothing before the next run
+
+   # 2. The upgrade run, then read its manifest.json, transcript.txt and the two environment files.
+   python3.11 eval/release-b-exit/record.py --upgrade \
      --out eval/release-b-exit/runs/<date>-upgrade-memkernel-0.6.0-to-0.7.0-wiki-studio-0.8.1 \
      --memkernel 0.7.0 --wiki-studio 0.8.1
+   git add eval/release-b-exit/runs/<date>-upgrade-memkernel-0.6.0-to-0.7.0-wiki-studio-0.8.1
+   git commit -m "Release B upgrade run: memkernel 0.6.0 to 0.7.0, wiki-studio 0.8.1"
    ```
 5. **Commit the run directory alone**, under `eval/release-b-exit/runs/<date>-memkernel-<v>-wiki-studio-<v>/`, or
    `runs/<date>-upgrade-memkernel-0.6.0-to-<v>-wiki-studio-<v>/`, and never edit it afterwards.
