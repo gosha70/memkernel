@@ -5,16 +5,18 @@
 Standard library only. It follows wiki-studio's recording protocol (``examples/correction-loop/README.md`` at
 wiki-studio commit ``2d5bf033d00fb7c57b1e1d3932a7586497bea9fb``), adapted to released wheels on both sides:
 
-Preflight, which creates nothing: refuse unless the working tree is clean and ``--out`` does not exist; record
+Preflight, which creates nothing: refuse unless this is Python 3.11, the working tree is clean and ``--out`` does not
+exist; record
 ``HEAD``'s full commit SHA. The attempt then starts by creating ``--out``:
 - archive that SHA, never the name ``HEAD``, and extract it;
 - hash ``run.py``, this recorder and the protocol README from the extracted tree, and refuse if the running
   recorder differs;
 - download memkernel ``--memkernel`` and wiki-studio ``--wiki-studio`` from PyPI. For ``--upgrade``, memkernel
   0.6.0 as well. Each wheel's sha256 is checked against the one PyPI publishes;
-- install them into a fresh virtual environment and write its ``pip freeze``. For ``--upgrade`` that is 0.6.0, and
-  the run installs the 0.7.x wheel itself halfway through;
-- download the embedding model at the pinned revision, and refuse any other snapshot;
+- install them into a fresh virtual environment and write its ``pip freeze``. For ``--upgrade`` that is 0.6.0
+  (``environment-before.txt``); the run installs the 0.7.x wheel itself halfway through, and the recorder then
+  writes ``environment-after.txt`` and the result of ``pip check``;
+- download the embedding model at the revision pinned here (no option overrides it), and refuse any other snapshot;
 - run the extracted ``run.py`` once, never retried, with the hub offline, writing ``transcript.txt``;
 - write ``manifest.json`` with the versions, the hashes, every check and the convergence summary.
 
@@ -29,6 +31,7 @@ import argparse
 import hashlib
 import json
 import os
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -39,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 UPGRADE_FROM = "0.6.0"
+PYTHON = (3, 11)  # the plan's interpreter for the recorded runs; the venv is built from this one
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -94,16 +98,33 @@ def _extract_commit(tmp: Path, commit: str) -> Path:
     source.mkdir()
     try:
         with tarfile.open(archive) as tar:
-            tar.extractall(source, filter="data")
+            try:
+                tar.extractall(source, filter="data")
+            except TypeError:  # Python 3.11 before 3.11.4 has no extraction filter; the archive is our own commit
+                tar.extractall(source)  # noqa: S202
     except (tarfile.TarError, OSError) as exc:
         raise CannotRunError(f"could not extract the archive of {commit}: {exc}") from exc
     return source
 
 
+def _tls() -> tuple[ssl.SSLContext, str]:
+    """A verifying TLS context, and where its CA certificates come from. python.org's macOS builds ship without a
+    CA store until their ``Install Certificates.command`` runs; then certifi's bundle (or the copy pip vendors) is
+    used. Verification is never turned off."""
+    context = ssl.create_default_context()
+    if context.cert_store_stats().get("x509_ca"):
+        return context, "the interpreter's default store"
+    try:
+        import certifi
+    except ImportError:
+        from pip._vendor import certifi  # pip, which the recorder needs anyway, carries a copy
+    return ssl.create_default_context(cafile=certifi.where()), f"certifi ({certifi.where()})"
+
+
 def _published_sha256(project: str, version: str, filename: str) -> str:
     url = f"https://pypi.org/pypi/{project}/{version}/json"
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 — a fixed https URL
+        with urllib.request.urlopen(url, timeout=30, context=_tls()[0]) as response:  # noqa: S310 — fixed https URL
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise CannotRunError(f"PyPI could not be read at {url}: {exc}") from exc
@@ -199,11 +220,27 @@ def _run_once(python: Path, out: Path, tmp: Path, snapshot: Path, source: Path, 
 
 
 def _write_manifest(out: Path, manifest: dict[str, Any]) -> None:
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str) + "\n", encoding="utf-8")
+    """Replace ``manifest.json`` atomically: a sibling file, flushed and fsynced, then renamed over it, so an
+    interruption leaves the previous manifest whole, never a truncated one."""
+    data = json.dumps(manifest, indent=2, default=str) + "\n"
+    tmp = out / "manifest.json.tmp"
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, out / "manifest.json")
+    directory = os.open(out, os.O_RDONLY)
+    try:  # the rename itself is durable only once the directory is
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
-def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool, revision: str) -> int:
+def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool) -> int:
     started_at = _utc_now()
+    revision = EMBEDDING_REVISION  # pinned in the commit; no option overrides it
+    if sys.version_info[:2] != PYTHON:
+        raise CannotRunError(f"record.py runs under Python {PYTHON[0]}.{PYTHON[1]}, not {sys.version.split()[0]}")
     if out.exists():
         raise CannotRunError(f"--out {out} already exists; a second attempt is a new directory")
     status = _run(["git", "-C", str(REPO_ROOT), "status", "--porcelain"])
@@ -219,6 +256,7 @@ def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool, revision
         "started_at": started_at,
         "embedding_model": EMBEDDING_MODEL,
         "embedding_revision": revision,
+        "tls_ca_source": _tls()[1],
     }
     stage = "extract"
 
@@ -248,7 +286,8 @@ def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool, revision
             enter("install")
             first = wheels["memkernel-upgrade-from"]["path"] if upgrade else target["path"]
             python = _install(tmp / "venv", [first, studio["path"]])
-            (out / "environment.txt").write_text(_run_or_die([str(python), "-m", "pip", "freeze"], "pip freeze").stdout)
+            freeze = _run_or_die([str(python), "-m", "pip", "freeze"], "pip freeze").stdout
+            (out / ("environment-before.txt" if upgrade else "environment.txt")).write_text(freeze, encoding="utf-8")
             manifest["versions_installed"] = _versions(python)
             enter("embedding")
             snapshot = _embedding_snapshot(python, revision)
@@ -256,6 +295,11 @@ def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool, revision
             extra = ["--upgrade", "--upgrade-to", str(target["path"])] if upgrade else []
             exit_code, summary = _run_once(python, out, tmp, snapshot, source, extra)
             manifest["versions_after"] = _versions(python)
+            if upgrade:  # the run installed the 0.7.x wheel itself: record and check the environment it ended in
+                after = _run_or_die([str(python), "-m", "pip", "freeze"], "pip freeze after the upgrade").stdout
+                (out / "environment-after.txt").write_text(after, encoding="utf-8")
+                check = _run([str(python), "-m", "pip", "check"])
+                manifest["pip_check_after"] = {"exit_code": check.returncode, "output": _tail(check.stdout, 2000)}
             manifest["exit_code"] = exit_code
             manifest["checks"] = summary.get("checks") if summary else None
             manifest["convergence"] = (
@@ -288,12 +332,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--memkernel", required=True, help="the released memkernel version, e.g. 0.7.0")
     parser.add_argument("--wiki-studio", required=True, help="the released wiki-studio version, e.g. 0.8.1")
     parser.add_argument("--upgrade", action="store_true", help=f"the upgrade run: from memkernel {UPGRADE_FROM}")
-    parser.add_argument("--embedding-revision", default=EMBEDDING_REVISION)
     args = parser.parse_args(argv)
     try:
-        return _record(
-            args.out.expanduser().absolute(), args.memkernel, args.wiki_studio, args.upgrade, args.embedding_revision
-        )
+        return _record(args.out.expanduser().absolute(), args.memkernel, args.wiki_studio, args.upgrade)
     except (CannotRunError, OSError) as exc:
         print(f"cannot run: {exc}", file=sys.stderr)
         return 2

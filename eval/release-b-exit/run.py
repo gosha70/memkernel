@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -299,6 +300,7 @@ def _converged(
     live: dict[str, str],
     retired: dict[str, str],
     name: str,
+    files: set[str],
 ) -> dict[str, Any]:
     """The convergence checks (plan.md, Retries): the expected live pages and retired records, no page key with
     two live memories, no duplicate page or receipt, no unfinished ledger entry. ``live`` maps a page to a rule
@@ -337,7 +339,17 @@ def _converged(
         for p in wiki.rglob("*.md")
         if not any(part.startswith(".") for part in p.relative_to(wiki).parts)  # not .audit/, wiki-studio's trail
     )
-    _check(checks, f"{name}-no-duplicate-page", len(page_files) == len(set(page_files)), str(page_files))
+    _check(checks, f"{name}-exact-page-set", page_files == sorted(files), str(page_files))
+    page_ids = [
+        line.split(":", 1)[1].strip()
+        for rel in page_files
+        if rel not in ("index.md", "log.md")
+        for line in (wiki / rel).read_text(encoding="utf-8").splitlines()
+        if line.startswith("page_id:")
+    ]
+    _check(checks, f"{name}-unique-page-ids", len(page_ids) == len(set(page_ids)), str(page_ids))
+    targets = re.findall(r"\]\(([^)]+\.md)\)", (wiki / "index.md").read_text(encoding="utf-8"))
+    _check(checks, f"{name}-unique-index-entries", len(targets) == len(set(targets)), str(targets))
     applied = workdir / "doc_internal" / "proposals" / ".applied"
     digests = [
         json.loads(r.read_text(encoding="utf-8")).get("submission_digest") for r in applied.glob("*/receipt.json")
@@ -464,7 +476,8 @@ def _session_2_check(workdir: Path, checks: list[dict[str, Any]], values: dict[s
     )
     service = _service()
     live = {rel: (RIGHT if role == "wrong" else MEMORIES[role][1]) for role, rel in pages.items()}
-    values["summary"] = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "session-2")
+    files = {*pages.values(), "index.md", "log.md"}
+    values["summary"] = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "session-2", files)
 
 
 def _session_2_again(workdir: Path, checks: list[dict[str, Any]], values: dict[str, Any]) -> None:
@@ -477,7 +490,8 @@ def _session_2_again(workdir: Path, checks: list[dict[str, Any]], values: dict[s
     _check(checks, "r3-import-again-imports-nothing", report.imported == [] and report.import_error is None)
     session_1 = _values(workdir, "session-1")
     live = {rel: (RIGHT if role == "wrong" else MEMORIES[role][1]) for role, rel in session_1["pages"].items()}
-    summary = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "r3")
+    files = {*session_1["pages"].values(), "index.md", "log.md"}
+    summary = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "r3", files)
     _check(checks, "r3-same-summary", summary == before, json.dumps(summary))
 
 
@@ -616,7 +630,8 @@ def _session_3(workdir: Path, checks: list[dict[str, Any]], values: dict[str, An
         MEMORIES["supersede"][1]: "superseded",
         MEMORIES["edit"][1]: "superseded",
     }
-    values["summary"] = _converged(workdir, service, checks, live, retired, "session-3")
+    files = {pages["wrong"], pages["edit"], pages["deprecate"], pages["supersede"], successor, "index.md", "log.md"}
+    values["summary"] = _converged(workdir, service, checks, live, retired, "session-3", files)
 
 
 def _session_4(workdir: Path, checks: list[dict[str, Any]], values: dict[str, Any]) -> None:
@@ -746,7 +761,8 @@ def _u_session_3(workdir: Path, checks: list[dict[str, Any]], values: dict[str, 
     _check(checks, "right-answer-current", any(m is not None and RIGHT in m.content for m in recalled))
     _check(checks, "wrong-rule-not-current", not any(m is not None and WRONG in m.content for m in recalled))
     live = {session_0["pages"]["wrong"]: RIGHT, session_0["pages"]["other"]: UPGRADE_MEMORIES["other"][1]}
-    values["summary"] = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "upgrade")
+    files = {*session_0["pages"].values(), "index.md", "log.md"}
+    values["summary"] = _converged(workdir, service, checks, live, {WRONG: "superseded"}, "upgrade", files)
 
 
 STEPS = {

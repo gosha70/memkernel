@@ -1,6 +1,6 @@
 # Spec: the Release B exit run (#48)
 
-Origin and facts are in `plan.md` and `origin/2026-11-04-exit-run.md`. Draft, for review. The owner
+Origin and facts are in `plan.md` and `origin/2026-11-04-exit-run.md`. Built in #98 and shipped with 0.7.0; the owner
 confirmed E1–E6 and decided E7, R2 and E5's path filter on 2026-11-04.
 
 ## Requirements
