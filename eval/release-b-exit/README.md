@@ -69,7 +69,9 @@ This follows wiki-studio's protocol (`examples/correction-loop/README.md` at wik
    Python 3.11 and refuses any other interpreter. It downloads the wheels from PyPI and refuses any whose sha256
    differs from the one PyPI publishes; the upgrade run also downloads memkernel 0.6.0. It installs them into a
    fresh virtual environment and records `pip freeze`: `environment.txt` for the main run;
-   `environment-before.txt`, `environment-after.txt` and a post-upgrade `pip check` for the upgrade run. The
+   `environment-before.txt`, `environment-after.txt` and a post-upgrade `pip check` for the upgrade run. A failed
+   `pip check` is the named check `pip-check-after-upgrade` in the manifest's checks, and fails the attempt (exit
+   code 1) even when every check of the run passed; a run that already failed keeps its own, higher exit code. The
    embedding model is pinned in `record.py` (`sentence-transformers/all-MiniLM-L6-v2` at
    `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`); no option overrides it, and any other snapshot is refused. The run
    happens once, never retried, with the hub offline.

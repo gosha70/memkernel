@@ -59,3 +59,20 @@ def test_an_interrupted_manifest_write_keeps_the_previous_manifest(
         "outcome": "running",
         "stage": "download",
     }
+
+
+def test_a_failed_post_upgrade_pip_check_is_a_named_failing_check() -> None:
+    import subprocess
+
+    record = _recorder()
+    broken = subprocess.CompletedProcess(
+        ["pip", "check"], 1, stdout="memkernel 0.7.0 requires x, which is not installed."
+    )
+    check = record._pip_check_after(broken)
+    assert check["name"] == "pip-check-after-upgrade" and check["ok"] is False and broken.stdout in check["detail"]
+
+    code, checks = record._with_check(0, [{"name": "a", "ok": True, "detail": ""}], check)
+    assert code == 1 and [c["name"] for c in checks] == ["a", "pip-check-after-upgrade"]
+    assert record._with_check(2, None, check)[0] == 2  # a worse exit code stays
+    clean = record._pip_check_after(subprocess.CompletedProcess(["pip", "check"], 0, stdout="No broken requirements."))
+    assert record._with_check(0, [], clean) == (0, [clean])

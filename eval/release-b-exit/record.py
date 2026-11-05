@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 UPGRADE_FROM = "0.6.0"
+PIP_CHECK_AFTER_UPGRADE = "pip-check-after-upgrade"  # the recorder's own named check, beside run.py's
 PYTHON = (3, 11)  # the plan's interpreter for the recorded runs; the venv is built from this one
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
@@ -219,6 +220,22 @@ def _run_once(python: Path, out: Path, tmp: Path, snapshot: Path, source: Path, 
     return completed.returncode, summary
 
 
+def _pip_check_after(completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    """The post-upgrade ``pip check`` as a named check, in run.py's form."""
+    return {
+        "name": PIP_CHECK_AFTER_UPGRADE,
+        "ok": completed.returncode == 0,
+        "detail": _tail(f"{completed.stdout}\n{completed.stderr}", 2000),
+    }
+
+
+def _with_check(exit_code: int, checks: list[dict[str, Any]] | None, check: dict[str, Any]) -> tuple[int, list[Any]]:
+    """``check`` appended to the run's checks; a failing one makes a passing run's exit code 1 (never lowers it)."""
+    if not check["ok"] and exit_code == 0:
+        exit_code = 1
+    return exit_code, [*(checks or []), check]
+
+
 def _write_manifest(out: Path, manifest: dict[str, Any]) -> None:
     """Replace ``manifest.json`` atomically: a sibling file, flushed and fsynced, then renamed over it, so an
     interruption leaves the previous manifest whole, never a truncated one."""
@@ -295,13 +312,18 @@ def _record(out: Path, memkernel: str, wiki_studio: str, upgrade: bool) -> int:
             extra = ["--upgrade", "--upgrade-to", str(target["path"])] if upgrade else []
             exit_code, summary = _run_once(python, out, tmp, snapshot, source, extra)
             manifest["versions_after"] = _versions(python)
+            post_check = None
             if upgrade:  # the run installed the 0.7.x wheel itself: record and check the environment it ended in
                 after = _run_or_die([str(python), "-m", "pip", "freeze"], "pip freeze after the upgrade").stdout
                 (out / "environment-after.txt").write_text(after, encoding="utf-8")
                 check = _run([str(python), "-m", "pip", "check"])
-                manifest["pip_check_after"] = {"exit_code": check.returncode, "output": _tail(check.stdout, 2000)}
+                post_check = _pip_check_after(check)
+            checks = summary.get("checks") if summary else None
+            if post_check is not None:
+                exit_code, checks = _with_check(exit_code, checks, post_check)
+                print(f"{'ok' if post_check['ok'] else 'FAILED'}: {PIP_CHECK_AFTER_UPGRADE}", file=sys.stderr)
             manifest["exit_code"] = exit_code
-            manifest["checks"] = summary.get("checks") if summary else None
+            manifest["checks"] = checks
             manifest["convergence"] = (
                 {
                     step: values.get("summary")
