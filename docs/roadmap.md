@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-30. Ordered by dependency, not by date.
+Updated 2026-11-04. Ordered by dependency, not by date.
 
 ## 0.2 — tiered memory (this branch)
 
@@ -114,15 +114,26 @@ is blocked on it.
 - [x] Release B part 2a (#48): governed `wiki_import` (approved revisions
       only, wiki-studio 0.7.0 review state), `corrects`, one memory per page,
       `MemoryService.supersede` (0.6.0); wiki-studio's Release B loop test 5 of
-      6, test 4 waiting on gosha70/wiki-studio#53
+      6 at 0.6.0, 6 of 6 since gosha70/wiki-studio#53 (0.7.0)
 - [x] Store-open race between the MCP server and a hook (#69) (0.6.0)
 - [x] Compaction hooks D1–D4 (#68): no placeholder checkpoint, Claude Code's
       `compact_summary` kept, `SessionStart` branches on `source`, the latest
       checkpoint by time (0.6.0)
-- [ ] Release B part 2b: withdrawal on supersession, deprecation and
-      deletion, with a per-page sync state (#48)
-- [ ] Release B part 2c: governed mode and curation debt at session start (#48)
-- [ ] Hook follow-ups D5–D9 and the capture phases (#59)
+
+## 0.7 — Release B withdrawal and governed mode, wiki scope, hooks
+
+- [x] Release B part 2b (#48): withdrawal on supersession, deprecation and
+      deletion, with the wiki sync ledger (specs/memkernel-0-7) (0.7.0)
+- [x] Release B part 2c (#48): `MEMKERNEL_WIKI_MODE`, curation debt at
+      session start, export batches, `sha:` and `memkernel_sha256`, `page_id`
+      (specs/memkernel-0-7-governed) (0.7.0)
+- [x] The wiki import keeps to its own wiki (#80), with `adopt_legacy` for a
+      0.6 store, and store locks with a single tag writer (0.7.0)
+- [x] Hook follow-ups D5–D9 (#59): what the hooks inject, the session spool
+      (0.7.0)
+- [ ] Release B exit evidence: the recorded exit run and upgrade run on the
+      released 0.7.0 (`eval/release-b-exit/`, specs/memkernel-0-7-release-b-exit)
+- [ ] The capture phases of #59 (Phases 2–4)
 
 ## Later / research
 
