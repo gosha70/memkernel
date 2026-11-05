@@ -1,0 +1,217 @@
+{
+  "outcome": "completed",
+  "kind": "upgrade",
+  "git_commit": "0cd33f0e38c29bdadbdbd123a0b55250e7bafa86",
+  "started_at": "2026-11-05T23:20:22Z",
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "tls_ca_source": "certifi (/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/certifi/cacert.pem)",
+  "run_sha256": "2c7f7f7327ccc16352b1b27274cefa52625f92a4d03c22afbdfe5ff734cda71c",
+  "record_sha256": "eff69abac6ccf1320b2d4846954ac877d57a34ac9b357c04835695b874ff2966",
+  "protocol_sha256": "4a36ec781672514aef6aa12e6b212289c23b5a50a2b426b414cc65f493660cb3",
+  "wheels": {
+    "memkernel": {
+      "file": "memkernel-0.7.0-py3-none-any.whl",
+      "sha256": "3653ae5b64628e8343f38ae6bf251bf7667a873bdde0abe2a44b73f7263aa229",
+      "pypi_sha256": "3653ae5b64628e8343f38ae6bf251bf7667a873bdde0abe2a44b73f7263aa229"
+    },
+    "wiki-studio": {
+      "file": "wiki_studio-0.8.1-py3-none-any.whl",
+      "sha256": "360d9d76e713c5bed8fc350a75e245e0b9fca7997c5d0fae61724ecb5a41f4ac",
+      "pypi_sha256": "360d9d76e713c5bed8fc350a75e245e0b9fca7997c5d0fae61724ecb5a41f4ac"
+    },
+    "memkernel-upgrade-from": {
+      "file": "memkernel-0.6.0-py3-none-any.whl",
+      "sha256": "11fb369921cf0f802d0112e0e559f4e8ce87dbba8068798493d6cb8938262f4a",
+      "pypi_sha256": "11fb369921cf0f802d0112e0e559f4e8ce87dbba8068798493d6cb8938262f4a"
+    }
+  },
+  "versions_installed": {
+    "memkernel": "0.6.0",
+    "wiki_studio": "0.8.1",
+    "python": "3.11.3",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "versions_after": {
+    "memkernel": "0.7.0",
+    "wiki_studio": "0.8.1",
+    "python": "3.11.3",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "exit_code": 0,
+  "checks": [
+    {
+      "name": "memkernel-0.6.0",
+      "ok": true,
+      "detail": "0.6.0"
+    },
+    {
+      "name": "0.6-export-gated",
+      "ok": true,
+      "detail": "None"
+    },
+    {
+      "name": "u-curator-0-read-decisions/deploy-window.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "u-curator-0-read-decisions/code-review.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "u-curator-0-promoted",
+      "ok": true,
+      "detail": "/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/work/doc_internal/proposals/2026-11-05-182153-u-curator-0 update decisions/code-review.md update decisions/deploy-window.md applied 4 edit(s); archived to /private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/work/doc_internal/proposals/.applied/2026-11-05-182153-u-curator-0."
+    },
+    {
+      "name": "u-curator-0-approved",
+      "ok": true,
+      "detail": "/8ae8cc402c3c075f150bfccba362198db9fa68786acdede2cbc7267d2d660359/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json approved: knowledge/wiki/.audit/approvals/path/d56c4f113f1153730f0c958c898c450de4d99cdabbfc3a576fb5943fff388594/6f80e45f95fcb1cb457eb02cfc742d6985002bd17fb5c22dbe70bfa0672c339b/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json"
+    },
+    {
+      "name": "0.6-import-governed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "0.6-wiki-memories",
+      "ok": true,
+      "detail": "['decisions/code-review.md', 'decisions/deploy-window.md']"
+    },
+    {
+      "name": "memkernel-0.7-installed",
+      "ok": true,
+      "detail": "0.7.0"
+    },
+    {
+      "name": "every-page-ambiguous",
+      "ok": true,
+      "detail": "[{'path': 'decisions/code-review.md', 'ref_ids': ['950846be-0fff-4b61-87c5-ce3bf861e5f3'], 'reason': 'legacy owner unproven'}, {'path': 'decisions/deploy-window.md', 'ref_ids': ['e9f74a68-b51b-4b31-8d9c-8a095f4902bd'], 'reason': 'legacy owner unproven'}]"
+    },
+    {
+      "name": "nothing-imported",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "name": "no-memory-changed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nothing-ambiguous",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "name": "records-adopted",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no-duplicate-record",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "u-curator-read-decisions/deploy-window.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "u-curator-promoted",
+      "ok": true,
+      "detail": "/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/work/doc_internal/proposals/2026-11-05-182206-u-curator update decisions/deploy-window.md applied 3 edit(s); archived to /private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/work/doc_internal/proposals/.applied/2026-11-05-182206-u-curator."
+    },
+    {
+      "name": "u-curator-approved",
+      "ok": true,
+      "detail": "approved: knowledge/wiki/.audit/approvals/path/940012e2ca0c1860b9781c272f46712eaac4641b7ce6d5b62d8022ae5ce1405a/9d9c5af8d4762653b51a51088eca724d174b1959b586af92d215529573578bb5/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json"
+    },
+    {
+      "name": "correction-recorded",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "right-answer-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wrong-rule-not-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "upgrade-live-pages",
+      "ok": true,
+      "detail": "['decisions/code-review.md', 'decisions/deploy-window.md']"
+    },
+    {
+      "name": "upgrade-live-content",
+      "ok": true,
+      "detail": "{'decisions/code-review.md': ['Code review\\n\\n# Code review\\n\\n## Decision\\n\\nCode review\\n\\nEvery '], 'decisions/deploy-window.md': ['Deploy on Tuesdays before noon.\\n\\n# Deploy on Tuesdays before']}"
+    },
+    {
+      "name": "upgrade-one-live-memory-per-page-key",
+      "ok": true,
+      "detail": "{'page_key:decisions/code-review.md': 1, 'page_key:decisions/deploy-window.md': 1}"
+    },
+    {
+      "name": "upgrade-retired-records-kept",
+      "ok": true,
+      "detail": "{'Deploy on Fridays after 17:00 UTC.': 'superseded'}"
+    },
+    {
+      "name": "upgrade-exact-page-set",
+      "ok": true,
+      "detail": "['decisions/code-review.md', 'decisions/deploy-window.md', 'index.md', 'log.md']"
+    },
+    {
+      "name": "upgrade-unique-page-ids",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "name": "upgrade-unique-index-entries",
+      "ok": true,
+      "detail": "['decisions/deploy-window.md', 'decisions/code-review.md']"
+    },
+    {
+      "name": "upgrade-no-duplicate-receipt",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "upgrade-no-unfinished-ledger-entry",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "pip-check-after-upgrade",
+      "ok": true,
+      "detail": "No broken requirements found."
+    }
+  ],
+  "convergence": {
+    "u-session-3": {
+      "live": {
+        "decisions/code-review.md": [
+          "Code review"
+        ],
+        "decisions/deploy-window.md": [
+          "Deploy on Tuesdays before noon."
+        ]
+      },
+      "retired": {
+        "Deploy on Fridays after 17:00 UTC.": "superseded"
+      },
+      "receipts": 3,
+      "ledger_unfinished": 0
+    }
+  },
+  "finished_at": "2026-11-05T23:22:12Z"
+}
