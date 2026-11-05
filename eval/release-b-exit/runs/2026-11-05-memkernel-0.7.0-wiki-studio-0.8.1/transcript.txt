@@ -1,0 +1,120 @@
+== session-1
+ok: wiki-governed
+W1105 18:11:05.548000 59967 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 5889.83it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: decisions-retained
+ok: wrong-rule-current
+ok: export-gated-governed
+ok: export-configured-governed
+ok: five-draft-pages
+ok: nothing-remaining
+ok: pages-carry-page-id
+ok: curation-debt-shows-the-drafts
+== curator-1
+ok: curator-1-read-decisions/deploy-window.md
+ok: curator-1-read-decisions/cache-layer.md
+ok: curator-1-read-decisions/log-format.md
+ok: curator-1-read-decisions/job-queue.md
+ok: curator-1-read-decisions/database.md
+ok: curator-1-promoted
+ok: curator-1-approved
+ok: all-approved
+== session-2 (R4: two imports)
+W1105 18:11:15.459000 61505 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 24897.03it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+W1105 18:11:20.065000 61705 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 12881.69it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: r4-first-import-ran
+ok: r4-second-import-ran
+== session-2-check
+ok: r4-second-reached-before-release
+ok: r4-second-locked-after-release
+ok: first-imported-all
+ok: second-found-all-current
+ok: correction-recorded
+W1105 18:11:27.190000 61976 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 12341.12it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: session-2-live-pages
+ok: session-2-live-content
+ok: session-2-one-live-memory-per-page-key
+ok: session-2-retired-records-kept
+ok: session-2-exact-page-set
+ok: session-2-unique-page-ids
+ok: session-2-unique-index-entries
+ok: session-2-no-duplicate-receipt
+ok: session-2-no-unfinished-ledger-entry
+== session-2-again
+W1105 18:11:32.315000 62157 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10604.42it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: r3-export-again-writes-nothing
+ok: r3-import-again-imports-nothing
+ok: r3-live-pages
+ok: r3-live-content
+ok: r3-one-live-memory-per-page-key
+ok: r3-retired-records-kept
+ok: r3-exact-page-set
+ok: r3-unique-page-ids
+ok: r3-unique-index-entries
+ok: r3-no-duplicate-receipt
+ok: r3-no-unfinished-ledger-entry
+ok: r3-same-summary
+== curator-2
+ok: r1-archive-failed
+ok: r1-committed-before-the-failure
+ok: r1-resolved-from-the-receipt
+ok: r1-nothing-reapplied
+ok: successor-approved
+ok: curator-2-read-decisions/cache-layer.md
+ok: curator-2-read-decisions/job-queue.md
+ok: curator-2-read-decisions/database.md
+ok: curator-2-promoted
+ok: curator-2-approved
+ok: page-deleted
+== session-3-killed (R2)
+W1105 18:11:38.520000 62359 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 14446.19it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+== session-3
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+W1105 18:11:42.987000 62507 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 9788.01it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: r2-both-live-after-the-kill
+ok: import-completed
+ok: deprecated-and-deleted-withdrawn
+ok: superseded-by-the-successor
+ok: r2-supersession-completed
+ok: session-3-live-pages
+ok: session-3-live-content
+ok: session-3-one-live-memory-per-page-key
+ok: session-3-retired-records-kept
+ok: session-3-exact-page-set
+ok: session-3-unique-page-ids
+ok: session-3-unique-index-entries
+ok: session-3-no-duplicate-receipt
+ok: session-3-no-unfinished-ledger-entry
+== session-4
+W1105 18:11:48.387000 62740 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10148.54it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: start-block-has-no-wrong-rule
+ok: start-block-no-unapproved-debt
+ok: right-answer-current
+ok: wrong-rule-not-current
+ok: answer-is-the-approved-revision
+answer: Deploy on Tuesdays before noon.
+run: every check passed (75 of 75 checks passed)
