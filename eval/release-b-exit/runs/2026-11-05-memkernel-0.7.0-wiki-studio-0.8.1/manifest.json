@@ -1,0 +1,463 @@
+{
+  "outcome": "completed",
+  "kind": "main",
+  "git_commit": "fbc28a4361432b763326a539c758b9b56757f9c7",
+  "started_at": "2026-11-05T23:09:39Z",
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "tls_ca_source": "certifi (/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/certifi/cacert.pem)",
+  "run_sha256": "2c7f7f7327ccc16352b1b27274cefa52625f92a4d03c22afbdfe5ff734cda71c",
+  "record_sha256": "eff69abac6ccf1320b2d4846954ac877d57a34ac9b357c04835695b874ff2966",
+  "protocol_sha256": "4a36ec781672514aef6aa12e6b212289c23b5a50a2b426b414cc65f493660cb3",
+  "wheels": {
+    "memkernel": {
+      "file": "memkernel-0.7.0-py3-none-any.whl",
+      "sha256": "3653ae5b64628e8343f38ae6bf251bf7667a873bdde0abe2a44b73f7263aa229",
+      "pypi_sha256": "3653ae5b64628e8343f38ae6bf251bf7667a873bdde0abe2a44b73f7263aa229"
+    },
+    "wiki-studio": {
+      "file": "wiki_studio-0.8.1-py3-none-any.whl",
+      "sha256": "360d9d76e713c5bed8fc350a75e245e0b9fca7997c5d0fae61724ecb5a41f4ac",
+      "pypi_sha256": "360d9d76e713c5bed8fc350a75e245e0b9fca7997c5d0fae61724ecb5a41f4ac"
+    }
+  },
+  "versions_installed": {
+    "memkernel": "0.7.0",
+    "wiki_studio": "0.8.1",
+    "python": "3.11.3",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "versions_after": {
+    "memkernel": "0.7.0",
+    "wiki_studio": "0.8.1",
+    "python": "3.11.3",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "exit_code": 0,
+  "checks": [
+    {
+      "name": "wiki-governed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "decisions-retained",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wrong-rule-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "export-gated-governed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "export-configured-governed",
+      "ok": true,
+      "detail": "governed"
+    },
+    {
+      "name": "five-draft-pages",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nothing-remaining",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "pages-carry-page-id",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curation-debt-shows-the-drafts",
+      "ok": true,
+      "detail": "0gn/T/memkernel-exit-record-15gjmljp/work/knowledge/wiki/index.md; read it before re-deriving project context. ### Curation debt unapproved 5, weak-orphan 5 - unapproved: decisions/cache-layer.md - unapproved: decisions/database.md - unapproved: decisions/deploy-window.md Run `wiki-studio findings` for the full list. --- Purged 0 expired short-term memories. Use recall() / get(ref_id) for details."
+    },
+    {
+      "name": "curator-1-read-decisions/deploy-window.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-1-read-decisions/cache-layer.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-1-read-decisions/log-format.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-1-read-decisions/job-queue.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-1-read-decisions/database.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-1-promoted",
+      "ok": true,
+      "detail": "ljp/work/doc_internal/proposals/2026-11-05-181111-curator-1 update decisions/cache-layer.md update decisions/database.md update decisions/deploy-window.md update decisions/job-queue.md update decisions/log-format.md applied 7 edit(s); archived to /private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/work/doc_internal/proposals/.applied/2026-11-05-181111-curator-1."
+    },
+    {
+      "name": "curator-1-approved",
+      "ok": true,
+      "detail": "8b773f6ba1049fb9d2aa06b738aeff7/1725804e2b89b278a009d7ff76453c912f753104e16ad22be56b5c177d3c51cf/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json approved: knowledge/wiki/.audit/approvals/id/pg-8673afbc04c84c76b801fead03bbad64/3aabc3cf50e8e8ca5d8bf85a6249fda836821bdcc92c2b7e8792945469e695b2/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json"
+    },
+    {
+      "name": "all-approved",
+      "ok": true,
+      "detail": "{'decisions/deploy-window.md': ReviewState(path='decisions/deploy-window.md', page_key='pg-254b46e955cf406192999e14d24515c9', state='approved', reason='record_matches_live', live_sha256='96fa07d54b3d47a617b8ec4b6c3c070a9d83903893918c4dc02361b483757e0f', approved_sha256='96fa07d54b3d47a617b8ec4b6c3c070a9d83903893918c4dc02361b483757e0f', record_path='.audit/approvals/id/pg-254b46e955cf406192999e14d24515c9/96fa07d54b3d47a617b8ec4b6c3c070a9d83903893918c4dc02361b483757e0f/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json', warnings=()), 'decisions/cache-layer.md': ReviewState(path='decisions/cache-layer.md', page_key='pg-2e133d09fe2d4d3bbe4c1241ea78c070', state='approved', reason='record_matches_live', live_sha256='4df71033b55f0fcc9c642c931209e7e2fa5fd7b555065f948de19de6dcfb6ae6', approved_sha256='4df71033b55f0fcc9c642c931209e7e2fa5fd7b555065f948de19de6dcfb6ae6', record_path='.audit/approvals/id/pg-2e133d09fe2d4d3bbe4c1241ea78c070/4df71033b55f0fcc9c642c931209e7e2fa5fd7b555065f948de19de6dcfb6ae6/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json', warnings=()), 'decisions/log-format.md': ReviewState(path='decisions/log-format.md', page_key='pg-d3d0e92b450449d1a1c038aa3551ff36', state='approved', reason='record_matches_live', live_sha256='5151e89595b6330d53278993539735b9da829d0260824f012e5b70c0923ec325', approved_sha256='5151e89595b6330d53278993539735b9da829d0260824f012e5b70c0923ec325', record_path='.audit/approvals/id/pg-d3d0e92b450449d1a1c038aa3551ff36/5151e89595b6330d53278993539735b9da829d0260824f012e5b70c0923ec325/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json', warnings=()), 'decisions/job-queue.md': ReviewState(path='decisions/job-queue.md', page_key='pg-a8b773f6ba1049fb9d2aa06b738aeff7', state='approved', reason='record_matches_live', live_sha256='1725804e2b89b278a009d7ff76453c912f753104e16ad22be56b5c177d3c51cf', approved_sha256='1725804e2b89b278a009d7ff76453c912f753104e16ad22be56b5c177d3c51cf', record_path='.audit/approvals/id/pg-a8b773f6ba1049fb9d2aa06b738aeff7/1725804e2b89b278a009d7ff76453c912f753104e16ad22be56b5c177d3c51cf/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json', warnings=()), 'decisions/database.md': ReviewState(path='decisions/database.md', page_key='pg-8673afbc04c84c76b801fead03bbad64', state='approved', reason='record_matches_live', live_sha256='3aabc3cf50e8e8ca5d8bf85a6249fda836821bdcc92c2b7e8792945469e695b2', approved_sha256='3aabc3cf50e8e8ca5d8bf85a6249fda836821bdcc92c2b7e8792945469e695b2', record_path='.audit/approvals/id/pg-8673afbc04c84c76b801fead03bbad64/3aabc3cf50e8e8ca5d8bf85a6249fda836821bdcc92c2b7e8792945469e695b2/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json', warnings=())}"
+    },
+    {
+      "name": "r4-first-import-ran",
+      "ok": true,
+      "detail": "None"
+    },
+    {
+      "name": "r4-second-import-ran",
+      "ok": true,
+      "detail": "None"
+    },
+    {
+      "name": "r4-second-reached-before-release",
+      "ok": true,
+      "detail": "1793920281.651129 < 1793920282.667976"
+    },
+    {
+      "name": "r4-second-locked-after-release",
+      "ok": true,
+      "detail": "1793920282.9398022 >= 1793920282.667976"
+    },
+    {
+      "name": "first-imported-all",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue.md', 'decisions/log-format.md']"
+    },
+    {
+      "name": "second-found-all-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "correction-recorded",
+      "ok": true,
+      "detail": "[{'page': 'decisions/deploy-window.md', 'ref_id': '31cf43de-bc89-49a2-9022-c31afa42e3cd'}]"
+    },
+    {
+      "name": "session-2-live-pages",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue.md', 'decisions/log-format.md']"
+    },
+    {
+      "name": "session-2-live-content",
+      "ok": true,
+      "detail": "{'decisions/cache-layer.md': ['Cache layer\\n\\n# Cache layer\\n\\n## Decision\\n\\nCache layer\\n\\nPut me'], 'decisions/database.md': ['Database\\n\\n# Database\\n\\n## Decision\\n\\nDatabase\\n\\nUse Postgres 14'], 'decisions/deploy-window.md': ['Deploy on Tuesdays before noon.\\n\\n# Deploy on Tuesdays before'], 'decisions/job-queue.md': ['Job queue\\n\\n# Job queue\\n\\n## Decision\\n\\nJob queue\\n\\nUse RabbitMQ'], 'decisions/log-format.md': ['Log format\\n\\n# Log format\\n\\n## Decision\\n\\nLog format\\n\\nWrite pla']}"
+    },
+    {
+      "name": "session-2-one-live-memory-per-page-key",
+      "ok": true,
+      "detail": "{'page_key:pg-2e133d09fe2d4d3bbe4c1241ea78c070': 1, 'page_key:pg-8673afbc04c84c76b801fead03bbad64': 1, 'page_key:pg-254b46e955cf406192999e14d24515c9': 1, 'page_key:pg-a8b773f6ba1049fb9d2aa06b738aeff7': 1, 'page_key:pg-d3d0e92b450449d1a1c038aa3551ff36': 1}"
+    },
+    {
+      "name": "session-2-retired-records-kept",
+      "ok": true,
+      "detail": "{'Deploy on Fridays after 17:00 UTC.': 'superseded'}"
+    },
+    {
+      "name": "session-2-exact-page-set",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue.md', 'decisions/log-format.md', 'index.md', 'log.md']"
+    },
+    {
+      "name": "session-2-unique-page-ids",
+      "ok": true,
+      "detail": "['pg-2e133d09fe2d4d3bbe4c1241ea78c070', 'pg-8673afbc04c84c76b801fead03bbad64', 'pg-254b46e955cf406192999e14d24515c9', 'pg-a8b773f6ba1049fb9d2aa06b738aeff7', 'pg-d3d0e92b450449d1a1c038aa3551ff36']"
+    },
+    {
+      "name": "session-2-unique-index-entries",
+      "ok": true,
+      "detail": "['decisions/deploy-window.md', 'decisions/cache-layer.md', 'decisions/log-format.md', 'decisions/job-queue.md', 'decisions/database.md']"
+    },
+    {
+      "name": "session-2-no-duplicate-receipt",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "session-2-no-unfinished-ledger-entry",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "r3-export-again-writes-nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "r3-import-again-imports-nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "r3-live-pages",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue.md', 'decisions/log-format.md']"
+    },
+    {
+      "name": "r3-live-content",
+      "ok": true,
+      "detail": "{'decisions/cache-layer.md': ['Cache layer\\n\\n# Cache layer\\n\\n## Decision\\n\\nCache layer\\n\\nPut me'], 'decisions/database.md': ['Database\\n\\n# Database\\n\\n## Decision\\n\\nDatabase\\n\\nUse Postgres 14'], 'decisions/deploy-window.md': ['Deploy on Tuesdays before noon.\\n\\n# Deploy on Tuesdays before'], 'decisions/job-queue.md': ['Job queue\\n\\n# Job queue\\n\\n## Decision\\n\\nJob queue\\n\\nUse RabbitMQ'], 'decisions/log-format.md': ['Log format\\n\\n# Log format\\n\\n## Decision\\n\\nLog format\\n\\nWrite pla']}"
+    },
+    {
+      "name": "r3-one-live-memory-per-page-key",
+      "ok": true,
+      "detail": "{'page_key:pg-2e133d09fe2d4d3bbe4c1241ea78c070': 1, 'page_key:pg-8673afbc04c84c76b801fead03bbad64': 1, 'page_key:pg-254b46e955cf406192999e14d24515c9': 1, 'page_key:pg-a8b773f6ba1049fb9d2aa06b738aeff7': 1, 'page_key:pg-d3d0e92b450449d1a1c038aa3551ff36': 1}"
+    },
+    {
+      "name": "r3-retired-records-kept",
+      "ok": true,
+      "detail": "{'Deploy on Fridays after 17:00 UTC.': 'superseded'}"
+    },
+    {
+      "name": "r3-exact-page-set",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue.md', 'decisions/log-format.md', 'index.md', 'log.md']"
+    },
+    {
+      "name": "r3-unique-page-ids",
+      "ok": true,
+      "detail": "['pg-2e133d09fe2d4d3bbe4c1241ea78c070', 'pg-8673afbc04c84c76b801fead03bbad64', 'pg-254b46e955cf406192999e14d24515c9', 'pg-a8b773f6ba1049fb9d2aa06b738aeff7', 'pg-d3d0e92b450449d1a1c038aa3551ff36']"
+    },
+    {
+      "name": "r3-unique-index-entries",
+      "ok": true,
+      "detail": "['decisions/deploy-window.md', 'decisions/cache-layer.md', 'decisions/log-format.md', 'decisions/job-queue.md', 'decisions/database.md']"
+    },
+    {
+      "name": "r3-no-duplicate-receipt",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "r3-no-unfinished-ledger-entry",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "r3-same-summary",
+      "ok": true,
+      "detail": "{\"live\": {\"decisions/cache-layer.md\": [\"Cache layer\"], \"decisions/database.md\": [\"Database\"], \"decisions/deploy-window.md\": [\"Deploy on Tuesdays before noon.\"], \"decisions/job-queue.md\": [\"Job queue\"], \"decisions/log-format.md\": [\"Log format\"]}, \"retired\": {\"Deploy on Fridays after 17:00 UTC.\": \"superseded\"}, \"receipts\": 2, \"ledger_unfinished\": 0}"
+    },
+    {
+      "name": "r1-archive-failed",
+      "ok": true,
+      "detail": "/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/work/doc_internal/proposals/curator-2-successor"
+    },
+    {
+      "name": "r1-committed-before-the-failure",
+      "ok": true,
+      "detail": "committed"
+    },
+    {
+      "name": "r1-resolved-from-the-receipt",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "r1-nothing-reapplied",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "successor-approved",
+      "ok": true,
+      "detail": "approved: knowledge/wiki/.audit/approvals/id/pg-1c93b4e80d5e40818276e7b3a370aaa4/0ad1354d01aae9037fd98b4a284622dc0c4483bc4087e836994834522031ae53/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json"
+    },
+    {
+      "name": "curator-2-read-decisions/cache-layer.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-2-read-decisions/job-queue.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-2-read-decisions/database.md",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curator-2-promoted",
+      "ok": true,
+      "detail": "s/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/work/doc_internal/proposals/2026-11-05-181135-curator-2 update decisions/cache-layer.md update decisions/database.md update decisions/job-queue.md applied 5 edit(s); archived to /private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-15gjmljp/work/doc_internal/proposals/.applied/2026-11-05-181135-curator-2."
+    },
+    {
+      "name": "curator-2-approved",
+      "ok": true,
+      "detail": "e133d09fe2d4d3bbe4c1241ea78c070/390e6a05a13f38011a4d797d43c939a31b625431d1df8766d5829e4a4b058daa/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json approved: knowledge/wiki/.audit/approvals/id/pg-8673afbc04c84c76b801fead03bbad64/21c9a1f5de1521fee7c041d129f9a939d5a8ef91a30f94a3d110566fc1c23dd6/2259307d3440dd23c4b738948efdd0fbe94dc532334ad4fcd36a437e48e7f780/approved.json"
+    },
+    {
+      "name": "page-deleted",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "r2-both-live-after-the-kill",
+      "ok": true,
+      "detail": "{\"predecessor\": \"33063e06-f048-4924-a507-27ea0c8e69f1\", \"replacement\": \"b0cf3d67-f5a9-46a1-9cb9-81253dddca1e\"}"
+    },
+    {
+      "name": "import-completed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "deprecated-and-deleted-withdrawn",
+      "ok": true,
+      "detail": "[{'path': 'decisions/log-format.md', 'ref_id': '64fab02e-4bb2-46bb-b4ad-031f393a830e', 'reason': 'deleted'}, {'path': 'decisions/cache-layer.md', 'ref_id': '3fcc45b4-b9ba-45a5-943a-0f2a7cd374ff', 'reason': 'deprecated'}]"
+    },
+    {
+      "name": "superseded-by-the-successor",
+      "ok": true,
+      "detail": "[{'path': 'decisions/job-queue.md', 'ref_id': '8425b534-f485-491d-9c1c-ff8538f01dde', 'by': '1e246a7b-e051-40ca-8894-d3e78920878e'}]"
+    },
+    {
+      "name": "r2-supersession-completed",
+      "ok": true,
+      "detail": "b0cf3d67-f5a9-46a1-9cb9-81253dddca1e"
+    },
+    {
+      "name": "session-3-live-pages",
+      "ok": true,
+      "detail": "['decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue-arq.md']"
+    },
+    {
+      "name": "session-3-live-content",
+      "ok": true,
+      "detail": "{'decisions/deploy-window.md': ['Deploy on Tuesdays before noon.\\n\\n# Deploy on Tuesdays before'], 'decisions/database.md': ['Database\\n\\n# Database\\n\\n## Decision\\n\\nDatabase\\n\\nUse Postgres 16'], 'decisions/job-queue-arq.md': ['Job queue on arq\\n\\n# Job queue on arq\\n\\n## Decision\\n\\nJob queue']}"
+    },
+    {
+      "name": "session-3-one-live-memory-per-page-key",
+      "ok": true,
+      "detail": "{'page_key:pg-254b46e955cf406192999e14d24515c9': 1, 'page_key:pg-8673afbc04c84c76b801fead03bbad64': 1, 'page_key:pg-1c93b4e80d5e40818276e7b3a370aaa4': 1}"
+    },
+    {
+      "name": "session-3-retired-records-kept",
+      "ok": true,
+      "detail": "{'Deploy on Fridays after 17:00 UTC.': 'superseded', 'Put memcached in front of the user API.': 'withdrawn', 'Write plain-text logs to /var/log/app.log.': 'withdrawn', 'Use RabbitMQ for background jobs.': 'superseded', 'Use Postgres 14 for the user database.': 'superseded'}"
+    },
+    {
+      "name": "session-3-exact-page-set",
+      "ok": true,
+      "detail": "['decisions/cache-layer.md', 'decisions/database.md', 'decisions/deploy-window.md', 'decisions/job-queue-arq.md', 'decisions/job-queue.md', 'index.md', 'log.md']"
+    },
+    {
+      "name": "session-3-unique-page-ids",
+      "ok": true,
+      "detail": "['pg-2e133d09fe2d4d3bbe4c1241ea78c070', 'pg-8673afbc04c84c76b801fead03bbad64', 'pg-254b46e955cf406192999e14d24515c9', 'pg-1c93b4e80d5e40818276e7b3a370aaa4', 'pg-a8b773f6ba1049fb9d2aa06b738aeff7']"
+    },
+    {
+      "name": "session-3-unique-index-entries",
+      "ok": true,
+      "detail": "['decisions/deploy-window.md', 'decisions/cache-layer.md', 'decisions/job-queue.md', 'decisions/database.md', 'decisions/job-queue-arq.md']"
+    },
+    {
+      "name": "session-3-no-duplicate-receipt",
+      "ok": true,
+      "detail": "4"
+    },
+    {
+      "name": "session-3-no-unfinished-ledger-entry",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "start-block-has-no-wrong-rule",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "start-block-no-unapproved-debt",
+      "ok": true,
+      "detail": "d-15gjmljp/work/knowledge/wiki/index.md; read it before re-deriving project context. ### Curation debt superseded-still-indexed 1, weak-orphan 5 - superseded-still-indexed: decisions/job-queue.md - weak-orphan: decisions/cache-layer.md - weak-orphan: decisions/database.md Run `wiki-studio findings` for the full list. --- Purged 0 expired short-term memories. Use recall() / get(ref_id) for details."
+    },
+    {
+      "name": "right-answer-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wrong-rule-not-current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "answer-is-the-approved-revision",
+      "ok": true,
+      "detail": "['96fa07d54b3d47a617b8ec4b6c3c070a9d83903893918c4dc02361b483757e0f']"
+    }
+  ],
+  "convergence": {
+    "session-2-check": {
+      "live": {
+        "decisions/cache-layer.md": [
+          "Cache layer"
+        ],
+        "decisions/database.md": [
+          "Database"
+        ],
+        "decisions/deploy-window.md": [
+          "Deploy on Tuesdays before noon."
+        ],
+        "decisions/job-queue.md": [
+          "Job queue"
+        ],
+        "decisions/log-format.md": [
+          "Log format"
+        ]
+      },
+      "retired": {
+        "Deploy on Fridays after 17:00 UTC.": "superseded"
+      },
+      "receipts": 2,
+      "ledger_unfinished": 0
+    },
+    "session-3": {
+      "live": {
+        "decisions/database.md": [
+          "Database"
+        ],
+        "decisions/deploy-window.md": [
+          "Deploy on Tuesdays before noon."
+        ],
+        "decisions/job-queue-arq.md": [
+          "Job queue on arq"
+        ]
+      },
+      "retired": {
+        "Deploy on Fridays after 17:00 UTC.": "superseded",
+        "Put memcached in front of the user API.": "withdrawn",
+        "Write plain-text logs to /var/log/app.log.": "withdrawn",
+        "Use RabbitMQ for background jobs.": "superseded",
+        "Use Postgres 14 for the user database.": "superseded"
+      },
+      "receipts": 4,
+      "ledger_unfinished": 0
+    }
+  },
+  "finished_at": "2026-11-05T23:11:51Z"
+}

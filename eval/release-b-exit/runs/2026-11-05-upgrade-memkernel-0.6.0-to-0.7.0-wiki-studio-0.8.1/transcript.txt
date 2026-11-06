@@ -1,0 +1,60 @@
+== u-session-0
+ok: memkernel-0.6.0
+W1105 18:21:48.947000 83952 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 6319.77it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: 0.6-export-gated
+ok: u-curator-0-read-decisions/deploy-window.md
+ok: u-curator-0-read-decisions/code-review.md
+ok: u-curator-0-promoted
+ok: u-curator-0-approved
+ok: 0.6-import-governed
+ok: 0.6-wiki-memories
+== upgrade: pip install /var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/downloads/memkernel-0.7.0/memkernel-0.7.0-py3-none-any.whl
+Processing /var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/downloads/memkernel-0.7.0/memkernel-0.7.0-py3-none-any.whl
+Installing collected packages: memkernel
+  Attempting uninstall: memkernel
+    Found existing installation: memkernel 0.6.0
+    Uninstalling memkernel-0.6.0:
+      Successfully uninstalled memkernel-0.6.0
+Successfully installed memkernel-0.7.0
+== u-session-1
+ok: memkernel-0.7-installed
+W1105 18:21:58.377000 85453 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 15660.03it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: every-page-ambiguous
+ok: nothing-imported
+ok: no-memory-changed
+== u-session-2
+W1105 18:22:03.887000 85736 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10900.62it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: nothing-ambiguous
+ok: records-adopted
+ok: no-duplicate-record
+== u-curator
+ok: u-curator-read-decisions/deploy-window.md
+ok: u-curator-promoted
+ok: u-curator-approved
+== u-session-3
+W1105 18:22:09.647000 85956 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 24651.26it/s]
+/private/var/folders/7y/_v47p2q12qq_9gdj_5d9qk4c0000gn/T/memkernel-exit-record-xytm76jf/venv/lib/python3.11/site-packages/memkernel/retrieval/embeddings.py:21: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  raw_dim = self._model.get_sentence_embedding_dimension()
+ok: correction-recorded
+ok: right-answer-current
+ok: wrong-rule-not-current
+ok: upgrade-live-pages
+ok: upgrade-live-content
+ok: upgrade-one-live-memory-per-page-key
+ok: upgrade-retired-records-kept
+ok: upgrade-exact-page-set
+ok: upgrade-unique-page-ids
+ok: upgrade-unique-index-entries
+ok: upgrade-no-duplicate-receipt
+ok: upgrade-no-unfinished-ledger-entry
+run: every check passed (30 of 30 checks passed)
