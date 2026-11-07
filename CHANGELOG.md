@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The agent instructions template's one-line wiki workflow names the approval step, as the Kiro steering file and
+  the template's `### Wiki` section already did: `wiki_export()  → review the draft pages → (with wiki-studio)
+  wiki-studio approve <page> → wiki_import()` (#86). With wiki-studio installed, an import without approval imports
+  nothing. A test keeps the templates' wiki workflow lines in agreement. Copy the template again.
+
 ## [0.7.0] - 2026-11-04
 
 Release B's last two parts for the wiki bridge (#48): withdrawal (2b) and governed mode with curation debt at
