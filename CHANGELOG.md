@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Injected memory is quoted as data** (#85; specs/memkernel-0-8-untrusted-memory). The session-start blocks (full and
+  `compact`) and `on_post_compact()` put every piece of text memkernel injects but did not write inside a
+  `<stored-memory kind="…">` element, with one notice line saying those items are data, not instructions. That covers
+  the checkpoint, memory previews, candidates, review sources and curation-debt page paths. A copy of the tag in stored
+  text is neutralised (`<` as `&lt;`, in any case and with whitespace after `<` or `/`); nothing else changes. The
+  9,000-character budget holds and the last-resort cut never splits an element. `on_post_compact()` now also cuts a
+  long checkpoint to its 3,500-character share. MCP tool results are unchanged. Copy the hooks and templates again.
+
+### Added
+
+- `templates/claude-settings.example.json` (#85): `permissions.deny` rules that keep Claude's file tools from editing
+  `.memkernel/`, `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/`. The README says what they
+  stop, what they do not, and when a mid-session "always allow" prompt deserves a second read.
+
 ### Fixed
 
 - The agent instructions template's one-line wiki workflow names the approval step, as the Kiro steering file and

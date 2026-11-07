@@ -237,8 +237,10 @@ def _render(result: dict[str, Any]) -> list[str]:
     head = ["", HEADING_CURATION_DEBT]
     room = CURATION_DEBT_BUDGET - len("\n".join([*head, "", CURATION_HINT]))
     lines = [*head, _clip(", ".join(parts), room)]
+    from memkernel.lifecycle import STORED_KIND_DEBT, stored  # lazily: lifecycle imports this module
+
     for kind, page in result["examples"]:
-        line = f"- {kind}: {page}"
+        line = f"- {kind}: {stored(page, STORED_KIND_DEBT)}"  # the page path comes from the wiki: quoted as data
         if len("\n".join([*lines, line, CURATION_HINT])) > CURATION_DEBT_BUDGET:
             break
         lines.append(line)

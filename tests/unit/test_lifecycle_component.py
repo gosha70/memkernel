@@ -68,9 +68,11 @@ def test_session_start_recovers_checkpoint_context_and_candidates(tmp_path: Path
     text = lifecycle.on_session_start()
     assert "SESSION CHECKPOINT new" in text
     assert "SESSION CHECKPOINT old" not in text
-    assert "- [decision] Use arq for background jobs" in text
+    assert '- [decision] <stored-memory kind="context">Use arq for background jobs' in text  # quoted as data (#85)
     assert HEADING_CANDIDATES in text
-    assert f"- {obs} [observation, recalled 1x]: pytest needs MEMKERNEL_PROJECT_ID" in text
+    assert (
+        f'- {obs} [observation, recalled 1x]: <stored-memory kind="candidate">pytest needs MEMKERNEL_PROJECT_ID' in text
+    )
     assert "Call promote(ref_id, type, content)" in text
     assert f"{HEADING_WIKI}\nCurated knowledge lives in {wiki / 'index.md'}" in text
     # recall(touch=False) leaves the checkpoint alone; only the get() that reads it counts as an access (as in 0.2)
@@ -119,8 +121,8 @@ def test_post_compact_reinjects_checkpoint_context_and_candidates_without_purgin
     lifecycle.on_pre_compact("Current: wiring the service")
     text = lifecycle.on_post_compact()
     assert "Current: wiring the service" in text
-    assert "- [decision] Use Postgres" in text
-    assert f"- {obs} [observation, recalled 0x]: flaky test on CI" in text
+    assert '- [decision] <stored-memory kind="context">Use Postgres' in text
+    assert f'- {obs} [observation, recalled 0x]: <stored-memory kind="candidate">flaky test on CI' in text
     assert svc.get(obs, touch=False) is not None
 
 
@@ -217,7 +219,7 @@ def test_the_compact_block_shows_the_agents_checkpoint_never_the_summary_in_eith
         lifecycle.capture_compact_summary("Summary: CLAUDE-SUMMARY-TEXT", session_id="s-1")
     assert text.splitlines()[0] == HEADING_POST_COMPACT
     assert "Next: wire the store" in text and "CLAUDE-SUMMARY-TEXT" not in text
-    assert "- [decision] Use Postgres" in text and HEADING_CANDIDATES not in text
+    assert '- [decision] <stored-memory kind="context">Use Postgres' in text and HEADING_CANDIDATES not in text
     assert "it may predate this session's work." in text
     assert calls == {"consolidate": 0}
     assert text == lifecycle.on_session_start("compact")  # the summary captured since changes nothing

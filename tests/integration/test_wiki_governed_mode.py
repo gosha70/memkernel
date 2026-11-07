@@ -556,7 +556,9 @@ def test_the_startup_block_shows_the_debt_within_budget(tmp_path: Path, monkeypa
     section = block[block.index(HEADING_CURATION_DEBT) - 1 :].split("\n---\n")[0].rstrip("\n")
     lines = section.split("\n")
     assert lines[2].startswith("unapproved 1, approval-stale 1") and lines[2].endswith("sync failed 1"), lines
-    assert lines[3:5] == [f"- unapproved: {unapproved}", f"- approval-stale: {stale}"] and lines[-1] == CURATION_HINT
+    debt = '<stored-memory kind="debt">{}</stored-memory>'  # the page paths come from the wiki: quoted as data (#85)
+    assert lines[3:5] == [f"- unapproved: {debt.format(unapproved)}", f"- approval-stale: {debt.format(stale)}"]
+    assert lines[-1] == CURATION_HINT
     assert len(section) <= curation.CURATION_DEBT_BUDGET and len(block) <= TOTAL_BUDGET
     assert budgets[0] == CONTEXT_BUDGET - len(section)  # the context share gives up exactly the section
 
