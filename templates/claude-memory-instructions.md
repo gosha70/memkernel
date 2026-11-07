@@ -43,7 +43,7 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
   promote(ref_id=…, type="fact"|"decision"|"procedure", content="<distilled, one idea>")
 
 ### Curating knowledge
-  wiki_export()  → review the draft pages → wiki_import()
+  wiki_export()  → review the draft pages → (with wiki-studio) wiki-studio approve <page> → wiki_import()
 ```
 
 ---
