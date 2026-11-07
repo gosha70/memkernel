@@ -1,7 +1,7 @@
 ---
 feature_id: memkernel-0-8-untrusted-memory
 spec_mode: full
-status: draft
+status: approved
 date: 2026-11-06
 collaboration_mode: single
 origin:

@@ -35,9 +35,12 @@ literal tag in the markdown block:
 ```
 
 - A list item becomes `- [decision] <stored-memory ref_id="…">…preview…</stored-memory>`, on one line.
-- **Only the tag itself is escaped** (the owner's amendment). Any `<stored-memory` or `</stored-memory` inside the
-  stored text, matched in any case (`<Stored-Memory`, `</STORED-MEMORY`), is neutralised before wrapping: its `<`
-  becomes `&lt;`. Every other `<` in stored text is left exactly as it is. So stored text can never close or open
+- **Only the tag itself is escaped** (the owner's amendments). Any opening or closing tag inside the stored text is
+  neutralised before wrapping:
+  - matched in any case: `<Stored-Memory`, `</STORED-MEMORY`;
+  - with whitespace after `<` or after `/`: `< stored-memory`, `</ stored-memory>`, `< / stored-memory`.
+
+  The match is the pattern `<\s*/?\s*stored-memory`, case-insensitive. The match's `<` becomes `&lt;`. Every other `<` in stored text is left exactly as it is. So stored text can never close or open
   a block, and that replacement is the only change made to stored text.
 - The block is read as raw text, never entity-decoded, so `&lt;` stays inert. Stored text that already contains
   `&lt;stored-memory` is left as it is: it opens nothing.
@@ -148,8 +151,12 @@ recalled content" stays open; this spec marks injected text, it does not sanitis
   - the notice appears once per block;
   - headings are unchanged;
   - memkernel's own lines are outside the elements.
-- **SC-2:** stored text containing `</stored-memory>`, `<stored-memory kind="x">` and mixed-case forms
-  (`</Stored-Memory>`) is neutralised, while other `<` characters (`a < b`, `<div>`) are left unchanged. No element in
+- **SC-2:** each of these forms in stored text is neutralised:
+  - `</stored-memory>` and `<stored-memory kind="x">`;
+  - mixed case: `</Stored-Memory>`;
+  - whitespace after `<` or `/`: `< stored-memory`, `</ stored-memory>`, `< / stored-memory`.
+
+  Other `<` characters (`a < b`, `<div>`) are left unchanged. No element in
   the block closes early, and parsing the block finds exactly the elements memkernel wrote.
 - **SC-3:** with every section over its share and the tag inside the stored text, the block is under 9,000
   characters and balanced, for the `startup`, `compact` and post-compact paths.
