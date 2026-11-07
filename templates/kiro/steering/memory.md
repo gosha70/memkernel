@@ -36,3 +36,7 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 
 ### Curating knowledge
   wiki_export()  → review the draft pages → (with wiki-studio) wiki-studio approve <page> → wiki_import()
+
+How a page is written, cited, linted and approved is wiki-studio's job: follow its curator persona,
+`WIKI_MAINTAINER.md`, shipped inside the wiki-studio package, not this file. Print its path with
+`python -c "import importlib.resources as r; print(r.files('wiki_studio') / 'schema' / 'WIKI_MAINTAINER.md')"`.
