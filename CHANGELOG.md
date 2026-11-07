@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-07
+
+Injected memory is quoted as data (#85), with a recommended Claude Code permissions example, and the agent
+instructions template's wiki workflow line names the approval step (#86).
+
 ### Changed
 
 - **Injected memory is quoted as data** (#85; specs/memkernel-0-8-untrusted-memory). The session-start blocks (full and
@@ -492,7 +497,8 @@ until that is fixed, this is memkernel-0-6 SC-8's interim result.
   tree-sitter AST chunking; episode TTL; dedup by content hash; FastAPI admin
   API; Claude Code hook templates.
 
-[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/gosha70/memkernel/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/gosha70/memkernel/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gosha70/memkernel/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gosha70/memkernel/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gosha70/memkernel/compare/v0.4.1...v0.5.0
