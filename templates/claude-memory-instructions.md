@@ -172,6 +172,12 @@ returns the reviewed version. With wiki-studio installed the import is governed:
 curator approved (`wiki-studio approve`) are imported, and an approved page's `corrects:` key
 supersedes the memories it names.
 
+This file covers the memory side only: when to export, when to import, and what the import brings
+back. Curating the pages is wiki-studio's job, described once in its curator persona,
+`WIKI_MAINTAINER.md`: page types, citations, writing and linking a page, linting, and the propose,
+promote and approve loop. Follow the project's copy at `<wiki>/schema/WIKI_MAINTAINER.md` if it has
+one, else the one shipped in the wiki-studio package; this file does not restate those steps.
+
 ### Hook setup (automated)
 
 See `templates/hooks/` for Python scripts that automate the session-start, pre-compaction

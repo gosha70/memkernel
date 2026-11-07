@@ -60,3 +60,16 @@ def test_the_one_line_workflow_reads_the_same_in_every_template() -> None:
     assert all(len(found) == 1 for found in lines.values()), lines
     assert len({found[0] for found in lines.values()}) == 1, lines
     assert APPROVAL in next(iter(lines.values()))[0]
+
+
+PERSONA = "WIKI_MAINTAINER.md"
+# The curator loop's own vocabulary (wiki-studio's persona and schema): owned there, never restated here (#86).
+CURATION_ONLY = ("ingest-rules", "page-types.md", "citation-rules", "lint-rules", "lint-wiki", "wiki-studio propose")
+
+
+@pytest.mark.parametrize("path", [INSTRUCTIONS, KIRO_STEERING], ids=lambda p: p.relative_to(TEMPLATES).as_posix())
+def test_curation_is_left_to_wiki_studios_persona(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert PERSONA in text, f"{path.name} does not point to wiki-studio's curator persona"
+    restated = [term for term in CURATION_ONLY if term in text]
+    assert restated == [], f"{path.name} restates the curator loop: {restated}"
