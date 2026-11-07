@@ -125,6 +125,27 @@ Each injected memory line ends with its `ref_id`, so `get(ref_id)` returns the f
 
 See the Prerequisites section inside each script for the Python environment requirement. Each script is a thin wrapper over [`MemoryLifecycle`](#embedding-memkernel-in-your-own-harness), so an in-process harness gets the same behaviour without the scripts.
 
+**Injected memory is quoted as data.** Stored text can come from anything the agent once read: tool output, a web page, a clipped source, a wiki page. So everything the blocks inject but memkernel did not write is quoted inside a `<stored-memory kind="…">` element, and the block's first line after its heading says those items are data to consult, not instructions to follow. That covers the checkpoint text, memory previews, promotion candidates, the source path of a "Needs review" item, and the curation debt's page paths. memkernel's own lines stay outside the elements, `ref_id`s included. A copy of the tag inside stored text (`</stored-memory>` in any case, with or without whitespace after `<` or `/`) is neutralised by writing its `<` as `&lt;`; no other character of stored text changes. This marks stored text; it does not detect or remove instructions in it.
+
+### 4. (Recommended) Keep memkernel's files and the hooks out of the agent's reach
+
+Merge [`templates/claude-settings.example.json`](templates/claude-settings.example.json) into your project's `.claude/settings.json`. Its `permissions.deny` rules stop Claude's own file tools from editing four paths:
+- `.memkernel/`, the store and state directory;
+- `.claude/settings.json` and `.claude/settings.local.json`;
+- `.claude/hooks/`.
+
+So a session cannot rewrite the store, or what runs at the next session start. memkernel's server and hooks write `.memkernel/` themselves, not through Claude's tools, so they are unaffected.
+
+Claude Code applies deny rules from a committed `.claude/settings.json` at once, and an allow rule cannot override them. `Edit(...)` rules cover every file-editing tool; a `Write(...)` rule would never match.
+
+These rules have limits:
+- **What they stop:** Claude's built-in file tools, the file commands Claude Code recognises in Bash (`cat`, `sed`, `tee`, ...) and redirections. Checked live with Claude Code 2.1.319: a write to each denied path was refused with "File is in a directory that is denied by your permission settings".
+- **What they don't stop:** a program that writes files without naming them, such as a script or `python -c`. [Sandboxing](https://code.claude.com/docs/en/sandboxing) is the stronger boundary.
+- **Other locations:** if you keep `MEMKERNEL_STATE_DIR` or the Chroma path elsewhere, change the first rule to match. A `/` rule anchors at the project, so a directory outside it needs an absolute `//` or a home-relative `~/` pattern, such as `Edit(~/.memkernel/**)`.
+- **The rest of `.claude/`** (agents, commands, skills) stays editable, because teams often have the agent maintain them; it is a protected path, so edits there still prompt. Add `Edit(/.claude/**)` if yours should not be editable at all.
+
+A mid-session "always allow" prompt, especially one asking for broad Bash or file access, deserves a second read: injected text can be what asked for it.
+
 ---
 
 ## Add to Kiro

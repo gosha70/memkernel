@@ -216,7 +216,9 @@ def test_session_start_lists_needs_review_only_when_flagged(tmp_path: Path) -> N
     assert HEADING_NEEDS_REVIEW not in text
     path.write_text(V2, encoding="utf-8")
     text = lifecycle.on_session_start()
-    assert f"{HEADING_NEEDS_REVIEW}\n- src/app.py — changed — {ref}\n" in text
+    assert (
+        f'{HEADING_NEEDS_REVIEW}\n- <stored-memory kind="review">src/app.py</stored-memory> — changed — {ref}\n' in text
+    )
     assert "retain the file again as code" in text
     # the 0.3 headings are untouched
     for heading in ("## Recovered from MemKernel (session start)", "### Latest checkpoint", "### Long-term context"):
