@@ -175,8 +175,11 @@ supersedes the memories it names.
 This file covers the memory side only: when to export, when to import, and what the import brings
 back. Curating the pages is wiki-studio's job, described once in its curator persona,
 `WIKI_MAINTAINER.md`: page types, citations, writing and linking a page, linting, and the propose,
-promote and approve loop. Follow the project's copy at `<wiki>/schema/WIKI_MAINTAINER.md` if it has
-one, else the one shipped in the wiki-studio package; this file does not restate those steps.
+promote and approve loop. Follow it for those steps; this file does not restate them. wiki-studio
+ships it inside its package; print its path, in the environment where wiki-studio is installed, with
+`python -c "import importlib.resources as r; print(r.files('wiki_studio') / 'schema' / 'WIKI_MAINTAINER.md')"`.
+wiki-studio reads no project copy of it: the only project copies it loads from `<wiki>/schema/` are
+its three prompt documents, never the persona.
 
 ### Hook setup (automated)
 
