@@ -20,6 +20,10 @@ instructions template's wiki workflow line names the approval step (#86).
   text is neutralised (`<` as `&lt;`, in any case and with whitespace after `<` or `/`); nothing else changes. The
   9,000-character budget holds and the last-resort cut never splits an element. `on_post_compact()` now also cuts a
   long checkpoint to its 3,500-character share. MCP tool results are unchanged. Copy the hooks and templates again.
+- The agent instructions template and the Kiro steering file cover the memory side of the wiki only, and leave
+  curation (page types, citations, linting, the propose, promote and approve loop) to wiki-studio's curator persona,
+  `WIKI_MAINTAINER.md`, which ships inside the wiki-studio package; they give the command that prints its path
+  (#86, #109). wiki-studio reads no project copy of the persona. Copy the templates again.
 
 ### Added
 
