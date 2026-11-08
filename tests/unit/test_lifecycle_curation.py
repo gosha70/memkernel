@@ -67,11 +67,23 @@ def test_no_debt_renders_nothing() -> None:
     assert curation._render(_result({})) == []
 
 
-def test_examples_put_review_kinds_first_in_order() -> None:
+def _collect_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, counts: dict[str, int], findings: list[tuple[str, str]]
+) -> dict[str, Any]:
+    """Run the real ``_collect`` on an ungoverned wiki whose wiki-studio calls return ``counts`` and ``findings``."""
+    monkeypatch.setattr(curation, "gate_available", lambda: object())
+    monkeypatch.setattr(curation, "wiki_id", lambda *args: "w")
+    monkeypatch.setattr(curation, "wiki_key", lambda *args: "k")
+    monkeypatch.setattr(curation, "curation_findings", lambda *args: (counts, findings))
+    return curation._collect(tmp_path, tmp_path, False, None, "p", lambda stage: None)
+
+
+def test_examples_put_review_kinds_first_in_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     findings = [("weak-orphan", "a.md"), ("approval-stale", "b.md"), ("stale-claim", "c.md"), ("unapproved", "d.md")]
-    review = set(curation.CURATION_REVIEW_KINDS)
-    chosen = sorted(findings, key=lambda f: (f[0] not in review, *curation._rank(f[0])))[:3]
-    assert chosen == [("unapproved", "d.md"), ("approval-stale", "b.md"), ("stale-claim", "c.md")]
+
+    collected = _collect_with(tmp_path, monkeypatch, {}, findings)
+
+    assert collected["examples"] == [("unapproved", "d.md"), ("approval-stale", "b.md"), ("stale-claim", "c.md")]
 
 
 def test_conflict_kinds_rank_after_review_kinds_and_before_stale_claims(
@@ -82,12 +94,8 @@ def test_conflict_kinds_rank_after_review_kinds_and_before_stale_claims(
     counts |= {"conflict-one-sided": 3, "unapproved": 1}
     findings = [("stale-claim", "a.md"), ("conflict-dangling", "b.md"), ("open-conflict", "c.md")]
     findings += [("unapproved", "d.md"), ("conflict-one-sided", "e.md")]
-    monkeypatch.setattr(curation, "gate_available", lambda: object())
-    monkeypatch.setattr(curation, "wiki_id", lambda *args: "w")
-    monkeypatch.setattr(curation, "wiki_key", lambda *args: "k")
-    monkeypatch.setattr(curation, "curation_findings", lambda *args: (counts, findings))
 
-    collected = curation._collect(tmp_path, tmp_path, False, None, "p", lambda stage: None)
+    collected = _collect_with(tmp_path, monkeypatch, counts, findings)
     rendered = curation._render(collected)
 
     assert rendered[2] == ", ".join(f"{kind} {counts[kind]}" for kind in order)
