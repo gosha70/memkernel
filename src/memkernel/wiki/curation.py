@@ -51,6 +51,9 @@ CURATION_REVIEW_KINDS = ("unapproved", "approval-stale", "approval-policy-change
 # memkernel's own order, never wiki-studio's dictionary order; a kind not listed follows, by name.
 CURATION_KIND_ORDER = (
     *CURATION_REVIEW_KINDS,
+    "open-conflict",
+    "conflict-one-sided",
+    "conflict-dangling",
     "stale-claim",
     "weak-orphan",
     "missing-cross-link",

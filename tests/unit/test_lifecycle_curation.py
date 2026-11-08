@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -29,6 +29,9 @@ from memkernel.wiki.ledger import (
     _memory_lock,
     snapshot_unfinished_in_memory,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -69,6 +72,26 @@ def test_examples_put_review_kinds_first_in_order() -> None:
     review = set(curation.CURATION_REVIEW_KINDS)
     chosen = sorted(findings, key=lambda f: (f[0] not in review, *curation._rank(f[0])))[:3]
     assert chosen == [("unapproved", "d.md"), ("approval-stale", "b.md"), ("stale-claim", "c.md")]
+
+
+def test_conflict_kinds_rank_after_review_kinds_and_before_stale_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order = ["unapproved", "open-conflict", "conflict-one-sided", "conflict-dangling", "stale-claim", "no-page-id"]
+    counts = {"no-page-id": 6, "conflict-dangling": 4, "stale-claim": 5, "open-conflict": 2}
+    counts |= {"conflict-one-sided": 3, "unapproved": 1}
+    findings = [("stale-claim", "a.md"), ("conflict-dangling", "b.md"), ("open-conflict", "c.md")]
+    findings += [("unapproved", "d.md"), ("conflict-one-sided", "e.md")]
+    monkeypatch.setattr(curation, "gate_available", lambda: object())
+    monkeypatch.setattr(curation, "wiki_id", lambda *args: "w")
+    monkeypatch.setattr(curation, "wiki_key", lambda *args: "k")
+    monkeypatch.setattr(curation, "curation_findings", lambda *args: (counts, findings))
+
+    collected = curation._collect(tmp_path, tmp_path, False, None, "p", lambda stage: None)
+    rendered = curation._render(collected)
+
+    assert rendered[2] == ", ".join(f"{kind} {counts[kind]}" for kind in order)
+    assert collected["examples"] == [("unapproved", "d.md"), ("open-conflict", "c.md"), ("conflict-one-sided", "e.md")]
 
 
 @pytest.mark.parametrize("over", [{"wiki_dir": ""}, {"wiki_mode": "ungated"}])
