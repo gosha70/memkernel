@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The curation debt section ranks wiki-studio 0.9.0's conflict findings (#111): `open-conflict`,
+  `conflict-one-sided` and `conflict-dangling` now follow the review kinds and come before `stale-claim`, in the
+  counts line and the example lines. Before, they sorted last, by name.
+
 ## [0.8.0] - 2026-11-07
 
 Injected memory is quoted as data (#85), with a recommended Claude Code permissions example, and the agent
