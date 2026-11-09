@@ -22,7 +22,7 @@ memkernel = "memkernel.mcp.server:main"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-mcp = ">=1.25,<2"
+mcp = ">=2.3,<3"
 chromadb = ">=1.0,<2"
 sentence-transformers = ">=4.0,<6"
 rank-bm25 = ">=0.2"

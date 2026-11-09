@@ -7,22 +7,23 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP  # noqa: TC002 — runtime import required by FastMCP introspection
-from mcp.server.fastmcp.server import Context  # noqa: TC002
+from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 — runtime import required by MCPServer introspection
 
 from memkernel.core.models import DEFAULT_ASK_MODE, MemoryTier, MemoryType
+from memkernel.mcp.tools.errors import reported_errors
 
 
-def _service(ctx: Context[Any, Any, Any] | None) -> Any:
+def _service(ctx: Context[Any, Any] | None) -> Any:
     if ctx is None:
         raise RuntimeError("Tool called outside of MCP request context")
     return ctx.request_context.lifespan_context.memory_service
 
 
-def register_memory_tools(server: FastMCP[Any]) -> None:
+def register_memory_tools(server: MCPServer[Any]) -> None:
     """Register the memory tools on the server."""
 
     @server.tool()
+    @reported_errors
     async def retain(
         content: str,
         type: str,  # noqa: A002
@@ -32,7 +33,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         importance: float | None = None,
         tags: list[str] | None = None,
         supersedes: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Store a memory. Returns ref_id. Idempotent for identical content+type.
 
@@ -57,6 +58,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         return json.dumps({"ref_id": ref_id})
 
     @server.tool()
+    @reported_errors
     async def recall(
         query: str,
         type: str | None = None,  # noqa: A002
@@ -66,7 +68,7 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         top_k: int | None = None,
         include_needs_review: bool = False,
         order: str = "relevance",
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Search memories by query. Returns ref_id + preview pairs ranked by relevance,
         recency and importance. Use get(ref_id) for full content.
@@ -93,9 +95,10 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         return json.dumps([ref.model_dump(mode="json") for ref in results])
 
     @server.tool()
+    @reported_errors
     async def get(
         ref_id: str,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Retrieve full content of a memory by ref_id."""
         svc = _service(ctx)
@@ -105,9 +108,10 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         return json.dumps(memory.model_dump(mode="json", exclude={"chunk_refs"}))
 
     @server.tool()
+    @reported_errors
     async def forget(
         ref_id: str,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Delete a memory by ref_id. Removes from all indexes."""
         svc = _service(ctx)
@@ -115,13 +119,14 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         return json.dumps({"ref_id": ref_id, "deleted": deleted})
 
     @server.tool()
+    @reported_errors
     async def promote(
         ref_id: str,
         type: str,  # noqa: A002
         content: str | None = None,
         importance: float | None = None,
         tags: list[str] | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Promote a short-term/working memory into a long-term type (decision, convention,
         fact, code, procedure). Pass the distilled `content`; defaults to the original text.
@@ -140,12 +145,13 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         return json.dumps({"ref_id": new_ref, "promoted_from": ref_id})
 
     @server.tool()
+    @reported_errors
     async def consolidate(
         session_id: str | None = None,
         limit: int = 20,
         synthesize: bool = False,
         revalidate: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Run a consolidation pass: purge expired short-term memories and return the
         short-term/working memories most worth promoting (ranked by importance and how
@@ -161,11 +167,12 @@ def register_memory_tools(server: FastMCP[Any]) -> None:
         )
 
     @server.tool()
+    @reported_errors
     async def ask(
         ref_id: str,
         question: str,
         mode: str = DEFAULT_ASK_MODE,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Answer a question about one memory without loading it into context. For a
         document memory the full body is consulted. mode: direct | rag | rlm | auto, passed

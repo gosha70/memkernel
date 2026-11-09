@@ -8,14 +8,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP  # noqa: TC002 — runtime import required by FastMCP introspection
-from mcp.server.fastmcp.server import Context  # noqa: TC002
+from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 — runtime import required by MCPServer introspection
 
+from memkernel.mcp.tools.errors import reported_errors
 from memkernel.wiki.studio import INSTALL_HINT, WIKI_MODE_UNGATED
 from memkernel.wiki.sync import UNGATED_LINT_HINT, WikiExporter, WikiImporter
 
 
-def _context(ctx: Context[Any, Any, Any] | None) -> Any:
+def _context(ctx: Context[Any, Any] | None) -> Any:
     if ctx is None:
         raise RuntimeError("Tool called outside of MCP request context")
     return ctx.request_context.lifespan_context
@@ -28,13 +28,14 @@ def _resolve_wiki_dir(wiki_dir: str | None, settings: Any) -> Path:
     return Path(resolved)
 
 
-def register_wiki_tools(server: FastMCP[Any]) -> None:
+def register_wiki_tools(server: MCPServer[Any]) -> None:
     """Register wiki_export and wiki_import on the server."""
 
     @server.tool()
+    @reported_errors
     async def wiki_export(
         wiki_dir: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Compile long-term memories (decision, convention, fact, procedure) that have no wiki
         page yet into draft markdown pages under wiki_dir (default MEMKERNEL_WIKI_DIR), and
@@ -104,12 +105,13 @@ def register_wiki_tools(server: FastMCP[Any]) -> None:
         return json.dumps(payload)
 
     @server.tool()
+    @reported_errors
     async def wiki_import(
         wiki_dir: str | None = None,
         adopt_legacy: bool = False,
         adopt_pages: list[dict[str, str]] | None = None,
         adopt_manifest: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
+        ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Index wiki pages under wiki_dir (default MEMKERNEL_WIKI_DIR) as long-term memories so
         recall() can find them. With wiki-studio >= 0.7.0 installed the import is governed

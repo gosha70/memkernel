@@ -30,11 +30,11 @@ src/memkernel/storage/   ChromaDB adapter (VectorStorePort)
 src/memkernel/retrieval/ AST chunker, sentence-transformers embedding, BM25, HybridSearchService + rescore
 src/memkernel/memory/    lifecycle (decay, retention), TTL policies, dedup
 src/memkernel/wiki/      LLM-wiki bridge (export drafts, import pages)
-src/memkernel/mcp/       FastMCP server + tools; src/memkernel/api/ FastAPI admin
+src/memkernel/mcp/       MCPServer (mcp 2.x) + tools; src/memkernel/api/ FastAPI admin
 src/memkernel/factory.py build_service() — the supported embedding entry point
 templates/               CLAUDE.md snippet, Claude Code hook scripts (session-start, pre/post-compact), kiro/ (mcp.json, steering, hooks)
 tests/unit, tests/e2e    unit tests use chromadb.EphemeralClient() + tests/conftest.py MockEmbedding;
-                         e2e uses mcp.shared.memory.create_connected_server_and_client_session
+                         e2e uses mcp.Client(server) in process, and real stdio/HTTP in test_mcp_transports.py
 ```
 
 ## Conventions that CI enforces

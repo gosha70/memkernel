@@ -198,7 +198,7 @@ async def _call(
         for name, arguments in calls:
             result = await session.call_tool(name, arguments=arguments)
             text = "".join(getattr(block, "text", "") for block in result.content)
-            if result.isError:
+            if result.is_error:
                 raise RuntimeError(f"{name} returned an error: {text[:500]}")
             results.append(json.loads(text))
     return results
