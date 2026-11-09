@@ -239,7 +239,7 @@ def test_auto_without_wiki_studio_is_ungated(tmp_path: Path, monkeypatch: pytest
 
 @pytest.mark.e2e
 async def test_the_tools_report_the_mode(tmp_path: Path) -> None:
-    from mcp.shared.memory import create_connected_server_and_client_session
+    from mcp import Client
 
     from memkernel.mcp.server import create_server
 
@@ -251,7 +251,7 @@ async def test_the_tools_report_the_mode(tmp_path: Path) -> None:
         wiki_mode="ungated",
     )
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         await client.call_tool("retain", arguments={"content": DECISION, "type": "decision"})
         export = json.loads((await client.call_tool("wiki_export", arguments={})).content[0].text)  # type: ignore[union-attr]
         imported = json.loads((await client.call_tool("wiki_import", arguments={})).content[0].text)  # type: ignore[union-attr]

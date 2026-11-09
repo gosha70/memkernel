@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from memkernel.config import MemKernelSettings
 from memkernel.factory import build_service
@@ -36,10 +36,17 @@ class MemKernelContext:
     settings: MemKernelSettings
 
 
+@dataclass
+class _Running:
+    """The lifespan context while the server runs, for handlers that cannot take a Context (static resources)."""
+
+    context: MemKernelContext | None = None
+
+
 def create_server(
     settings: MemKernelSettings | None = None,
     embedding: EmbeddingPort | None = None,
-) -> FastMCP[MemKernelContext]:
+) -> MCPServer[MemKernelContext]:
     """Factory — single source of truth for settings.
 
     The lifespan closure captures ``settings`` from here.
@@ -48,33 +55,41 @@ def create_server(
     """
     resolved_settings = settings or MemKernelSettings()
     captured_embedding = embedding
+    running = _Running()
 
     @asynccontextmanager
-    async def lifespan(server: FastMCP[MemKernelContext]) -> AsyncIterator[MemKernelContext]:
+    async def lifespan(server: MCPServer[MemKernelContext]) -> AsyncIterator[MemKernelContext]:
         memory_service = build_service(settings=resolved_settings, embedding=captured_embedding)
-        yield MemKernelContext(memory_service=memory_service, settings=resolved_settings)
+        running.context = MemKernelContext(memory_service=memory_service, settings=resolved_settings)
+        try:
+            yield running.context
+        finally:
+            running.context = None
 
-    server: FastMCP[MemKernelContext] = FastMCP(
-        "MemKernel",
-        host=resolved_settings.host,
-        port=resolved_settings.port,
-        lifespan=lifespan,
-    )
+    server: MCPServer[MemKernelContext] = MCPServer("MemKernel", lifespan=lifespan)
     register_memory_tools(server)
     register_wiki_tools(server)
-    _register_health_resource(server)
+    _register_health_resource(server, running)
     return server
 
 
-def _register_health_resource(server: FastMCP[MemKernelContext]) -> None:
-    # No parameters: FastMCP registers any function with parameters (a
-    # `ctx` included) as a URI *template*, which made memory://status
-    # unreadable as a concrete resource in 0.1–0.3. The request-scoped
-    # context comes from server.get_context() instead.
+def run_server(server: MCPServer[MemKernelContext], settings: MemKernelSettings) -> None:
+    """Serve on the configured transport; host and port apply to Streamable HTTP only."""
+    if settings.transport == "streamable-http":
+        server.run("streamable-http", host=settings.host, port=settings.port)
+    else:
+        server.run("stdio")
+
+
+def _register_health_resource(server: MCPServer[MemKernelContext], running: _Running) -> None:
+    # mcp 2.x takes no Context on a static resource and has no get_context(),
+    # so the handler reads the lifespan context through `running`.
     @server.resource("memory://status")
     async def status() -> str:
         """Server health, memory count and the quick store-health summary."""
-        app_ctx: MemKernelContext = server.get_context().request_context.lifespan_context
+        app_ctx = running.context
+        if app_ctx is None:
+            raise RuntimeError("memory://status is readable only while the server runs")
         count = app_ctx.memory_service.count()
         return json.dumps(
             {
@@ -118,8 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     logging.basicConfig(stream=sys.stderr, level=logging.INFO)
     settings = MemKernelSettings()
-    server = create_server(settings)
-    server.run(transport=settings.transport)
+    run_server(create_server(settings), settings)
     return 0
 
 

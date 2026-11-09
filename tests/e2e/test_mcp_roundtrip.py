@@ -1,11 +1,11 @@
-"""E2E tests: MCP client round-trip via in-memory transport."""
+"""E2E tests: MCP client round-trip in process (mcp.Client on the server object)."""
 
 from __future__ import annotations
 
 import json
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp import Client
 from mcp.types import CallToolResult, TextContent
 
 from memkernel.config import MemKernelSettings
@@ -31,13 +31,13 @@ def _test_settings() -> MemKernelSettings:
 
 
 @pytest.mark.e2e
-async def test_stdio_roundtrip_retain_recall_get_forget() -> None:
+async def test_in_process_roundtrip_retain_recall_get_forget() -> None:
     """Full MCP round-trip: retain → recall → get → forget → recall (empty)."""
     settings = _test_settings()
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         # 1. Retain a decision
         result = await client.call_tool(
             "retain",
@@ -96,7 +96,7 @@ async def test_dedup_same_content_same_type_returns_same_ref_id() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         content = "Always use snake_case for Python function names"
 
         r1 = await client.call_tool(
@@ -126,7 +126,7 @@ async def test_dedup_same_content_different_type_creates_new_memory() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         content = "The auth service uses JWT tokens"
 
         r1 = await client.call_tool(
@@ -151,7 +151,7 @@ async def test_recall_with_type_filter() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         await client.call_tool(
             "retain",
             arguments={"content": "Use React for frontend", "type": "decision"},
@@ -176,7 +176,7 @@ async def test_get_not_found() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         result = await client.call_tool("get", arguments={"ref_id": "nonexistent-id"})
         response = json.loads(_text(result))
         assert response["error"] == "not_found"
@@ -200,7 +200,7 @@ async def test_checkpoint_roundtrip_simulated_compaction() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         pre_session = "pre-compaction"
 
         # 1. Store decisions before compaction
@@ -280,7 +280,7 @@ async def test_tool_count_under_10() -> None:
     mock_emb = MockEmbedding(dimension=384)
     server = create_server(settings=settings, embedding=mock_emb)
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         tools = await client.list_tools()
         tool_names = [t.name for t in tools.tools]
         assert len(tool_names) < 10
@@ -303,7 +303,7 @@ async def test_tiered_memory_roundtrip_promote_consolidate() -> None:
     settings = _test_settings()
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         result = await client.call_tool(
             "retain",
             arguments={"content": "pytest needs MEMKERNEL_PROJECT_ID set", "type": "observation", "tags": ["ci"]},
@@ -354,7 +354,7 @@ async def test_wiki_export_reports_an_uncertain_outcome(tmp_path: object, monkey
     )
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         export = json.loads(_text(await client.call_tool("wiki_export", arguments={})))
 
     assert export["written"] == [] and export["gate_error"] == uncertain.gate_error
@@ -376,7 +376,7 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
     )
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         await client.call_tool("retain", arguments={"content": "Use arq for background jobs", "type": "decision"})
         await client.call_tool("retain", arguments={"content": "ran tests", "type": "episode"})
 
@@ -428,10 +428,10 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
 async def test_wiki_tools_require_a_directory() -> None:
     """Without MEMKERNEL_WIKI_DIR and without wiki_dir the wiki tools report an error."""
     server = create_server(settings=_test_settings(), embedding=MockEmbedding(dimension=384))
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         result = await client.call_tool("wiki_export", arguments={})
-        assert result.isError
-        assert "wiki" in _text(result).lower()
+        assert result.is_error
+        assert "No wiki directory: pass wiki_dir or set MEMKERNEL_WIKI_DIR" in _text(result)
 
 
 @pytest.mark.e2e
@@ -444,7 +444,7 @@ async def test_document_roundtrip_retain_ask_recall() -> None:
     settings = _test_settings()
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         result = await client.call_tool(
             "retain", arguments={"content": body, "type": "document", "source": "specs/escape.md"}
         )
@@ -471,7 +471,7 @@ async def test_document_roundtrip_retain_ask_recall() -> None:
         assert json.loads(_text(result))["error"] == "not_found"
 
         result = await client.call_tool("ask", arguments={"ref_id": ref_id, "question": "?", "mode": "hybrid"})
-        assert result.isError
+        assert result.is_error and "unknown ask mode 'hybrid'" in _text(result)
 
         # recall by a phrase deep in the document returns the document once, no chunk records
         result = await client.call_tool("recall", arguments={"query": "QUETZALCOATL-7741", "tier": "long_term"})
@@ -487,7 +487,7 @@ async def test_code_reretain_supersedes_previous_snapshot() -> None:
     v1 = "def shared():\n    return 1\n\ndef only_v1():\n    return 'OLDMARKER-7731'\n"
     v2 = "def shared():\n    return 1\n\ndef only_v2():\n    return 'NEWMARKER-9902'\n"
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         r = await client.call_tool("retain", arguments={"content": v1, "type": "code", "source": "src/app.py"})
         old = json.loads(_text(r))["ref_id"]
         r = await client.call_tool("retain", arguments={"content": v1, "type": "code", "source": "src/app.py"})
@@ -514,7 +514,7 @@ async def test_status_resource_carries_health_summary() -> None:
     """US3 (0.4): memory://status reports the quick health summary; the tool set stays at nine."""
     settings = _test_settings()
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         await client.call_tool("retain", arguments={"content": "Use arq", "type": "decision", "supersedes": "ghost"})
         resource = await client.read_resource("memory://status")
         payload = json.loads(resource.contents[0].text)  # type: ignore[union-attr]
@@ -539,7 +539,7 @@ async def test_recall_order_newest_through_the_mcp_tool() -> None:
     settings = MemKernelSettings(project_id=f"e2e_{__import__('uuid').uuid4().hex[:8]}", chroma_persist_path="")
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
-    async with create_connected_server_and_client_session(server) as client:
+    async with Client(server) as client:
         await client.call_tool(
             "retain", arguments={"content": "SESSION CHECKPOINT old", "type": "episode", "checkpoint": True}
         )
@@ -560,7 +560,7 @@ async def test_recall_order_newest_through_the_mcp_tool() -> None:
         refused = await client.call_tool("recall", arguments={"query": "x", "order": "newest"})
 
     assert [r["ref_id"] for r in newest] == [latest["ref_id"]]
-    assert refused.isError and "only for checkpoint_only" in _text(refused)
+    assert refused.is_error and "only for checkpoint_only" in _text(refused)
 
 
 @pytest.mark.e2e
@@ -587,11 +587,11 @@ async def test_wiki_import_reports_ambiguous_pages_and_adopts_on_request(tmp_pat
     real = sync.gate_available
     sync.gate_available = lambda: None  # type: ignore[assignment]  # the ungoverned path, wiki-studio or not
     try:
-        async with create_connected_server_and_client_session(server) as client:
+        async with Client(server) as client:
             refused = await client.call_tool(
                 "retain", arguments={"content": "x", "type": "fact", "tags": ["wiki-id:abc"]}
             )
-            assert refused.isError and "reserved" in _text(refused)
+            assert refused.is_error and "reserved" in _text(refused)
             old = json.loads(
                 _text(
                     await client.call_tool(

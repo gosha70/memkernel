@@ -33,14 +33,25 @@ def test_unknown_argument_is_an_error(capsys: pytest.CaptureFixture[str]) -> Non
     assert "unknown arguments: --bogus x" in captured.err and "usage: memkernel" in captured.err
 
 
-def test_no_arguments_runs_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("transport", "expected"),
+    [
+        ("streamable-http", {"transport": "streamable-http", "host": "127.0.0.1", "port": 9123}),
+        ("stdio", {"transport": "stdio"}),
+    ],
+)
+def test_no_arguments_runs_the_server(
+    transport: str, expected: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls: dict[str, Any] = {}
 
     class FakeServer:
-        def run(self, transport: str) -> None:
-            calls["transport"] = transport
+        def run(self, transport: str, **kwargs: Any) -> None:
+            calls.update(transport=transport, **kwargs)
 
     monkeypatch.setattr(server_module, "create_server", lambda settings: FakeServer())
-    monkeypatch.setenv("MEMKERNEL_TRANSPORT", "streamable-http")
+    monkeypatch.setenv("MEMKERNEL_TRANSPORT", transport)
+    monkeypatch.setenv("MEMKERNEL_HOST", "127.0.0.1")
+    monkeypatch.setenv("MEMKERNEL_PORT", "9123")
     assert server_module.main([]) == 0
-    assert calls == {"transport": "streamable-http"}
+    assert calls == expected
