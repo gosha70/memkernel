@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   file in `source`. Agents recall decisions before adding a helper, dependency or module, check a decision's
   evidence before reusing it, and ask when two live decisions disagree. No change to tools or storage. Copy the
   template again.
+- From the #57 replay (`eval/decisions-57/`, results in `docs/research/implementation-decisions-57.md`): the
+  template looks decisions up with `top_k=5`, not 3, and asks for a first line that fits recall's 200-character
+  preview.
 
 ## [0.9.0] - 2026-11-08
 

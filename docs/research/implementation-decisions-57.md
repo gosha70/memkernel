@@ -173,6 +173,64 @@ without wiki-studio installed. This does not touch #48's governed-import contrac
 Not recommended, per #57's scope: a new record type, automatic merging or deletion, or deciding automatically that
 an old decision fits a new requirement.
 
+## 4. Replay results (step 2, 2026-11-11)
+
+The runner, corpus and raw results are in `eval/decisions-57/`. The corpus is 12 real decisions from
+code-copilot-team, two per case kind in Q5, each with a later task, the expected behaviour and a trap. The runner
+seeds them into a fresh store with the default embedding (`all-MiniLM-L6-v2`), runs each later task as the
+template's query (`recall(<task>, type="decision", top_k=3)`), and checks what comes back. memkernel is unchanged
+(0.9.0 on `main`). Three versions of the store:
+
+- **as left:** the 12 records plus memkernel's five ADRs as unrelated decisions (17); no record superseded;
+- **superseded:** the same, with each stale record's successor retained with `supersedes=`;
+- **crowded:** as superseded, plus the opening of every code-copilot-team spec (at `00d49c0`) that the corpus does
+  not cite, as same-domain decisions (101 in all).
+
+| Case kind | as left (17) | crowded (101), `top_k=3` | crowded, `top_k=5` |
+|---|---|---|---|
+| reuse (2) | found, ranks 1 and 2 | found, ranks 2 and 2 | found |
+| native vs dependency (2) | found, rank 1 | found, rank 1 | found |
+| rejected for safety (2) | found, rank 1 | found, rank 1 | found |
+| stale (2) | **returned live at rank 1** | hidden; successor returned | hidden; successor returned |
+| false-reuse trap (2) | clusters: its "not an explorer" record at rank 1; config: right record at rank 2, trap at 3 | clusters: rank 1; **config: right record missing**, trap at rank 2 | config: still missing |
+| conflict (2 queries) | both partners shown | **one query misses its partner** | both partners shown |
+
+Cost per decision point: three previews of 200 characters (about 150 tokens), five at `top_k=5` (about 250), and
+20–70 ms per `recall` on a laptop.
+
+Findings:
+1. **Finding the seed record is not the problem.** Every seed record was in the top 3, in all three stores.
+2. **A stale decision nobody superseded comes back as a live one, ranked first.** With `supersedes=` set, recall
+   hides it and returns the successor, so supersession works when someone records it.
+3. **Revalidation never flags a decision.** A probe retained a `decision` and a `code` memory citing the same file,
+   then rewrote and then deleted the file: `revalidate` flagged the `code` memory both times and the `decision`
+   neither time.
+4. **File-hash revalidation of decisions would catch both real stale cases, and hide valid ones.** In
+   code-copilot-team's history, the first cited file of both stale records changed after the decision date. So did
+   the first cited file of 3 of the 10 records still in force (the SWE-bench spec, and `safety.md` for both the
+   git-lock rule and the confirmation rule). With recall's default of hiding flagged memories, those three would
+   disappear, two of them safety rules.
+5. **`top_k=3` is too tight in a crowded store.** At 101 decisions one conflict query lost its partner and the
+   config-redaction trap lost the right record, leaving only the wrong helper on screen. `top_k=5` fixes the
+   conflict and not the trap.
+6. **11 of 12 first lines are longer than recall's 200-character preview.** All 12 previews still show
+   "we chose"; 2 lose the "because" clause.
+
+Not measured: whether an agent, given these results, makes the right choice. That needs agent runs on
+code-copilot-team at the historical commits, and this run measures retrieval only.
+
+## 5. Decision
+
+- **Docs and skill are enough for retrieval and conflicts,** with two template changes from the findings: look up
+  decisions with `top_k=5`, and keep the first line within 200 characters so the preview carries the reason.
+- **A runtime change is justified for staleness, but not the one proposed in section 3.** Findings 3 and 4 show the
+  gap is real and that file hashes catch real stale decisions, but hiding a flagged decision would hide valid
+  safety rules. The follow-up spec should flag a decision whose cited file changed or disappeared and **still
+  return it, marked** (for example, a `needs_review` note in its preview), so the agent re-checks the evidence
+  instead of losing the decision. That is a separate feature with its own spec and approval.
+- **Not justified by this corpus:** a tag or path filter on `recall`. The config-trap miss is a ranking problem
+  among same-domain records; a filter on `area:` tags might help, but one case is not evidence enough.
+
 ## Caveats
 
 - Coverage is uneven: Cursor, Devin, Cline, Windsurf, Mem0 and Letta produced no verified claims, so Q2 rests on

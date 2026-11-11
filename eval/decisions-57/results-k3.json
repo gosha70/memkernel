@@ -1,0 +1,788 @@
+{
+  "memkernel": "0.9.0",
+  "top_k": 3,
+  "arms": {
+    "as-left": {
+      "store_decisions": 17,
+      "cases": [
+        {
+          "kind": "reuse",
+          "title": "Trace archive reuses the ingest redaction path",
+          "query": "Add a durable archive that stores the full text of each turn for search and export.",
+          "ms": 32.7,
+          "tokens": 889,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Trace archive reuses the ingest redaction path",
+              "score": 1.57
+            },
+            {
+              "name": "Never archive raw JSONL",
+              "score": 1.4861
+            },
+            {
+              "name": "ADR-009-rlm-studio-for-documents",
+              "score": 1.4048
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Never archive raw JSONL",
+            "ADR-009-rlm-studio-for-documents"
+          ]
+        },
+        {
+          "kind": "reuse",
+          "title": "Benchmark step reuses the one correlate scan seam",
+          "query": "Add a pipeline step that links benchmark runs to sessions and reports live progress.",
+          "ms": 25.1,
+          "tokens": 697,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Benchmark UI was backend-free, one-shot and Studio-only",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.57
+            },
+            {
+              "name": "The clusters view is not an explorer",
+              "score": 1.339
+            }
+          ],
+          "seed_rank": 2,
+          "ok": true,
+          "other_hits": [
+            "Benchmark UI was backend-free, one-shot and Studio-only",
+            "The clusters view is not an explorer"
+          ]
+        },
+        {
+          "kind": "native-vs-dependency",
+          "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+          "query": "Add task fetching for the SWE-bench Verified adapter.",
+          "ms": 26.6,
+          "tokens": 689,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark UI was backend-free, one-shot and Studio-only",
+              "score": 1.3157
+            },
+            {
+              "name": "Judge statistics and charts stay in the stdlib",
+              "score": 1.3091
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Benchmark UI was backend-free, one-shot and Studio-only",
+            "Judge statistics and charts stay in the stdlib"
+          ]
+        },
+        {
+          "kind": "native-vs-dependency",
+          "title": "Judge statistics and charts stay in the stdlib",
+          "query": "Compute the judge-calibration correlation and render the report charts.",
+          "ms": 23.1,
+          "tokens": 942,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Judge statistics and charts stay in the stdlib",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.3237
+            },
+            {
+              "name": "ADR-008-llm-wiki-as-semantic-layer",
+              "score": 1.216
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Benchmark step reuses the one correlate scan seam",
+            "ADR-008-llm-wiki-as-semantic-layer"
+          ]
+        },
+        {
+          "kind": "rejected-for-safety",
+          "title": "Never bypass a git lock with an alternate index",
+          "query": "A commit fails because `.git/index.lock` exists; make the commit go through.",
+          "ms": 23.9,
+          "tokens": 678,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Never bypass a git lock with an alternate index",
+              "score": 1.57
+            },
+            {
+              "name": "Destructive git commands require confirmation",
+              "score": 1.4486
+            },
+            {
+              "name": "Balanced profile denies destructive git commands",
+              "score": 1.2975
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Destructive git commands require confirmation",
+            "Balanced profile denies destructive git commands"
+          ]
+        },
+        {
+          "kind": "rejected-for-safety",
+          "title": "Never archive raw JSONL",
+          "query": "Add full-text trace retention; the simplest source is the original JSONL files.",
+          "ms": 24.2,
+          "tokens": 889,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Never archive raw JSONL",
+              "score": 1.57
+            },
+            {
+              "name": "Trace archive reuses the ingest redaction path",
+              "score": 1.4904
+            },
+            {
+              "name": "ADR-008-llm-wiki-as-semantic-layer",
+              "score": 1.3398
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Trace archive reuses the ingest redaction path",
+            "ADR-008-llm-wiki-as-semantic-layer"
+          ]
+        },
+        {
+          "kind": "stale",
+          "title": "Benchmark UI was backend-free, one-shot and Studio-only",
+          "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
+          "ms": 23.1,
+          "tokens": 856,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Benchmark UI was backend-free, one-shot and Studio-only",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.57
+            },
+            {
+              "name": "ADR-008-llm-wiki-as-semantic-layer",
+              "score": 1.233
+            }
+          ],
+          "seed_rank": 1,
+          "stale_returned_live": true,
+          "successor_rank": null,
+          "ok": false,
+          "other_hits": [
+            "Benchmark step reuses the one correlate scan seam",
+            "ADR-008-llm-wiki-as-semantic-layer"
+          ]
+        },
+        {
+          "kind": "stale",
+          "title": "merge.require_green_ci was never read",
+          "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
+          "ms": 25.9,
+          "tokens": 844,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "merge.require_green_ci was never read",
+              "score": 1.57
+            },
+            {
+              "name": "ADR-011-mcp-2",
+              "score": 1.4924
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.2781
+            }
+          ],
+          "seed_rank": 1,
+          "stale_returned_live": true,
+          "successor_rank": null,
+          "ok": false,
+          "other_hits": [
+            "ADR-011-mcp-2",
+            "Benchmark step reuses the one correlate scan seam"
+          ]
+        },
+        {
+          "kind": "false-reuse-trap",
+          "title": "The clusters view is not an explorer",
+          "query": "Add filtering, drill-down and a graph visualization to the clusters page.",
+          "ms": 29.1,
+          "tokens": 780,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "The clusters view is not an explorer",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark UI was backend-free, one-shot and Studio-only",
+              "score": 1.3998
+            },
+            {
+              "name": "ADR-008-llm-wiki-as-semantic-layer",
+              "score": 1.2401
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Benchmark UI was backend-free, one-shot and Studio-only",
+            "ADR-008-llm-wiki-as-semantic-layer"
+          ]
+        },
+        {
+          "kind": "false-reuse-trap",
+          "title": "Config redaction is not free-text redaction",
+          "query": "Redact free-text transcript excerpts before writing them to a new log path.",
+          "ms": 22.3,
+          "tokens": 705,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Never archive raw JSONL",
+              "score": 1.57
+            },
+            {
+              "name": "Trace archive reuses the ingest redaction path",
+              "score": 1.528
+            },
+            {
+              "name": "Config redaction is not free-text redaction",
+              "score": 1.4754
+            }
+          ],
+          "seed_rank": 3,
+          "right_record_rank": 2,
+          "ok": true,
+          "other_hits": [
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path"
+          ]
+        },
+        {
+          "kind": "conflict",
+          "title": "Destructive git commands require confirmation",
+          "query": "Recover a project by running `git reset --hard origin/main`.",
+          "ms": 22.9,
+          "tokens": 678,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Destructive git commands require confirmation",
+              "score": 1.57
+            },
+            {
+              "name": "Never bypass a git lock with an alternate index",
+              "score": 1.4453
+            },
+            {
+              "name": "Balanced profile denies destructive git commands",
+              "score": 1.4059
+            }
+          ],
+          "seed_rank": 1,
+          "partner_rank": 3,
+          "ok": true,
+          "other_hits": [
+            "Never bypass a git lock with an alternate index"
+          ]
+        },
+        {
+          "kind": "conflict",
+          "title": "Balanced profile denies destructive git commands",
+          "query": "Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.",
+          "ms": 22.5,
+          "tokens": 678,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Destructive git commands require confirmation",
+              "score": 1.57
+            },
+            {
+              "name": "Balanced profile denies destructive git commands",
+              "score": 1.57
+            },
+            {
+              "name": "Never bypass a git lock with an alternate index",
+              "score": 1.4235
+            }
+          ],
+          "seed_rank": 2,
+          "partner_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Never bypass a git lock with an alternate index"
+          ]
+        }
+      ]
+    },
+    "superseded": {
+      "store_decisions": 19,
+      "cases": [
+        {
+          "kind": "stale",
+          "title": "Benchmark UI was backend-free, one-shot and Studio-only",
+          "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
+          "ms": 25.5,
+          "tokens": 968,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "(successor) benchmark step",
+              "score": 1.57
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.5695
+            },
+            {
+              "name": "ADR-008-llm-wiki-as-semantic-layer",
+              "score": 1.449
+            }
+          ],
+          "seed_rank": null,
+          "stale_returned_live": false,
+          "successor_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Benchmark step reuses the one correlate scan seam",
+            "ADR-008-llm-wiki-as-semantic-layer"
+          ]
+        },
+        {
+          "kind": "stale",
+          "title": "merge.require_green_ci was never read",
+          "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
+          "ms": 23.9,
+          "tokens": 802,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "(successor) green-CI correction",
+              "score": 1.4859
+            },
+            {
+              "name": "ADR-011-mcp-2",
+              "score": 1.4044
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.1793
+            }
+          ],
+          "seed_rank": null,
+          "stale_returned_live": false,
+          "successor_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "ADR-011-mcp-2",
+            "Benchmark step reuses the one correlate scan seam"
+          ]
+        }
+      ]
+    },
+    "crowded": {
+      "store_decisions": 101,
+      "cases": [
+        {
+          "kind": "reuse",
+          "title": "Trace archive reuses the ingest redaction path",
+          "query": "Add a durable archive that stores the full text of each turn for search and export.",
+          "ms": 51.4,
+          "tokens": 889,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "cct-spec:sa-search",
+              "score": 1.57
+            },
+            {
+              "name": "Trace archive reuses the ingest redaction path",
+              "score": 1.5687
+            },
+            {
+              "name": "Never archive raw JSONL",
+              "score": 1.5425
+            }
+          ],
+          "seed_rank": 2,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:sa-search",
+            "Never archive raw JSONL"
+          ]
+        },
+        {
+          "kind": "reuse",
+          "title": "Benchmark step reuses the one correlate scan seam",
+          "query": "Add a pipeline step that links benchmark runs to sessions and reports live progress.",
+          "ms": 46.6,
+          "tokens": 968,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "(successor) benchmark step",
+              "score": 1.5449
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.5436
+            },
+            {
+              "name": "cct-spec:session-analytics-correlate",
+              "score": 1.4945
+            }
+          ],
+          "seed_rank": 2,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:session-analytics-correlate"
+          ]
+        },
+        {
+          "kind": "native-vs-dependency",
+          "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+          "query": "Add task fetching for the SWE-bench Verified adapter.",
+          "ms": 51.7,
+          "tokens": 975,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:benchmark-harness",
+              "score": 1.4616
+            },
+            {
+              "name": "cct-spec:benchmark-bench-driver",
+              "score": 1.4343
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:benchmark-harness",
+            "cct-spec:benchmark-bench-driver"
+          ]
+        },
+        {
+          "kind": "native-vs-dependency",
+          "title": "Judge statistics and charts stay in the stdlib",
+          "query": "Compute the judge-calibration correlation and render the report charts.",
+          "ms": 48.1,
+          "tokens": 1025,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Judge statistics and charts stay in the stdlib",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:sa-expectations",
+              "score": 1.5307
+            },
+            {
+              "name": "cct-spec:routing-calibration",
+              "score": 1.4411
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:sa-expectations",
+            "cct-spec:routing-calibration"
+          ]
+        },
+        {
+          "kind": "rejected-for-safety",
+          "title": "Never bypass a git lock with an alternate index",
+          "query": "A commit fails because `.git/index.lock` exists; make the commit go through.",
+          "ms": 50.1,
+          "tokens": 971,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Never bypass a git lock with an alternate index",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:wiki-audit-flush",
+              "score": 1.5435
+            },
+            {
+              "name": "cct-spec:wiki-audit-trail",
+              "score": 1.435
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:wiki-audit-flush",
+            "cct-spec:wiki-audit-trail"
+          ]
+        },
+        {
+          "kind": "rejected-for-safety",
+          "title": "Never archive raw JSONL",
+          "query": "Add full-text trace retention; the simplest source is the original JSONL files.",
+          "ms": 49.2,
+          "tokens": 889,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Never archive raw JSONL",
+              "score": 1.57
+            },
+            {
+              "name": "Trace archive reuses the ingest redaction path",
+              "score": 1.5433
+            },
+            {
+              "name": "cct-spec:session-analytics-trace-archive-a",
+              "score": 1.5049
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:session-analytics-trace-archive-a"
+          ]
+        },
+        {
+          "kind": "stale",
+          "title": "Benchmark UI was backend-free, one-shot and Studio-only",
+          "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
+          "ms": 46.8,
+          "tokens": 968,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "cct-spec:session-analytics-correlate",
+              "score": 1.57
+            },
+            {
+              "name": "(successor) benchmark step",
+              "score": 1.5084
+            },
+            {
+              "name": "Benchmark step reuses the one correlate scan seam",
+              "score": 1.5064
+            }
+          ],
+          "seed_rank": null,
+          "stale_returned_live": false,
+          "successor_rank": 2,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:session-analytics-correlate",
+            "Benchmark step reuses the one correlate scan seam"
+          ]
+        },
+        {
+          "kind": "stale",
+          "title": "merge.require_green_ci was never read",
+          "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
+          "ms": 45.1,
+          "tokens": 885,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "(successor) green-CI correction",
+              "score": 1.5179
+            },
+            {
+              "name": "cct-spec:auto-build-loop-pr-profile",
+              "score": 1.481
+            },
+            {
+              "name": "cct-spec:auto-build-visual-gate",
+              "score": 1.4573
+            }
+          ],
+          "seed_rank": null,
+          "stale_returned_live": false,
+          "successor_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:auto-build-visual-gate"
+          ]
+        },
+        {
+          "kind": "false-reuse-trap",
+          "title": "The clusters view is not an explorer",
+          "query": "Add filtering, drill-down and a graph visualization to the clusters page.",
+          "ms": 48.8,
+          "tokens": 966,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "The clusters view is not an explorer",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:session-analytics-similarity-cluster",
+              "score": 1.5307
+            },
+            {
+              "name": "cct-spec:session-analytics",
+              "score": 1.4934
+            }
+          ],
+          "seed_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:session-analytics-similarity-cluster",
+            "cct-spec:session-analytics"
+          ]
+        },
+        {
+          "kind": "false-reuse-trap",
+          "title": "Config redaction is not free-text redaction",
+          "query": "Redact free-text transcript excerpts before writing them to a new log path.",
+          "ms": 46.9,
+          "tokens": 941,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "cct-spec:session-analytics-trace-archive-a",
+              "score": 1.57
+            },
+            {
+              "name": "Config redaction is not free-text redaction",
+              "score": 1.4748
+            },
+            {
+              "name": "cct-spec:wiki-audit-flush",
+              "score": 1.4723
+            }
+          ],
+          "seed_rank": 2,
+          "right_record_rank": null,
+          "ok": false,
+          "other_hits": [
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:wiki-audit-flush"
+          ]
+        },
+        {
+          "kind": "conflict",
+          "title": "Destructive git commands require confirmation",
+          "query": "Recover a project by running `git reset --hard origin/main`.",
+          "ms": 46.7,
+          "tokens": 800,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Destructive git commands require confirmation",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:pi-worktree-lifecycle",
+              "score": 1.5054
+            },
+            {
+              "name": "Never bypass a git lock with an alternate index",
+              "score": 1.4832
+            }
+          ],
+          "seed_rank": 1,
+          "partner_rank": null,
+          "ok": false,
+          "other_hits": [
+            "cct-spec:pi-worktree-lifecycle",
+            "Never bypass a git lock with an alternate index"
+          ]
+        },
+        {
+          "kind": "conflict",
+          "title": "Balanced profile denies destructive git commands",
+          "query": "Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.",
+          "ms": 51.5,
+          "tokens": 832,
+          "preview_chars": 600,
+          "top": [
+            {
+              "name": "Destructive git commands require confirmation",
+              "score": 1.57
+            },
+            {
+              "name": "Balanced profile denies destructive git commands",
+              "score": 1.57
+            },
+            {
+              "name": "cct-spec:pi-worktree-lifecycle",
+              "score": 1.4932
+            }
+          ],
+          "seed_rank": 2,
+          "partner_rank": 1,
+          "ok": true,
+          "other_hits": [
+            "cct-spec:pi-worktree-lifecycle"
+          ]
+        }
+      ]
+    }
+  },
+  "cct_commit": "00d49c0a9eb51e9bf234cee70490889b151cd550",
+  "file_probe": {
+    "rewritten": {
+      "decision": false,
+      "code": true
+    },
+    "deleted": {
+      "decision": false,
+      "code": true
+    }
+  },
+  "first_line_over_preview": [
+    "Trace archive reuses the ingest redaction path",
+    "Benchmark step reuses the one correlate scan seam",
+    "SWE-bench fetch uses the stdlib rows API, not Parquet",
+    "Judge statistics and charts stay in the stdlib",
+    "Never bypass a git lock with an alternate index",
+    "Benchmark UI was backend-free, one-shot and Studio-only",
+    "merge.require_green_ci was never read",
+    "The clusters view is not an explorer",
+    "Config redaction is not free-text redaction",
+    "Destructive git commands require confirmation",
+    "Balanced profile denies destructive git commands"
+  ],
+  "preview_length": 200
+}
