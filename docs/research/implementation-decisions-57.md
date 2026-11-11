@@ -177,9 +177,11 @@ an old decision fits a new requirement.
 
 The runner, corpus and raw results are in `eval/decisions-57/`. The corpus is 12 real decisions from
 code-copilot-team, two per case kind in Q5, each with a later task, the expected behaviour and a trap. The runner
-seeds them into a fresh store with the default embedding (`all-MiniLM-L6-v2`), runs each later task as the
-template's query (`recall(<task>, type="decision", top_k=3)`), and checks what comes back. memkernel is unchanged
-(0.9.0 on `main`). Three versions of the store:
+seeds them into a fresh store with memkernel's default embedding, pinned to `sentence-transformers/all-MiniLM-L6-v2`
+at revision `1110a243` (the same snapshot as `eval/release-b-exit`; the results record it and the library
+versions), runs each later task as the template's query (`recall(<task>, type="decision", top_k=…)`), and checks
+what comes back. **Every case was run twice, at `top_k=3` and at `top_k=5`** (`results-k3.json`,
+`results-k5.json`). memkernel is unchanged (0.9.0 on `main`). Three versions of the store:
 
 - **as left:** the 12 records plus memkernel's five ADRs as unrelated decisions (17); no record superseded;
 - **superseded:** the same, with each stale record's successor retained with `supersedes=`;
@@ -208,10 +210,21 @@ Findings:
    then rewrote and then deleted the file: `revalidate` flagged the `code` memory both times and the `decision`
    neither time.
 4. **File-hash revalidation of decisions would catch both real stale cases, and hide valid ones.** In
-   code-copilot-team's history, the first cited file of both stale records changed after the decision date. So did
-   the first cited file of 3 of the 10 records still in force (the SWE-bench spec, and `safety.md` for both the
-   git-lock rule and the confirmation rule). With recall's default of hiding flagged memories, those three would
-   disappear, two of them safety rules.
+   code-copilot-team's history up to `00d49c0`, the first cited file of both stale records changed after the
+   decision date. So did the first cited file of 3 of the 10 records still in force. With recall's default of
+   hiding flagged memories, those three would disappear, two of them safety rules. The runner computes this
+   (`cited_file_history` in the results): it compares each file at the last commit on or before the decision date
+   (UTC) with `00d49c0`. The files that changed:
+
+   | Record (kind) | First cited file | Decision date | Changed by |
+   |---|---|---|---|
+   | Benchmark UI (stale) | `specs/session-analytics-benchmark-ui/spec.md` | 2026-07-18 | `2325480` (2026-09-08) |
+   | merge.require_green_ci (stale) | `specs/auto-build-loop-merge-profile/spec.md` | 2026-07-14 | `e39969f` and `24bec0b` (2026-10-29); also listed: `a24a00e`, the commit that introduced the decision, which lands after the UTC cutoff |
+   | SWE-bench fetch (in force) | `specs/benchmark-adapters-backends/spec.md` | 2026-05-18 | `36076dc`, `e59f7cc` (2026-09-01) |
+   | Git lock (in force) | `claude_code/.claude/rules/safety.md` | 2026-05-02 | `37e8417`, `1b6c6c4` (2026-09-04) |
+   | Destructive git commands (in force) | `claude_code/.claude/rules/safety.md` | 2026-05-02 | `37e8417`, `1b6c6c4` (2026-09-04) |
+
+   The other seven files did not change. A file missing at either commit counts as changed.
 5. **`top_k=3` can be too tight when same-domain text competes.** With the 82 spec excerpts added, one conflict
    query lost its partner and the config-redaction trap lost the right record, leaving only the wrong helper on
    screen. `top_k=5` fixes the conflict and not the trap. A store of many genuine decision records was not tested;

@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,9 @@ from memkernel.factory import build_service  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CORPUS = HERE / "corpus.md"
+# The embedding the published results used, as in eval/release-b-exit; loaded from this snapshot only.
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 CCT_REV = "00d49c0a9eb51e9bf234cee70490889b151cd550"  # code-copilot-team commit of the published results
 TOP_K = 5  # the template's recall-before-building query; results-k3.json is the run that changed it from 3
 SUCCESSORS = {
@@ -71,13 +75,25 @@ def parse_corpus(text: str) -> list[dict[str, Any]]:
                 "partner": fields.get("partner", ""),
                 "replay": replay,
                 "first_line": len(f"decision: {fields['decision']}"),
+                "date": fields["date"].split(";")[0].strip(),
             }
         )
     return records
 
 
-def service(tmp: Path) -> Any:
+def embedding_snapshot() -> Path:
+    """The pinned model snapshot, downloaded if needed; any other revision is refused."""
+    from huggingface_hub import snapshot_download
+
+    snapshot = Path(snapshot_download(EMBEDDING_MODEL, revision=EMBEDDING_REVISION))
+    if snapshot.name != EMBEDDING_REVISION:
+        raise SystemExit(f"the embedding snapshot is {snapshot}, not the pinned revision {EMBEDDING_REVISION}")
+    return snapshot
+
+
+def service(tmp: Path, model: Path) -> Any:
     settings = MemKernelSettings(
+        embedding_model=str(model),
         project_id="decisions57",
         project_root=str(tmp),
         state_dir=str(tmp / "state"),
@@ -108,6 +124,44 @@ def cct_distractors(cct: Path, rev: str, records: list[dict[str, Any]]) -> list[
     ]
     if not out:
         raise SystemExit(f"no code-copilot-team specs at {rev} in {cct}; pass --cct <checkout>")
+    return out
+
+
+def cited_file_history(cct: Path, rev: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Finding 4: did each record's first cited file change between its decision date and ``rev``?
+
+    The base is the last commit at or before the end of the decision date (UTC) in ``rev``'s history; the file is
+    compared there and at ``rev``, and the commits that touched it in between are listed.
+    """
+    out = []
+    for record in records:
+        found = re.search(r"code-copilot-team@[0-9a-f]+ ([\w./-]+)", record["content"])
+        if found is None:
+            raise SystemExit(f"no code-copilot-team citation in {record['title']!r}")
+        path = found.group(1).split(":")[0]
+        base = _git(cct, "rev-list", "-1", f"--before={record['date']}T23:59:59Z", rev).strip()
+        if not base:
+            raise SystemExit(f"no code-copilot-team commit on or before {record['date']} in {rev}")
+        blobs = [
+            subprocess.run(
+                ["git", "-C", str(cct), "rev-parse", f"{c}:{path}"], capture_output=True, text=True
+            ).stdout.strip()
+            for c in (base, rev)
+        ]
+        changed_by = _git(cct, "log", "--format=%h %cs %s", f"{base}..{rev}", "--", path).splitlines()
+        out.append(
+            {
+                "kind": record["kind"],
+                "title": record["title"],
+                "path": path,
+                "date": record["date"],
+                "base": base[:7],
+                "changed": blobs[0] != blobs[1] or not blobs[0] or not blobs[1],
+                "missing_at_date": not blobs[0],
+                "missing_at_rev": not blobs[1],
+                "changed_by": changed_by,
+            }
+        )
     return out
 
 
@@ -177,8 +231,8 @@ def judge(record: dict[str, Any], result: dict[str, Any], arm: str) -> dict[str,
     return verdict
 
 
-def file_probe(tmp: Path) -> dict[str, Any]:
-    svc = service(tmp)
+def file_probe(tmp: Path, model: Path) -> dict[str, Any]:
+    svc = service(tmp, model)
     cited = tmp / "src" / "redact.py"
     cited.parent.mkdir(parents=True)
     cited.write_text("def redact_text(s):\n    return s.replace('secret', '***')\n", encoding="utf-8")
@@ -209,14 +263,22 @@ def main() -> int:
     args = parser.parse_args()
     records = parse_corpus(CORPUS.read_text(encoding="utf-8"))
     assert len(records) == 12, len(records)
-    report: dict[str, Any] = {"memkernel": __version__, "top_k": args.top_k, "arms": {}}
+    model = embedding_snapshot()
+    report: dict[str, Any] = {
+        "memkernel": __version__,
+        "top_k": args.top_k,
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_revision": EMBEDDING_REVISION,
+        "versions": {name: metadata.version(name) for name in ("sentence-transformers", "chromadb", "torch")},
+        "arms": {},
+    }
     cct = Path(args.cct)
     report["cct_commit"] = _git(cct, "rev-parse", "--verify", f"{args.cct_rev}^{{commit}}").strip()
     extra = cct_distractors(cct, report["cct_commit"], records)
     report["cct_specs"] = len(extra)
     for arm in ("as-left", "superseded", "crowded"):
         with tempfile.TemporaryDirectory() as tmp:
-            svc = service(Path(tmp))
+            svc = service(Path(tmp), model)
             refs = seed(svc, records, superseded=arm != "as-left", extra=extra if arm == "crowded" else [])
             cases = []
             for record in records:
@@ -226,7 +288,15 @@ def main() -> int:
                 cases.append({"kind": record["kind"], "title": record["title"], **result, **judge(record, result, arm)})
             report["arms"][arm] = {"store_decisions": len(refs), "cases": cases}
     with tempfile.TemporaryDirectory() as tmp:
-        report["file_probe"] = file_probe(Path(tmp))
+        report["file_probe"] = file_probe(Path(tmp), model)
+    history = cited_file_history(cct, report["cct_commit"], records)
+    report["cited_file_history"] = history
+    report["cited_file_changed"] = {
+        "stale": sum(h["changed"] for h in history if h["kind"] == "stale"),
+        "stale_of": sum(h["kind"] == "stale" for h in history),
+        "in_force": sum(h["changed"] for h in history if h["kind"] != "stale"),
+        "in_force_of": sum(h["kind"] != "stale" for h in history),
+    }
     preview = MemKernelSettings().preview_length
     report["first_line_over_preview"] = [r["title"] for r in records if r["first_line"] > preview]
     report["preview_length"] = preview
@@ -240,6 +310,7 @@ def main() -> int:
                 f"{c['ms']:>6}ms {c['preview_chars']:>4}ch others={[o[:28] for o in c['other_hits']]}"
             )
     print("file probe:", report["file_probe"])
+    print("cited files changed since the decision date:", report["cited_file_changed"])
     print(f"first lines over preview_length={preview}: {len(report['first_line_over_preview'])}/12")
     return 0
 
