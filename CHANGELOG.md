@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The agent instructions template (`templates/claude-memory-instructions.md`) gains **decision records** (#57): a
+  one-line summary plus `requirement`, `chosen`, `rejected`, `evidence` and `revisit-when`, retained with the cited
+  file in `source`. Agents recall decisions before adding a helper, dependency or module, check a decision's
+  evidence before reusing it, and ask when two live decisions disagree. No change to tools or storage. Copy the
+  template again.
+
 ## [0.9.0] - 2026-11-08
 
 memkernel runs on the mcp 2.x SDK (#95), so `memkernel[wiki]` and `wiki-studio[mcp]` install into one environment,

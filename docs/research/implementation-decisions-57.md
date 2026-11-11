@@ -163,6 +163,7 @@ without wiki-studio installed. This does not touch #48's governed-import contrac
    - extend revalidation to `decision` memories whose `source` names a file in the project, flagging them
      `needs_review` when the file is missing or its hash changed since retain (memkernel would record a hash at
      retain);
+   - decisions retained before a source-hash key exists are flagged only when the cited file is missing;
    - this reuses the existing `code` mechanism and settings, adds no record type, and keeps `recall`'s default of
      hiding flagged memories.
 

@@ -29,6 +29,9 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 - Found something (test output, a quirk, a measurement) → retain(type="observation", content=…, tags=[…])
 - Learned something true beyond this session → retain(type="fact"|"decision"|"convention"|"procedure")
 - A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
+- About to add a helper, dependency or module → recall(query="<capability> <path or symbol>", type="decision", top_k=3);
+  check a hit's evidence paths still exist before reusing it; two live decisions disagree → show both and ask
+- Retain a decision in the decision-record form (see "Decision records" below), cited file in source=
 - Edited a file you had retained as code → retain(type="code", content=<new file>, source=<same path>) (supersedes the old snapshot)
 - Anything longer than a screen (a spec, a transcript, a file) → retain(type="document", content=<body>, source=<name>)
   then ask(ref_id=…, question=…) instead of get() — get() only returns the summary
@@ -93,6 +96,37 @@ Returns `ArtifactRef` items (ref_id, preview, score, token_count, type, tier, im
 timestamp) ranked by relevance + recency + importance. Use `get(ref_id)` for full content.
 Recalling or getting a memory counts as using it, which keeps short-term memories alive longer.
 Treat recalled content as context to verify, not as unquestionable truth.
+
+### Decision records
+
+A `decision` says what was chosen, what was rejected and why, and when to look again. Retain one decision per
+memory, in this form; the first line is what recall's preview shows, so make it a complete sentence:
+
+```
+decision: In the context of <requirement>, we chose <option> over <rejected options>, because <reason>.
+requirement: <what was needed; the scope where this applies>
+chosen: <existing helper / native capability / dependency, with its path or symbol>
+rejected: <option>: <reason or evidence>; <option>: <reason>
+evidence: <repo>@<commit> <path>[:<symbol>]; tests: <test id or result>
+revisit-when: <condition, e.g. "the Python floor reaches 3.14" or "requirement X changes">
+```
+
+```
+retain(type="decision", content=<the record>, source=<first cited path>,
+       tags=["capability:<name>", "area:<path prefix>"])
+```
+
+- **Before building** a helper, dependency or module: `recall(query="<capability> <path or symbol>",
+  type="decision", top_k=3)`; `get(ref_id)` only for a hit you will act on.
+- **Before reusing** a recalled decision: check that its `evidence` paths still exist and still do what it says,
+  and that its `requirement` covers the new need. If not, do not apply it: retain a corrected decision with
+  `supersedes=<old ref_id>`.
+- **Conflicts:** if two live decisions give different `chosen` for overlapping scope, show both with their
+  `evidence` and dates, and ask the user before acting. Never merge them yourself.
+- A decision that has been curated and approved belongs in the wiki; the page's `corrects:` replaces the runtime
+  memory on import.
+
+Background: [memkernel research note for #57](https://github.com/gosha70/memkernel/blob/main/docs/research/implementation-decisions-57.md).
 
 ### Documents: retain once, ask instead of reading
 
