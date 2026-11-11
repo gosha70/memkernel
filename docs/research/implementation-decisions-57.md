@@ -183,8 +183,10 @@ template's query (`recall(<task>, type="decision", top_k=3)`), and checks what c
 
 - **as left:** the 12 records plus memkernel's five ADRs as unrelated decisions (17); no record superseded;
 - **superseded:** the same, with each stale record's successor retained with `supersedes=`;
-- **crowded:** as superseded, plus the opening of every code-copilot-team spec (at `00d49c0`) that the corpus does
-  not cite, as same-domain decisions (101 in all).
+- **crowded:** as superseded, plus the first 1,500 characters of every code-copilot-team spec the corpus does not
+  cite, read from commit `00d49c0` and stored as decisions: 12 records, 2 successors, 5 ADR excerpts and 82 spec
+  excerpts, 101 in all. This is **synthetic, spec-heavy noise** from the same project, not a store of 101
+  independently recorded decisions.
 
 | Case kind | as left (17) | crowded (101), `top_k=3` | crowded, `top_k=5` |
 |---|---|---|---|
@@ -210,9 +212,10 @@ Findings:
    the first cited file of 3 of the 10 records still in force (the SWE-bench spec, and `safety.md` for both the
    git-lock rule and the confirmation rule). With recall's default of hiding flagged memories, those three would
    disappear, two of them safety rules.
-5. **`top_k=3` is too tight in a crowded store.** At 101 decisions one conflict query lost its partner and the
-   config-redaction trap lost the right record, leaving only the wrong helper on screen. `top_k=5` fixes the
-   conflict and not the trap.
+5. **`top_k=3` can be too tight when same-domain text competes.** With the 82 spec excerpts added, one conflict
+   query lost its partner and the config-redaction trap lost the right record, leaving only the wrong helper on
+   screen. `top_k=5` fixes the conflict and not the trap. A store of many genuine decision records was not tested;
+   that needs a larger corpus.
 6. **11 of 12 first lines are longer than recall's 200-character preview.** All 12 previews still show
    "we chose"; 2 lose the "because" clause.
 
@@ -223,6 +226,8 @@ code-copilot-team at the historical commits, and this run measures retrieval onl
 
 - **Docs and skill are enough for retrieval and conflicts,** with two template changes from the findings: look up
   decisions with `top_k=5`, and keep the first line within 200 characters so the preview carries the reason.
+  `top_k=5` rests on the synthetic crowded condition (finding 5); it costs about 100 tokens more per lookup, and
+  the miss it fixes is a conflict the agent should have been shown.
 - **A runtime change is justified for staleness, but not the one proposed in section 3.** Findings 3 and 4 show the
   gap is real and that file hashes catch real stale decisions, but hiding a flagged decision would hide valid
   safety rules. The follow-up spec should flag a decision whose cited file changed or disappeared and **still
