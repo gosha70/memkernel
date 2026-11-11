@@ -31,7 +31,15 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 - A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
 - About to add a helper, dependency or module → recall(query="<capability> <path or symbol>", type="decision", top_k=3);
   check a hit's evidence paths still exist before reusing it; two live decisions disagree → show both and ask
-- Retain a decision in the decision-record form (see "Decision records" below), cited file in source=
+- Retain a decision as one record; its first line is what recall's preview shows, so make it a full sentence:
+    decision: In the context of <requirement>, we chose <option> over <rejected>, because <reason>.
+    requirement: <what was needed; where it applies>
+    chosen: <helper, native capability or dependency, with its path or symbol>
+    rejected: <option>: <why>; <option>: <why>
+    evidence: <commit> <path>; tests: <test id>
+    revisit-when: <condition>
+  retain(type="decision", content=<record>, source=<first cited path>,
+         tags=["capability:<name>", "area:<path prefix>"])
 - Edited a file you had retained as code → retain(type="code", content=<new file>, source=<same path>) (supersedes the old snapshot)
 - Anything longer than a screen (a spec, a transcript, a file) → retain(type="document", content=<body>, source=<name>)
   then ask(ref_id=…, question=…) instead of get() — get() only returns the summary
