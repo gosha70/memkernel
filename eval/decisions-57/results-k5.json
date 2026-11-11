@@ -9,7 +9,7 @@
           "kind": "reuse",
           "title": "Trace archive reuses the ingest redaction path",
           "query": "Add a durable archive that stores the full text of each turn for search and export.",
-          "ms": 25.2,
+          "ms": 24.1,
           "tokens": 1639,
           "preview_chars": 1000,
           "top": [
@@ -47,7 +47,7 @@
           "kind": "reuse",
           "title": "Benchmark step reuses the one correlate scan seam",
           "query": "Add a pipeline step that links benchmark runs to sessions and reports live progress.",
-          "ms": 21.0,
+          "ms": 21.7,
           "tokens": 1447,
           "preview_chars": 1000,
           "top": [
@@ -85,7 +85,7 @@
           "kind": "native-vs-dependency",
           "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
           "query": "Add task fetching for the SWE-bench Verified adapter.",
-          "ms": 23.2,
+          "ms": 23.5,
           "tokens": 1356,
           "preview_chars": 1000,
           "top": [
@@ -123,7 +123,7 @@
           "kind": "native-vs-dependency",
           "title": "Judge statistics and charts stay in the stdlib",
           "query": "Compute the judge-calibration correlation and render the report charts.",
-          "ms": 26.9,
+          "ms": 24.2,
           "tokens": 1383,
           "preview_chars": 1000,
           "top": [
@@ -161,7 +161,7 @@
           "kind": "rejected-for-safety",
           "title": "Never bypass a git lock with an alternate index",
           "query": "A commit fails because `.git/index.lock` exists; make the commit go through.",
-          "ms": 25.8,
+          "ms": 24.4,
           "tokens": 1345,
           "preview_chars": 1000,
           "top": [
@@ -199,7 +199,7 @@
           "kind": "rejected-for-safety",
           "title": "Never archive raw JSONL",
           "query": "Add full-text trace retention; the simplest source is the original JSONL files.",
-          "ms": 26.0,
+          "ms": 22.4,
           "tokens": 1489,
           "preview_chars": 1000,
           "top": [
@@ -237,7 +237,7 @@
           "kind": "stale",
           "title": "Benchmark UI was backend-free, one-shot and Studio-only",
           "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
-          "ms": 25.5,
+          "ms": 22.5,
           "tokens": 1456,
           "preview_chars": 1000,
           "top": [
@@ -277,7 +277,7 @@
           "kind": "stale",
           "title": "merge.require_green_ci was never read",
           "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
-          "ms": 22.1,
+          "ms": 23.2,
           "tokens": 1269,
           "preview_chars": 1000,
           "top": [
@@ -317,7 +317,7 @@
           "kind": "false-reuse-trap",
           "title": "The clusters view is not an explorer",
           "query": "Add filtering, drill-down and a graph visualization to the clusters page.",
-          "ms": 21.3,
+          "ms": 22.7,
           "tokens": 1430,
           "preview_chars": 1000,
           "top": [
@@ -355,7 +355,7 @@
           "kind": "false-reuse-trap",
           "title": "Config redaction is not free-text redaction",
           "query": "Redact free-text transcript excerpts before writing them to a new log path.",
-          "ms": 22.3,
+          "ms": 22.9,
           "tokens": 1284,
           "preview_chars": 1000,
           "top": [
@@ -394,7 +394,7 @@
           "kind": "conflict",
           "title": "Destructive git commands require confirmation",
           "query": "Recover a project by running `git reset --hard origin/main`.",
-          "ms": 20.9,
+          "ms": 22.1,
           "tokens": 1244,
           "preview_chars": 1000,
           "top": [
@@ -432,7 +432,7 @@
           "kind": "conflict",
           "title": "Balanced profile denies destructive git commands",
           "query": "Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.",
-          "ms": 22.4,
+          "ms": 22.8,
           "tokens": 1428,
           "preview_chars": 1000,
           "top": [
@@ -475,7 +475,7 @@
           "kind": "stale",
           "title": "Benchmark UI was backend-free, one-shot and Studio-only",
           "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
-          "ms": 35.6,
+          "ms": 25.2,
           "tokens": 1568,
           "preview_chars": 1000,
           "top": [
@@ -515,7 +515,7 @@
           "kind": "stale",
           "title": "merge.require_green_ci was never read",
           "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
-          "ms": 30.9,
+          "ms": 23.7,
           "tokens": 1307,
           "preview_chars": 1000,
           "top": [
@@ -559,7 +559,7 @@
           "kind": "reuse",
           "title": "Trace archive reuses the ingest redaction path",
           "query": "Add a durable archive that stores the full text of each turn for search and export.",
-          "ms": 66.9,
+          "ms": 60.2,
           "tokens": 1639,
           "preview_chars": 1000,
           "top": [
@@ -597,7 +597,7 @@
           "kind": "reuse",
           "title": "Benchmark step reuses the one correlate scan seam",
           "query": "Add a pipeline step that links benchmark runs to sessions and reports live progress.",
-          "ms": 57.6,
+          "ms": 54.9,
           "tokens": 1718,
           "preview_chars": 1000,
           "top": [
@@ -634,7 +634,7 @@
           "kind": "native-vs-dependency",
           "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
           "query": "Add task fetching for the SWE-bench Verified adapter.",
-          "ms": 53.2,
+          "ms": 55.3,
           "tokens": 1725,
           "preview_chars": 1000,
           "top": [
@@ -672,7 +672,7 @@
           "kind": "native-vs-dependency",
           "title": "Judge statistics and charts stay in the stdlib",
           "query": "Compute the judge-calibration correlation and render the report charts.",
-          "ms": 53.1,
+          "ms": 53.2,
           "tokens": 1775,
           "preview_chars": 1000,
           "top": [
@@ -710,7 +710,7 @@
           "kind": "rejected-for-safety",
           "title": "Never bypass a git lock with an alternate index",
           "query": "A commit fails because `.git/index.lock` exists; make the commit go through.",
-          "ms": 59.5,
+          "ms": 56.8,
           "tokens": 1550,
           "preview_chars": 1000,
           "top": [
@@ -748,7 +748,7 @@
           "kind": "rejected-for-safety",
           "title": "Never archive raw JSONL",
           "query": "Add full-text trace retention; the simplest source is the original JSONL files.",
-          "ms": 57.7,
+          "ms": 51.9,
           "tokens": 1639,
           "preview_chars": 1000,
           "top": [
@@ -786,7 +786,7 @@
           "kind": "stale",
           "title": "Benchmark UI was backend-free, one-shot and Studio-only",
           "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
-          "ms": 53.5,
+          "ms": 55.3,
           "tokens": 1718,
           "preview_chars": 1000,
           "top": [
@@ -826,7 +826,7 @@
           "kind": "stale",
           "title": "merge.require_green_ci was never read",
           "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
-          "ms": 62.4,
+          "ms": 58.3,
           "tokens": 1635,
           "preview_chars": 1000,
           "top": [
@@ -866,7 +866,7 @@
           "kind": "false-reuse-trap",
           "title": "The clusters view is not an explorer",
           "query": "Add filtering, drill-down and a graph visualization to the clusters page.",
-          "ms": 57.4,
+          "ms": 65.5,
           "tokens": 1716,
           "preview_chars": 1000,
           "top": [
@@ -904,7 +904,7 @@
           "kind": "false-reuse-trap",
           "title": "Config redaction is not free-text redaction",
           "query": "Redact free-text transcript excerpts before writing them to a new log path.",
-          "ms": 58.8,
+          "ms": 55.9,
           "tokens": 1691,
           "preview_chars": 1000,
           "top": [
@@ -943,7 +943,7 @@
           "kind": "conflict",
           "title": "Destructive git commands require confirmation",
           "query": "Recover a project by running `git reset --hard origin/main`.",
-          "ms": 65.7,
+          "ms": 59.6,
           "tokens": 1428,
           "preview_chars": 1000,
           "top": [
@@ -981,7 +981,7 @@
           "kind": "conflict",
           "title": "Balanced profile denies destructive git commands",
           "query": "Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.",
-          "ms": 56.1,
+          "ms": 57.7,
           "tokens": 1582,
           "preview_chars": 1000,
           "top": [
@@ -1019,6 +1019,7 @@
     }
   },
   "cct_commit": "00d49c0a9eb51e9bf234cee70490889b151cd550",
+  "cct_specs": 82,
   "file_probe": {
     "rewritten": {
       "decision": false,

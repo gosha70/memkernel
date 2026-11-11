@@ -7,7 +7,8 @@ store, then runs each record's later task as the template's recall query (``type
 Stale cases run twice: as an agent would have left them (never superseded) and with ``supersedes=`` set. A last
 probe checks whether a decision whose cited file changes is ever flagged, next to a ``code`` memory as control.
 
-Usage: poetry run python eval/decisions-57/run.py [--top-k 5] [--cct <code-copilot-team checkout>] [--out <file>]
+Usage: poetry run python eval/decisions-57/run.py [--top-k 5] [--cct <code-copilot-team checkout>] [--cct-rev <commit>]
+       [--out <file>]
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from memkernel.factory import build_service  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CORPUS = HERE / "corpus.md"
+CCT_REV = "00d49c0a9eb51e9bf234cee70490889b151cd550"  # code-copilot-team commit of the published results
 TOP_K = 5  # the template's recall-before-building query; results-k3.json is the run that changed it from 3
 SUCCESSORS = {
     "Benchmark UI was backend-free, one-shot and Studio-only": "(successor) benchmark step",
@@ -84,15 +86,28 @@ def service(tmp: Path) -> Any:
     return build_service(settings, chroma_client=chromadb.EphemeralClient())
 
 
-def cct_distractors(cct: Path, records: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    """The opening of each CCT spec, as a same-domain decision; specs the corpus cites are left out."""
+def _git(cct: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(cct), *args], capture_output=True, text=True, check=True).stdout
+
+
+def cct_distractors(cct: Path, rev: str, records: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """The opening of each CCT spec at ``rev``, read from git (never the working tree); cited specs are left out.
+
+    These are spec excerpts stored as decisions: same-domain noise, not independently recorded decisions.
+    """
     cited = set(re.findall(r"specs/([\w.-]+)/", "\n".join(r["content"] for r in records)))
-    out = []
-    for spec in sorted((cct / "specs").glob("*/spec.md")):
-        if spec.parent.name not in cited:
-            out.append((f"cct-spec:{spec.parent.name}", spec.read_text(encoding="utf-8")[:1500]))
+    paths = [
+        p
+        for p in _git(cct, "ls-tree", "-r", "--name-only", rev, "--", "specs").splitlines()
+        if re.fullmatch(r"specs/[^/]+/spec\.md", p)
+    ]
+    out = [
+        (f"cct-spec:{Path(p).parent.name}", _git(cct, "show", f"{rev}:{p}")[:1500])
+        for p in sorted(paths)
+        if Path(p).parent.name not in cited
+    ]
     if not out:
-        raise SystemExit(f"no code-copilot-team specs under {cct}; pass --cct <checkout>")
+        raise SystemExit(f"no code-copilot-team specs at {rev} in {cct}; pass --cct <checkout>")
     return out
 
 
@@ -190,15 +205,15 @@ def main() -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--top-k", type=int, default=TOP_K)
     parser.add_argument("--cct", default=str(Path.home() / "dev" / "repo" / "code-copilot-team"))
+    parser.add_argument("--cct-rev", default=CCT_REV, help="the published results use CCT_REV")
     args = parser.parse_args()
     records = parse_corpus(CORPUS.read_text(encoding="utf-8"))
     assert len(records) == 12, len(records)
     report: dict[str, Any] = {"memkernel": __version__, "top_k": args.top_k, "arms": {}}
     cct = Path(args.cct)
-    extra = cct_distractors(cct, records)
-    report["cct_commit"] = subprocess.run(
-        ["git", "-C", str(cct), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    report["cct_commit"] = _git(cct, "rev-parse", "--verify", f"{args.cct_rev}^{{commit}}").strip()
+    extra = cct_distractors(cct, report["cct_commit"], records)
+    report["cct_specs"] = len(extra)
     for arm in ("as-left", "superseded", "crowded"):
         with tempfile.TemporaryDirectory() as tmp:
             svc = service(Path(tmp))
