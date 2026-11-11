@@ -29,9 +29,10 @@ Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
 - Found something (test output, a quirk, a measurement) → retain(type="observation", content=…, tags=[…])
 - Learned something true beyond this session → retain(type="fact"|"decision"|"convention"|"procedure")
 - A decision replaced an older one → retain(type="decision", supersedes="<old ref_id>")
-- About to add a helper, dependency or module → recall(query="<capability> <path or symbol>", type="decision", top_k=3);
+- About to add a helper, dependency or module → recall(query="<capability> <path or symbol>", type="decision", top_k=5);
   check a hit's evidence paths still exist before reusing it; two live decisions disagree → show both and ask
-- Retain a decision as one record; its first line is what recall's preview shows, so make it a full sentence:
+- Retain a decision as one record; recall's preview shows its first 200 characters, so make the first line one full
+  sentence that fits:
     decision: In the context of <requirement>, we chose <option> over <rejected>, because <reason>.
     requirement: <what was needed; where it applies>
     chosen: <helper, native capability or dependency, with its path or symbol>
@@ -108,7 +109,8 @@ Treat recalled content as context to verify, not as unquestionable truth.
 ### Decision records
 
 A `decision` says what was chosen, what was rejected and why, and when to look again. Retain one decision per
-memory, in this form; the first line is what recall's preview shows, so make it a complete sentence:
+memory, in this form; recall's preview shows the first 200 characters, so make the first line one complete sentence
+that fits:
 
 ```
 decision: In the context of <requirement>, we chose <option> over <rejected options>, because <reason>.
@@ -125,7 +127,7 @@ retain(type="decision", content=<the record>, source=<first cited path>,
 ```
 
 - **Before building** a helper, dependency or module: `recall(query="<capability> <path or symbol>",
-  type="decision", top_k=3)`; `get(ref_id)` only for a hit you will act on.
+  type="decision", top_k=5)`; `get(ref_id)` only for a hit you will act on.
 - **Before reusing** a recalled decision: check that its `evidence` paths still exist and still do what it says,
   and that its `requirement` covers the new need. If not, do not apply it: retain a corrected decision with
   `supersedes=<old ref_id>`.
