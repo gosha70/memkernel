@@ -271,6 +271,9 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_RECALL_WEIGHT_IMPORTANCE` | `0.3` | Weight of importance in the final recall score |
 | `MEMKERNEL_WIKI_DIR` | `` | Directory of the LLM wiki used by `wiki_export` / `wiki_import` (empty = pass `wiki_dir` explicitly) |
 | `MEMKERNEL_STATE_DIR` | `.memkernel/state` | memkernel's own state outside ChromaDB: the wiki sync ledger. Resolved like `MEMKERNEL_CHROMA_PERSIST_PATH` (a relative path is relative to the process's working directory, so set it absolute when the persist path is); keep it out of git |
+| `MEMKERNEL_RECALL_LOG` | `false` | Keep a recall log: each MCP `recall`, and each hook block that shows memories, appends one line (time, query, filters, returned `ref_id`s) to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, created readable by you only. It stores query text, so it is off by default; it stays on this computer, so keep it out of git. Nothing is written for an in-memory store. Used by the repeated-mistake count (see [Counting repeated mistakes](#counting-repeated-mistakes)) |
+| `MEMKERNEL_RECALL_LOG_MAX_BYTES` | `5000000` | Size of one recall-log file before it is rotated to `recall.jsonl.1` |
+| `MEMKERNEL_RECALL_LOG_MAX_FILES` | `10` | Recall-log files kept, the current one included; the oldest is deleted at rotation |
 | `MEMKERNEL_WIKI_PROPOSALS_DIR` | `""` | Where wiki-studio patch-sets are written before promote (`memkernel[wiki]`); empty means `<project root>/.memkernel/wiki-proposals`. Setting it requests the gate: without wiki-studio installed, a warning is logged. |
 | `MEMKERNEL_WIKI_MODE` | `auto` | `auto`: wiki-studio's gate and review state when wiki-studio 0.7.0 or later is installed, the direct writer and file-reading import when it is not. `governed`: `wiki_export` and `wiki_import` refuse, writing nothing, unless wiki-studio is installed with every capability memkernel uses and the wiki's manifest is `governed` (`approval_required: true`) without schema drift. `ungated`: wiki-studio is never loaded. Responses report `mode` (`gated` or `ungated`, the path that ran) and `configured_mode` (this setting). |
 | `MEMKERNEL_WIKI_EXPORT_BATCH` | `10` | New pages one `wiki_export` writes at most, the most important memories first; the response's `remaining` counts the rest (`null` when the gate's outcome is uncertain or `governed` refused before reading the wiki). `0` = no limit; a negative value is refused |
@@ -279,6 +282,47 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_PORT` | `8765` | Port for `streamable-http` transport |
 
 ---
+
+## Counting repeated mistakes
+
+A repeated mistake is an error the agent stored in a memory that comes back in a later session. The count needs
+three things: the stored memories, each session's own command output, and what memkernel showed each session.
+memkernel keeps the first; Claude Code's transcripts keep the second; the recall log keeps the third.
+
+1. **Turn the log on** before the build: `MEMKERNEL_RECALL_LOG=1` for the MCP server and the hooks (see
+   [Configuration](#configuration)). Each MCP `recall`, and each hook block that shows memories, then adds one line
+   to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`.
+2. **Run the count** after the build, from a memkernel checkout, with each store the sessions used and the
+   project's transcript folder:
+
+   ```bash
+   poetry run python eval/repeat-mistakes/count.py \
+     --store name=main,chroma=/path/to/.memkernel/chroma,state=/path/to/.memkernel/state,project=default \
+     --transcripts ~/.claude/projects/<project folder> --json repeats.json
+   ```
+
+The rule is fixed and mechanical (it follows the one posted on #112):
+- **Stored error:** text a memory quotes in backticks that contains `Error`, `Exception`, `Traceback`, `FAILED` or
+  `fatal` (case-sensitive). ``npm test fails with `Error: Cannot find module 'x'` `` stores
+  `Error: Cannot find module 'x'`.
+- **Repeat:** a later session whose own `Bash` output contains that exact text; once per memory and session.
+- **Outcome**, before the failure: **shown** (memkernel returned the memory to that session), **missed** (the
+  session used the memory's store, and memkernel did not return it), **other store** (the session never used that
+  store), **unknown** (no log records for that session). The report also counts later sessions that were shown a
+  memory and did not repeat its error.
+
+**Check the report before sharing it.** It quotes each matched error text, which is text from your memories and
+from the sessions' command output in the transcripts, together with memory ids and session ids. The `--json` file
+holds the same.
+
+What it cannot detect:
+- a reworded or differently quoted error (exact text only);
+- a failure seen through a tool other than `Bash`;
+- sessions whose recalls were not logged: the log was off, or an MCP recall matched calls in two sessions and was
+  not guessed;
+- recalls made through the Python library rather than the MCP tool or a hook;
+- tools other than Claude Code: only its transcripts are read, through a small reader that #59's transcript reader
+  will replace.
 
 ## Transports
 

@@ -72,7 +72,7 @@ def append(settings: MemKernelSettings, event: str, session_id: str, when: datet
     if path is None or not session_id:
         return
     record = {"event": event, "session_id": session_id, "time": when.isoformat(), **fields}
-    with _locked(path), path.open("a", encoding="utf-8") as handle:
+    with locked(path), path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
@@ -93,7 +93,7 @@ def drain(
     if path is None or not path.exists():
         return DrainResult([], 0)
     cutoff = (now or datetime.now(UTC)) - SPOOL_UNENDED_MAX_AGE
-    with _locked(path):
+    with locked(path):
         records: list[dict[str, Any]] = []
         malformed = 0
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -142,7 +142,8 @@ def drain(
 
 
 @contextmanager
-def _locked(path: Path) -> Iterator[None]:
+def locked(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on ``<path>.lock`` (creating the directory); shared with the recall log."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(f"{path.name}.lock").open("a", encoding="utf-8") as handle:
         if fcntl is not None:

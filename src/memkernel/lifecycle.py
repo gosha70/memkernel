@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from memkernel import session_spool
+from memkernel import recall_log, session_spool
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
 from memkernel.wiki.curation import curation_debt_lines
@@ -49,6 +49,10 @@ HEADING_CHECKPOINT = "### Latest checkpoint"
 HEADING_CONTEXT = "### Long-term context"
 HEADING_CANDIDATES = "### Promotion candidates (short-term memories worth keeping)"
 HEADING_NEEDS_REVIEW = "### Needs review"
+# The recall log's names for the hook blocks that show memories (memkernel-0-10-recall-log A1).
+BLOCK_SESSION_START = "session-start"
+BLOCK_COMPACT_RECOVERY = "compact-recovery"
+BLOCK_POST_COMPACT = "post-compact"
 HEADING_STORE_HEALTH = "### Store health"
 HEADING_WIKI = "### Wiki"
 HEADING_PREVIOUS_SESSIONS = "### Previous sessions"
@@ -126,7 +130,7 @@ class MemoryLifecycle:
         if source in SOURCES_ALREADY_IN_CONTEXT:
             return ""
         if source == SOURCE_COMPACT:
-            return self._compact_recovery()
+            return self._compact_recovery(session_id or "")
         drained = self._drain_spool(session_id) if source == SOURCE_STARTUP else session_spool.DrainResult([], 0)
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
@@ -162,7 +166,10 @@ class MemoryLifecycle:
                 f"Purged {report['purged']} expired short-term memories. Use recall() / get(ref_id) for details.",
             ]
         )
-        return _finish(lines)
+        shown = [m.ref_id for m in (latest, *context) if m is not None]
+        shown += [c["ref_id"] for c in report["candidates"]]
+        shown += [f["ref_id"] for f in report.get("revalidated", {}).get("flagged", []) if f.get("ref_id")]
+        return self._logged(_finish(lines), BLOCK_SESSION_START, shown, session_id or "")
 
     def on_pre_compact(self, summary: str) -> str:
         """Retain a non-empty ``summary`` as a checkpoint episode, consolidate, and return a one-line status.
@@ -214,7 +221,9 @@ class MemoryLifecycle:
         ]
         lines.extend(_candidates_block(candidates))
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
-        return _finish(lines)
+        shown = [latest.ref_id] if latest is not None else []
+        shown += [r.ref_id for r in context] + [c["ref_id"] for c in candidates]
+        return self._logged(_finish(lines), BLOCK_POST_COMPACT, shown, "")
 
     def on_session_end(self, summary: str) -> str:
         """Retain ``summary`` as a session checkpoint (if given), consolidate, and report what is worth promoting."""
@@ -234,6 +243,12 @@ class MemoryLifecycle:
     # Internals
     # ------------------------------------------------------------------
 
+    def _logged(self, text: str, block: str, candidates: list[str], session_id: str) -> str:
+        """Log the memories whose ref_id ``text`` shows, in order of appearance (A1); return ``text``."""
+        shown = sorted({ref for ref in candidates if ref and ref in text}, key=text.index)
+        recall_log.append(self._settings, recall_log.ORIGIN_HOOK, shown, session_id=session_id, block=block)
+        return text
+
     def _retain_checkpoint(self, summary: str, now: datetime, tags: list[str]) -> str:
         return self._service.retain(
             content=f"{_CHECKPOINT_PREFIX}{now.isoformat()}\n\n{summary}",
@@ -244,7 +259,7 @@ class MemoryLifecycle:
             tags=tags,
         )
 
-    def _compact_recovery(self) -> str:
+    def _compact_recovery(self, session_id: str) -> str:
         """After a compaction: the latest checkpoint not captured from the compaction summary, with its age, and the
         long-term context. No consolidation, revalidation, purge or candidates; the same whichever hook ran first."""
         chosen = next((m for m in self._service.checkpoints_newest_first() if COMPACT_SUMMARY_TAG not in m.tags), None)
@@ -262,7 +277,8 @@ class MemoryLifecycle:
         lines.extend(self._checkpoint_lines(checkpoint) if checkpoint is not None else ["No checkpoint found."])
         lines.extend(["", HEADING_CONTEXT, *(self._memory_lines(context) or ["No prior memories found."])])
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
-        return _finish(lines)
+        shown = [m.ref_id for m in (checkpoint, *context) if m is not None]
+        return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id)
 
     def _drain_spool(self, session_id: str | None) -> DrainResult:
         """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009).
