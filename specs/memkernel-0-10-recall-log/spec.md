@@ -4,9 +4,11 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 
 ## Checked facts (`main` at `4ac307e`, memkernel 0.9.0)
 
-- **Who calls `recall`.** The MCP tool (`src/memkernel/mcp/tools/memory.py`, `recall`) and the session-start hook
-  path (`src/memkernel/lifecycle.py`, two calls: the context lines and the checkpoint). The hook knows Claude
-  Code's session id (`on_session_start(source, session_id)`); the MCP server does not.
+- **Who calls `recall`.** The MCP tool (`src/memkernel/mcp/tools/memory.py`, `recall`), and in the hooks only the
+  compact recovery (`_compact_recovery`) and `on_post_compact`. A normal session start (`startup`, `clear`) picks
+  its checkpoint and context without `recall` (`_startup_context` uses `list_memories`). *Corrected in build: the
+  draft said the session-start path made two `recall` calls.* The hook knows Claude Code's session id
+  (`on_session_start(source, session_id)`); the MCP server does not.
 - **The spool cannot map sessions after the fact.** `session_spool.drain()` removes every ended session at the
   next `startup`, so its windows are gone before any count runs. #120 proposes mapping through the spool; this
   spec uses the transcripts instead (D2).
@@ -29,11 +31,13 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 ## Requirements
 
 - **FR-001 Recall log (D1, D3, D4).** With `MEMKERNEL_RECALL_LOG=1` and a persisted store, each `recall` made by
-  the MCP tool or the session-start hook appends one JSON line to
+  the MCP tool, and each hook block that shows memories (session start, compact recovery, post-compact; amendment A1),
+  appends one JSON line to
   `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`: `time` (UTC, ISO 8601), `origin` (`tool` or
   `hook`), `session_id` (the hook's; empty for `tool`), `query`, the filters as passed (`type`, `tier`,
   `session_id_filter`, `checkpoint_only`, `top_k`, `include_needs_review`, `order`), and `ref_ids`, in the order
-  returned. The query is kept up to 2,000 characters. The file is created with mode `0600`. A write failure is
+  returned. A hook record has an empty query and no filters, a `block` field naming the block, and as `ref_ids`
+  the memories whose `ref_id` appears in the block it returned. The query is kept up to 2,000 characters. The file is created with mode `0600`. A write failure is
   logged once per process and never fails the `recall`.
 - **FR-002 Off by default.** Disabled, or with an in-memory store, nothing is written and no directory is created.
 - **FR-003 Bounded (D3).** Before each append, if the current file would pass `recall_log_max_bytes`, it is
@@ -81,8 +85,11 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 
 ## Decisions (the owner's, 2026-11-11)
 
-- **D1 Where to log.** Recalls made by the MCP tool and by the session-start hook, through one small `recall_log`
-  module; `MemoryService.recall` keeps its signature. Recalls by other Python callers are not logged.
+- **D1 Where to log.** Recalls made by the MCP tool, and what the hook blocks show (A1), through one small
+  `recall_log` module; `MemoryService.recall` keeps its signature. Recalls by other Python callers are not logged.
+- **A1 (the owner's, 2026-11-11, during the build).** A normal session start shows memories without `recall`, so
+  logging only `recall` calls would report them as missed. Each hook block that shows memories writes one record
+  listing the `ref_id`s it injected.
 - **D2 Which session a recall belongs to.** `hook` records carry the session id. For a `tool` record, the script
   finds the transcript's own `recall` call: same query, within 5 seconds (the MCP server and Claude Code run on
   the same computer), paired one to one, nearest first. No
