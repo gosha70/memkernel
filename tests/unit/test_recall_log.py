@@ -17,7 +17,7 @@ from memkernel import recall_log
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryType
 from memkernel.factory import build_service
-from memkernel.lifecycle import BLOCK_COMPACT_RECOVERY, BLOCK_SESSION_START, MemoryLifecycle
+from memkernel.lifecycle import BLOCK_COMPACT_RECOVERY, BLOCK_POST_COMPACT, BLOCK_SESSION_START, MemoryLifecycle
 from tests.conftest import MockEmbedding
 
 if TYPE_CHECKING:
@@ -158,3 +158,47 @@ def test_a_lifecycle_without_settings_writes_to_the_services_log(tmp_path: Path)
     MemoryLifecycle(svc).on_session_start("startup", session_id="s4")
     (record,) = _records(settings)
     assert record["origin"] == "hook" and record["session_id"] == "s4" and ref in record["ref_ids"]
+
+
+def test_a_record_larger_than_the_limit_is_cut_to_fit(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, recall_log_max_bytes=200)
+    refs = [f"ref-{i:032d}" for i in range(30)]
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, refs, query="q" * 150)
+    path = recall_log.log_path(settings)
+    assert path is not None and path.stat().st_size <= 200
+    (record,) = _records(settings)
+    assert record["truncated"] is True and record["ref_ids"] == refs[: len(record["ref_ids"])]
+
+
+def test_a_record_that_fits_is_not_marked(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, ["a"], query="q")
+    assert "truncated" not in _records(settings)[0]
+
+
+def test_post_compact_logs_only_with_a_session_id(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    lifecycle, svc = _lifecycle(settings)
+    svc.retain("SESSION CHECKPOINT\nCurrent: schema.", MemoryType.EPISODE, checkpoint=True)
+    lifecycle.on_post_compact()
+    path = recall_log.log_path(settings)
+    assert path is not None and not path.exists()
+    text = lifecycle.on_post_compact(session_id="h1")
+    (record,) = _records(settings)
+    assert record["block"] == BLOCK_POST_COMPACT and record["session_id"] == "h1"
+    assert record["ref_ids"] and all(ref in text for ref in record["ref_ids"])
+
+
+def test_without_fcntl_the_log_warns_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from memkernel import session_spool
+
+    monkeypatch.setattr(session_spool, "fcntl", None)
+    monkeypatch.setattr(recall_log, "_warned_unlocked", False)
+    settings = _settings(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="memkernel.recall_log"):
+        for _ in range(3):
+            recall_log.append(settings, recall_log.ORIGIN_TOOL, ["x"])
+    assert sum("not locked" in r.getMessage() for r in caplog.records) == 1
+    assert len(_records(settings)) == 3

@@ -117,7 +117,7 @@ def test_every_outcome_on_a_fixture_with_known_repeats(tmp_path: Path) -> None:
     s6.tool(at(42), "Read", {"file_path": "notes.md"}, "We once saw Error: Cannot find module 'left-pad'")
     # S7 was shown a memory and did not repeat its error.
     s7 = Transcript(folder, "s7")
-    recall_log.append(a, "hook", [m_shown], session_id="s7", block="session-start", now=at(50))
+    recall_log.append(a, "hook", [m_shown, m_unknown], session_id="s7", block="session-start", now=at(50))  # two
     s7.tool(at(51), "Bash", {"command": "ls"}, "README.md")
 
     out = tmp_path / "report.json"
@@ -141,13 +141,17 @@ def test_every_outcome_on_a_fixture_with_known_repeats(tmp_path: Path) -> None:
     assert set(outcomes) == {(m_shown, "s1"), (m_missed, "s2"), (m_other, "s3"), (m_unknown, "s4"), (m_two, "s5")}
     assert outcomes[(m_shown, "s1")]["outcome"] == "shown"
     assert outcomes[(m_missed, "s2")]["outcome"] == "missed"
-    assert outcomes[(m_missed, "s2")]["evidence"] == {"recalls_before_failure": 1, "all_filtered_out": False}
+    assert outcomes[(m_missed, "s2")]["evidence"] == {
+        "tool_recalls_before_failure": 0,
+        "hook_blocks_before_failure": 1,
+        "all_tool_recalls_filtered_out": False,
+    }
     assert outcomes[(m_other, "s3")]["outcome"] == "other store"
     assert outcomes[(m_unknown, "s4")]["outcome"] == "unknown"
     assert outcomes[(m_two, "s5")]["outcome"] == "unknown"
     assert outcomes[(m_two, "s5")]["signature"] == "Error: disk full"
     assert report["by_outcome"] == {"shown": 1, "missed": 1, "other store": 1, "unknown": 2}
-    assert report["shown_without_repeat"] == 1
+    assert report["shown_without_repeat"] == 1  # one session, though it was shown two memories
     assert report["unattributed_tool_records"] == 1
     assert report["stored_errors"] == 5 and report["limits"]
 
@@ -168,9 +172,46 @@ def test_stored_errors_are_backtick_spans_with_an_error_word(content: str, expec
     assert count_module.signatures(content) == expected
 
 
-def test_a_filter_that_excludes_the_memory_is_reported(tmp_path: Path) -> None:
-    error = count_module.StoredError("a", "r1", "fact", "long_term", False, datetime.now(UTC), "Error: x")
+def _error(**overrides: Any) -> Any:
+    fields: dict[str, Any] = {
+        "store": "a",
+        "ref_id": "r1",
+        "type": "fact",
+        "tier": "long_term",
+        "checkpoint": False,
+        "session_id": "build-1",
+        "needs_review": False,
+        "time": datetime.now(UTC),
+        "signature": "Error: x",
+    }
+    fields.update(overrides)
+    return count_module.StoredError(**fields)
+
+
+@pytest.mark.parametrize(
+    ("filters", "error_overrides", "excluded"),
+    [
+        ({"type": "decision"}, {}, True),
+        ({"tier": "working"}, {}, True),
+        ({"session_id_filter": "other"}, {}, True),
+        ({"session_id_filter": "build-1"}, {}, False),
+        ({"include_needs_review": False}, {"needs_review": True}, True),
+        ({"include_needs_review": True}, {"needs_review": True}, False),
+        ({"checkpoint_only": True}, {}, True),
+        ({"top_k": 3, "order": "relevance"}, {}, False),
+    ],
+)
+def test_every_logged_filter_is_evaluated(
+    filters: dict[str, Any], error_overrides: dict[str, Any], excluded: bool
+) -> None:
     when = datetime.now(UTC)
-    filtered = count_module.LogRecord("a", when, "tool", "", "q", {"type": "decision"}, [])
-    outcome, evidence = count_module.classify(error, [filtered], when + timedelta(seconds=1))
-    assert outcome == "missed" and evidence == {"recalls_before_failure": 1, "all_filtered_out": True}
+    error = _error(**error_overrides)
+    record = count_module.LogRecord("a", when, "tool", "", "q", filters, [])
+    hook = count_module.LogRecord("a", when, "hook", "s", "", {}, [])
+    outcome, evidence = count_module.classify(error, [record, hook], when + timedelta(seconds=1))
+    assert outcome == "missed"
+    assert evidence == {
+        "tool_recalls_before_failure": 1,
+        "hook_blocks_before_failure": 1,
+        "all_tool_recalls_filtered_out": excluded,
+    }

@@ -14,8 +14,9 @@ All notable changes to this project are documented here. The format follows
   `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, rotated by `MEMKERNEL_RECALL_LOG_MAX_BYTES` (5 MB) and
   `MEMKERNEL_RECALL_LOG_MAX_FILES` (10). Off by default, because it stores query text. `eval/repeat-mistakes/count.py`
   applies #112's rule to the stores, the recall logs and Claude Code's transcripts, and reports each repeat as shown,
-  missed, other store or unknown. `recall`'s results, the MCP tools and the hook scripts are unchanged. README:
-  "Counting repeated mistakes".
+  missed, other store or unknown. `recall`'s results, the MCP tools and the hook scripts are unchanged;
+  `on_post_compact()` gains an optional `session_id`, logged only when given. The log is locked on POSIX only (one
+  warning on Windows). README: "Counting repeated mistakes".
 
 ### Changed
 

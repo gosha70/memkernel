@@ -77,6 +77,8 @@ class StoredError:
     type: str
     tier: str
     checkpoint: bool
+    session_id: str
+    needs_review: bool  # as the store holds it now: a flag set or cleared since the failure is not known
     time: datetime
     signature: str
 
@@ -141,6 +143,8 @@ def stored_errors(store: Store) -> list[StoredError]:
                     memory.type.value,
                     memory.tier.value,
                     memory.checkpoint,
+                    memory.session_id,
+                    memory.needs_review,
                     memory.timestamp,
                     signature,
                 )
@@ -184,7 +188,7 @@ def attribute(records: list[LogRecord], sessions: list[Session]) -> tuple[dict[s
     by_session: dict[str, list[LogRecord]] = {}
     pairs: list[tuple[timedelta, int, str, int]] = []
     candidate_sessions: dict[int, set[str]] = {}
-    tool_records = []
+    tool_records: list[LogRecord] = []
     for record in records:
         if record.origin == recall_log.ORIGIN_HOOK:
             if record.session_id:
@@ -213,11 +217,15 @@ def attribute(records: list[LogRecord], sessions: list[Session]) -> tuple[dict[s
 
 
 def _excluded(record: LogRecord, error: StoredError) -> bool:
-    """True when the record's filters could not have returned the memory."""
+    """True when the MCP recall's filters could not have returned the memory (every filter the log records)."""
     filters = record.filters
     if filters.get("type") and filters["type"] != error.type:
         return True
     if filters.get("tier") and filters["tier"] != error.tier:
+        return True
+    if filters.get("session_id_filter") and filters["session_id_filter"] != error.session_id:
+        return True
+    if error.needs_review and not filters.get("include_needs_review"):
         return True
     return bool(filters.get("checkpoint_only")) and not error.checkpoint
 
@@ -229,10 +237,12 @@ def classify(error: StoredError, records: list[LogRecord], failure: datetime) ->
     if any(r.store == error.store and error.ref_id in r.ref_ids for r in before):
         return SHOWN, {}
     if error.store in {r.store for r in records}:
-        from_store = [r for r in before if r.store == error.store]
+        tool = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_TOOL]
+        hook = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_HOOK]
         return MISSED, {
-            "recalls_before_failure": len(from_store),
-            "all_filtered_out": bool(from_store) and all(_excluded(r, error) for r in from_store),
+            "tool_recalls_before_failure": len(tool),
+            "hook_blocks_before_failure": len(hook),
+            "all_tool_recalls_filtered_out": bool(tool) and all(_excluded(r, error) for r in tool),
         }
     return OTHER_STORE, {"stores_used": sorted({r.store for r in records})}
 
@@ -242,7 +252,7 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
     records = [r for store in stores for r in read_log(store)]
     by_session, unattributed = attribute(records, sessions)
     repeats: list[Repeat] = []
-    shown_without_repeat = 0
+    shown_without_repeat: set[str] = set()
     memories: dict[tuple[str, str], list[StoredError]] = {}
     for error in errors:
         memories.setdefault((error.store, error.ref_id), []).append(error)
@@ -258,7 +268,7 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
             session_records = by_session.get(session.session_id, [])
             if hit is None:
                 if any(r.store == store_name and ref_id in r.ref_ids for r in session_records):
-                    shown_without_repeat += 1
+                    shown_without_repeat.add(session.session_id)
                 continue
             failure, error = hit
             outcome, evidence = classify(error, session_records, failure)
@@ -271,7 +281,7 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
         "sessions": len(sessions),
         "repeats": len(repeats),
         "by_outcome": {o: sum(r.outcome == o for r in repeats) for o in OUTCOMES},
-        "shown_without_repeat": shown_without_repeat,
+        "shown_without_repeat": len(shown_without_repeat),
         "unattributed_tool_records": unattributed,
         "details": [asdict(r) for r in repeats],
         "limits": list(LIMITS),

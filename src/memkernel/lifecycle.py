@@ -199,8 +199,12 @@ class MemoryLifecycle:
         how = f" ({trigger})" if trigger else ""
         return f"MemKernel: compaction summary{how} retained as a checkpoint — ref_id={ref_id}"
 
-    def on_post_compact(self) -> str:
-        """Return the latest checkpoint, long-term context and promotion candidates for re-injection."""
+    def on_post_compact(self, session_id: str = "") -> str:
+        """Return the latest checkpoint, long-term context and promotion candidates for re-injection.
+
+        For harnesses that call it after their own compaction (Claude Code's hooks do not). With ``session_id``, what
+        the block shows is written to the recall log; without one there is nothing to attribute it to, so nothing is.
+        """
         latest = self._latest_checkpoint_memory()
         context = self._service.recall(
             "decisions conventions architecture", tier=MemoryTier.LONG_TERM, top_k=POST_COMPACT_CONTEXT_TOP_K
@@ -223,7 +227,8 @@ class MemoryLifecycle:
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         shown = [latest.ref_id] if latest is not None else []
         shown += [r.ref_id for r in context] + [c["ref_id"] for c in candidates]
-        return self._logged(_finish(lines), BLOCK_POST_COMPACT, shown, "")
+        text = _finish(lines)
+        return self._logged(text, BLOCK_POST_COMPACT, shown, session_id) if session_id else text
 
     def on_session_end(self, summary: str) -> str:
         """Retain ``summary`` as a session checkpoint (if given), consolidate, and report what is worth promoting."""

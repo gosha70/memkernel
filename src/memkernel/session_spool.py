@@ -141,6 +141,11 @@ def drain(
     return DrainResult(sorted(unsaved, key=lambda w: w.end), unended_removed)
 
 
+def locking() -> bool:
+    """Whether :func:`locked` really locks (POSIX ``fcntl``); on Windows it does not."""
+    return fcntl is not None
+
+
 @contextmanager
 def locked(path: Path) -> Iterator[None]:
     """Hold an exclusive lock on ``<path>.lock`` (creating the directory); shared with the recall log."""

@@ -31,7 +31,8 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 ## Requirements
 
 - **FR-001 Recall log (D1, D3, D4).** With `MEMKERNEL_RECALL_LOG=1` and a persisted store, each `recall` made by
-  the MCP tool, and each hook block that shows memories (session start, compact recovery, post-compact; amendment A1),
+  the MCP tool, and each hook block that shows memories (session start, compact recovery; post-compact only when
+  called with a session id, A2; amendment A1),
   appends one JSON line to
   `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`: `time` (UTC, ISO 8601), `origin` (`tool` or
   `hook`), `session_id` (the hook's; empty for `tool`), `query`, the filters as passed (`type`, `tier`,
@@ -42,14 +43,16 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 - **FR-002 Off by default.** Disabled, or with an in-memory store, nothing is written and no directory is created.
 - **FR-003 Bounded (D3).** Before each append, if the current file would pass `recall_log_max_bytes`, it is
   rotated: `recall.jsonl` becomes `recall.jsonl.1`, older files shift up, and files beyond `recall_log_max_files`
-  are deleted.
+  are deleted. A single record larger than the limit keeps its first `ref_ids`, then as much query text, as fit,
+  and is marked `truncated` (A2). The lock is POSIX-only (A2).
 - **FR-004 Settings.** `recall_log: bool = False` (`MEMKERNEL_RECALL_LOG`), `recall_log_max_bytes` (default
   5 MB per file) and `recall_log_max_files` (default 10), all in the README configuration table, with a note that
   the log stores query text and stays local.
 - **FR-005 Counting script (D2, D5, D6).** `eval/repeat-mistakes/count.py` reads one or more stores (each with its
   recall log) and a Claude Code transcript folder, applies the rule in D5, classifies each repeat as in D6, and
   prints a report with counts, each repeat's evidence (memory `ref_id`, session id, the failure's timestamp, the
-  matched text; for Missed, whether every recall's filters excluded the memory) and its limits. `--json` writes the same as a file.
+  matched text; for Missed, how many MCP recalls and hook blocks came before the failure, and whether every MCP
+  recall's filters, all of those the log records, excluded the memory) and its limits. `--json` writes the same as a file.
 - **FR-006 Transcript reader.** A small Claude Code transcript reader inside `eval/repeat-mistakes/`, documented
   as temporary until #59 Phase 2's reader exists.
 - **FR-007 Docs.** A README section: enabling the log, running the count on your own build, and what it cannot
@@ -85,6 +88,10 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 
 ## Decisions (the owner's, 2026-11-11)
 
+- **A2 (the owner's, 2026-11-11, review of #124).** `on_post_compact(session_id="")`: Claude Code's hooks do not
+  call it; a harness that does can pass a session id, and only then is its block logged. The recall log, like the
+  store locks, is locked on POSIX only: on Windows it runs unlocked with one warning per process, and concurrent
+  writers there can lose records or pass the size limit. A record larger than the size limit is cut to fit.
 - **D1 Where to log.** Recalls made by the MCP tool, and what the hook blocks show (A1), through one small
   `recall_log` module; `MemoryService.recall` keeps its signature. Recalls by other Python callers are not logged.
 - **A1 (the owner's, 2026-11-11, during the build).** A normal session start shows memories without `recall`, so
