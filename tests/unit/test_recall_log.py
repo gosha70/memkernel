@@ -148,3 +148,13 @@ def test_resume_shows_nothing_and_logs_nothing(tmp_path: Path) -> None:
     assert lifecycle.on_session_start("resume", session_id="s3") == ""
     path = recall_log.log_path(settings)
     assert path is not None and not path.exists()
+
+
+def test_a_lifecycle_without_settings_writes_to_the_services_log(tmp_path: Path) -> None:
+    """Hook records use the store's settings, not the lifecycle's own defaults (the FR-011 lesson)."""
+    settings = _settings(tmp_path)
+    svc = build_service(settings, embedding=MockEmbedding(), chroma_client=chromadb.EphemeralClient())
+    ref = svc.retain("Use Postgres for the user store.", MemoryType.DECISION)
+    MemoryLifecycle(svc).on_session_start("startup", session_id="s4")
+    (record,) = _records(settings)
+    assert record["origin"] == "hook" and record["session_id"] == "s4" and ref in record["ref_ids"]

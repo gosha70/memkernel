@@ -246,7 +246,7 @@ class MemoryLifecycle:
     def _logged(self, text: str, block: str, candidates: list[str], session_id: str) -> str:
         """Log the memories whose ref_id ``text`` shows, in order of appearance (A1); return ``text``."""
         shown = sorted({ref for ref in candidates if ref and ref in text}, key=text.index)
-        recall_log.append(self._settings, recall_log.ORIGIN_HOOK, shown, session_id=session_id, block=block)
+        recall_log.append(self._service.settings, recall_log.ORIGIN_HOOK, shown, session_id=session_id, block=block)
         return text
 
     def _retain_checkpoint(self, summary: str, now: datetime, tags: list[str]) -> str:
