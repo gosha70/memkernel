@@ -64,6 +64,7 @@ def test_one_record_with_every_field(tmp_path: Path) -> None:
     (record,) = _records(settings)
     assert record["origin"] == "tool" and record["ref_ids"] == ["a", "b"] and record["query"] == "db choice"
     assert record["filters"] == {"top_k": 3} and record["session_id"] == "" and "block" not in record
+    assert record["query_sha256"] == recall_log.query_hash("db choice")
     assert record["time"].endswith("+00:00")
 
 
@@ -87,24 +88,24 @@ def test_off_or_in_memory_writes_nothing(tmp_path: Path, overrides: dict[str, An
 
 
 def test_rotation_keeps_the_file_count_and_size(tmp_path: Path) -> None:
-    settings = _settings(tmp_path, recall_log_max_bytes=400, recall_log_max_files=3)
+    settings = _settings(tmp_path, recall_log_max_bytes=4_096, recall_log_max_files=3)
     for i in range(40):
-        recall_log.append(settings, recall_log.ORIGIN_TOOL, [f"r{i}"], query=f"query {i}")
+        recall_log.append(settings, recall_log.ORIGIN_TOOL, [f"r{i}"], query=f"query {i} " + "x" * 1_000)
     path = recall_log.log_path(settings)
     assert path is not None
     files = _log_files(path)
     assert [f.name for f in files] == ["recall.jsonl", "recall.jsonl.1", "recall.jsonl.2"]
-    assert all(f.stat().st_size <= 400 for f in files)
+    assert all(f.stat().st_size <= 4_096 for f in files)
     assert _records(settings)[-1]["ref_ids"] == ["r39"]  # the newest record is in the current file
 
 
 def test_one_file_means_the_log_restarts(tmp_path: Path) -> None:
-    settings = _settings(tmp_path, recall_log_max_bytes=200, recall_log_max_files=1)
+    settings = _settings(tmp_path, recall_log_max_bytes=4_096, recall_log_max_files=1)
     for i in range(10):
-        recall_log.append(settings, recall_log.ORIGIN_TOOL, [f"r{i}"])
+        recall_log.append(settings, recall_log.ORIGIN_TOOL, [f"r{i}"], query="x" * 1_000)
     path = recall_log.log_path(settings)
     assert path is not None and [f.name for f in _log_files(path)] == ["recall.jsonl"]
-    assert path.stat().st_size <= 200
+    assert path.stat().st_size <= 4_096 and _records(settings)[-1]["ref_ids"] == ["r9"]
 
 
 def test_a_failed_write_is_logged_once_and_never_raises(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -160,14 +161,26 @@ def test_a_lifecycle_without_settings_writes_to_the_services_log(tmp_path: Path)
     assert record["origin"] == "hook" and record["session_id"] == "s4" and ref in record["ref_ids"]
 
 
-def test_a_record_larger_than_the_limit_is_cut_to_fit(tmp_path: Path) -> None:
-    settings = _settings(tmp_path, recall_log_max_bytes=200)
-    refs = [f"ref-{i:032d}" for i in range(30)]
-    recall_log.append(settings, recall_log.ORIGIN_TOOL, refs, query="q" * 150)
+@pytest.mark.parametrize("count", [300, 10_000])
+def test_a_record_larger_than_the_limit_gives_up_query_text_then_trailing_ids(tmp_path: Path, count: int) -> None:
+    settings = _settings(tmp_path, recall_log_max_bytes=4_096)
+    refs = [f"ref-{i:032d}" for i in range(count)]
+    query = "q" * 150
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, refs, query=query)
     path = recall_log.log_path(settings)
-    assert path is not None and path.stat().st_size <= 200
+    assert path is not None and path.stat().st_size <= 4_096
     (record,) = _records(settings)
-    assert record["truncated"] is True and record["ref_ids"] == refs[: len(record["ref_ids"])]
+    assert record["truncated"] is True and record["ref_ids_truncated"] is True and record["query"] == ""
+    assert record["query_sha256"] == recall_log.query_hash(query)
+    assert 1 <= len(record["ref_ids"]) < count and record["ref_ids"] == refs[: len(record["ref_ids"])]
+
+
+def test_a_long_query_alone_is_cut_and_every_id_kept(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, recall_log_max_bytes=4_096)
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, ["a", "b"], query="é" * 1_500)  # six bytes each in JSON
+    (record,) = _records(settings)
+    assert record["truncated"] is True and record["ref_ids"] == ["a", "b"] and 0 < len(record["query"]) < 1_500
+    assert "ref_ids_truncated" not in record
 
 
 def test_a_record_that_fits_is_not_marked(tmp_path: Path) -> None:
@@ -202,3 +215,25 @@ def test_without_fcntl_the_log_warns_once(
             recall_log.append(settings, recall_log.ORIGIN_TOOL, ["x"])
     assert sum("not locked" in r.getMessage() for r in caplog.records) == 1
     assert len(_records(settings)) == 3
+
+
+def test_the_size_limit_has_a_floor_that_holds_a_full_mcp_record(tmp_path: Path) -> None:
+    from pydantic import ValidationError
+
+    from memkernel.config import RECALL_LOG_MIN_BYTES
+
+    with pytest.raises(ValidationError):
+        _settings(tmp_path, recall_log_max_bytes=RECALL_LOG_MIN_BYTES - 1)
+    settings = _settings(tmp_path, recall_log_max_bytes=RECALL_LOG_MIN_BYTES)
+    filters = {
+        "type": "decision",
+        "tier": "long_term",
+        "session_id_filter": "a-session-id-of-the-usual-length-0123456",
+        "checkpoint_only": False,
+        "top_k": 5,
+        "include_needs_review": False,
+        "order": "relevance",
+    }
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, ["a" * 32], query="q" * 2_000, filters=filters)
+    (record,) = _records(settings)
+    assert record["filters"] == filters and record["ref_ids"] == ["a" * 32]

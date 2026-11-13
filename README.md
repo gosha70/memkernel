@@ -272,7 +272,7 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_WIKI_DIR` | `` | Directory of the LLM wiki used by `wiki_export` / `wiki_import` (empty = pass `wiki_dir` explicitly) |
 | `MEMKERNEL_STATE_DIR` | `.memkernel/state` | memkernel's own state outside ChromaDB: the wiki sync ledger. Resolved like `MEMKERNEL_CHROMA_PERSIST_PATH` (a relative path is relative to the process's working directory, so set it absolute when the persist path is); keep it out of git |
 | `MEMKERNEL_RECALL_LOG` | `false` | Keep a recall log: each MCP `recall`, and each hook block that shows memories, appends one line (time, query, filters, returned `ref_id`s) to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, created readable by you only. It stores query text, so it is off by default; it stays on this computer, so keep it out of git. Nothing is written for an in-memory store. The log is locked on POSIX (Linux, macOS) only: on Windows it runs unlocked with one logged warning, and concurrent writers can lose records or pass the size limit. Used by the repeated-mistake count (see [Counting repeated mistakes](#counting-repeated-mistakes)) |
-| `MEMKERNEL_RECALL_LOG_MAX_BYTES` | `5000000` | Size of one recall-log file before it is rotated to `recall.jsonl.1`; a single record larger than this keeps its first `ref_id`s and is marked `truncated` |
+| `MEMKERNEL_RECALL_LOG_MAX_BYTES` | `5000000` | Size of one recall-log file before it is rotated to `recall.jsonl.1`, at least `4096`; a single record larger than this gives up query text first, then trailing `ref_id`s, and is marked `truncated` |
 | `MEMKERNEL_RECALL_LOG_MAX_FILES` | `10` | Recall-log files kept, the current one included; the oldest is deleted at rotation |
 | `MEMKERNEL_WIKI_PROPOSALS_DIR` | `""` | Where wiki-studio patch-sets are written before promote (`memkernel[wiki]`); empty means `<project root>/.memkernel/wiki-proposals`. Setting it requests the gate: without wiki-studio installed, a warning is logged. |
 | `MEMKERNEL_WIKI_MODE` | `auto` | `auto`: wiki-studio's gate and review state when wiki-studio 0.7.0 or later is installed, the direct writer and file-reading import when it is not. `governed`: `wiki_export` and `wiki_import` refuse, writing nothing, unless wiki-studio is installed with every capability memkernel uses and the wiki's manifest is `governed` (`approval_required: true`) without schema drift. `ungated`: wiki-studio is never loaded. Responses report `mode` (`gated` or `ungated`, the path that ran) and `configured_mode` (this setting). |
@@ -308,8 +308,10 @@ The rule is fixed and mechanical (it follows the one posted on #112):
 - **Repeat:** a later session whose own `Bash` output contains that exact text; once per memory and session.
 - **Outcome**, before the failure: **shown** (memkernel returned the memory to that session), **missed** (the
   session used the memory's store, and memkernel did not return it), **other store** (the session never used that
-  store), **unknown** (no log records for that session). For a miss, the report says how many MCP recalls and hook
-  blocks came before the failure, and whether every MCP recall's filters excluded the memory. It also counts the
+  store), **unknown** (no log records for that session; or a miss cannot be shown, because a record of the memory's
+  store whose `ref_id`s were cut (`ref_ids_truncated`), or an MCP recall that matched calls in two sessions and may have been this one's, came before
+  the failure). Malformed log lines are skipped and counted. For a miss, the report says how many MCP recalls and hook
+  blocks came before the failure, and whether every MCP recall's type, tier, session or checkpoint filter excluded the memory. It also counts the
   later sessions (each once) that were shown a memory and did not repeat its error.
 
 **Check the report before sharing it.** It quotes each matched error text, which is text from your memories and
@@ -322,6 +324,7 @@ What it cannot detect:
 - sessions whose recalls were not logged: the log was off, or an MCP recall matched calls in two sessions and was
   not guessed;
 - recalls made through the Python library rather than the MCP tool or a hook;
+- whether a memory was flagged for review when a recall ran: a recall that hid flagged memories may have hidden it;
 - tools other than Claude Code: only its transcripts are read, through a small reader that #59's transcript reader
   will replace.
 

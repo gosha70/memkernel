@@ -37,14 +37,15 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
   `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`: `time` (UTC, ISO 8601), `origin` (`tool` or
   `hook`), `session_id` (the hook's; empty for `tool`), `query`, the filters as passed (`type`, `tier`,
   `session_id_filter`, `checkpoint_only`, `top_k`, `include_needs_review`, `order`), and `ref_ids`, in the order
-  returned. A hook record has an empty query and no filters, a `block` field naming the block, and as `ref_ids`
+  returned, and `query_sha256`, the hash of the full query. A hook record has an empty query and no filters, a `block` field naming the block, and as `ref_ids`
   the memories whose `ref_id` appears in the block it returned. The query is kept up to 2,000 characters. The file is created with mode `0600`. A write failure is
   logged once per process and never fails the `recall`.
 - **FR-002 Off by default.** Disabled, or with an in-memory store, nothing is written and no directory is created.
 - **FR-003 Bounded (D3).** Before each append, if the current file would pass `recall_log_max_bytes`, it is
   rotated: `recall.jsonl` becomes `recall.jsonl.1`, older files shift up, and files beyond `recall_log_max_files`
-  are deleted. A single record larger than the limit keeps its first `ref_ids`, then as much query text, as fit,
-  and is marked `truncated` (A2). The lock is POSIX-only (A2).
+  are deleted. A single record larger than the limit gives up query text first, then trailing `ref_ids`, and is
+  marked `truncated` (A2). The size limit is at least 4,096 bytes, so a record with an empty query, its filters and
+  a session id always fits (A2). The lock is POSIX-only (A2).
 - **FR-004 Settings.** `recall_log: bool = False` (`MEMKERNEL_RECALL_LOG`), `recall_log_max_bytes` (default
   5 MB per file) and `recall_log_max_files` (default 10), all in the README configuration table, with a note that
   the log stores query text and stays local.
@@ -52,7 +53,12 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
   recall log) and a Claude Code transcript folder, applies the rule in D5, classifies each repeat as in D6, and
   prints a report with counts, each repeat's evidence (memory `ref_id`, session id, the failure's timestamp, the
   matched text; for Missed, how many MCP recalls and hook blocks came before the failure, and whether every MCP
-  recall's filters, all of those the log records, excluded the memory) and its limits. `--json` writes the same as a file.
+  recall's type, tier, session and checkpoint filters excluded the memory) and its limits. A miss with a truncated
+  record (cut `ref_ids`) of the memory's store before the failure, or an ambiguous record (D2) of one of its candidate sessions that
+  may have returned the memory, is reported as unknown; only a record whose `ref_ids` were cut
+  (`ref_ids_truncated`) counts here, since one that lost only query text still lists every id. Malformed log lines are skipped and counted;
+  `include_needs_review` is not judged,
+  because whether the memory was flagged when the recall ran is not known (A2). `--json` writes the same as a file.
 - **FR-006 Transcript reader.** A small Claude Code transcript reader inside `eval/repeat-mistakes/`, documented
   as temporary until #59 Phase 2's reader exists.
 - **FR-007 Docs.** A README section: enabling the log, running the count on your own build, and what it cannot
@@ -91,7 +97,10 @@ Status: approved by the owner, 2026-11-11 (decisions D1–D6 below).
 - **A2 (the owner's, 2026-11-11, review of #124).** `on_post_compact(session_id="")`: Claude Code's hooks do not
   call it; a harness that does can pass a session id, and only then is its block logged. The recall log, like the
   store locks, is locked on POSIX only: on Windows it runs unlocked with one warning per process, and concurrent
-  writers there can lose records or pass the size limit. A record larger than the size limit is cut to fit.
+  writers there can lose records or pass the size limit. From the review: a record larger than the size limit gives
+  up query text, then trailing `ref_ids`, is marked `truncated`, and keeps `query_sha256`, by which the count pairs
+  tool records with transcript calls; a truncated record cannot show a miss, so such a miss is unknown; and the
+  count does not judge `include_needs_review`.
 - **D1 Where to log.** Recalls made by the MCP tool, and what the hook blocks show (A1), through one small
   `recall_log` module; `MemoryService.recall` keeps its signature. Recalls by other Python callers are not logged.
 - **A1 (the owner's, 2026-11-11, during the build).** A normal session start shows memories without `recall`, so

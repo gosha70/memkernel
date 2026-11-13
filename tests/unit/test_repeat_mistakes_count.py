@@ -180,7 +180,6 @@ def _error(**overrides: Any) -> Any:
         "tier": "long_term",
         "checkpoint": False,
         "session_id": "build-1",
-        "needs_review": False,
         "time": datetime.now(UTC),
         "signature": "Error: x",
     }
@@ -195,8 +194,7 @@ def _error(**overrides: Any) -> Any:
         ({"tier": "working"}, {}, True),
         ({"session_id_filter": "other"}, {}, True),
         ({"session_id_filter": "build-1"}, {}, False),
-        ({"include_needs_review": False}, {"needs_review": True}, True),
-        ({"include_needs_review": True}, {"needs_review": True}, False),
+        ({"include_needs_review": False}, {}, False),  # whether it was flagged then is not known
         ({"checkpoint_only": True}, {}, True),
         ({"top_k": 3, "order": "relevance"}, {}, False),
     ],
@@ -215,3 +213,74 @@ def test_every_logged_filter_is_evaluated(
         "hook_blocks_before_failure": 1,
         "all_tool_recalls_filtered_out": excluded,
     }
+
+
+def test_a_truncated_record_makes_a_miss_unknown() -> None:
+    when = datetime.now(UTC)
+    cut = count_module.LogRecord("a", when, "tool", "", "", {}, ["r0"], "h", True)
+    outcome, evidence = count_module.classify(_error(), [cut], when + timedelta(seconds=1))
+    assert outcome == "unknown" and evidence == {"truncated_record_before_failure": True}
+    shown = count_module.LogRecord("a", when, "tool", "", "", {}, ["r1"], "h", True)
+    assert count_module.classify(_error(), [shown], when + timedelta(seconds=1))[0] == "shown"
+
+
+def test_a_cut_query_still_pairs_by_its_hash(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, "a")
+    query = "why does the migration fail " * 80  # 2,240 characters: longer than the log keeps
+    when = datetime.now(UTC)
+    recall_log.append(settings, "tool", ["r1"], query=query, now=when)
+    folder = tmp_path / "t"
+    folder.mkdir()
+    Transcript(folder, "s1").tool(when, count_module.DEFAULT_RECALL_TOOL, {"query": query}, "[]")
+    store = count_module.Store("a", settings)
+    records, malformed = count_module.read_log(store)
+    assert malformed == 0 and len(records[0].query) < len(query)
+    by_session, possible, unattributed = count_module.attribute(
+        records, count_module.read_sessions(folder, count_module.DEFAULT_RECALL_TOOL)
+    )
+    assert unattributed == 0 and not possible and [r.ref_ids for r in by_session["s1"]] == [["r1"]]
+
+
+def test_an_ambiguous_record_that_may_have_shown_the_memory_makes_a_miss_unknown() -> None:
+    when = datetime.now(UTC)
+    hook = count_module.LogRecord("a", when, "hook", "s1", "", {}, [])
+    ambiguous = count_module.LogRecord("a", when, "tool", "", "q", {}, ["r1"], "h")
+    failure = when + timedelta(seconds=1)
+    assert count_module.classify(_error(), [hook], failure, [ambiguous]) == (
+        "unknown",
+        {"ambiguous_record_may_have_shown": True},
+    )
+    other = count_module.LogRecord("a", when, "tool", "", "q", {}, ["r9"], "h")
+    assert count_module.classify(_error(), [hook], failure, [other])[0] == "missed"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        {"filters": []},
+        {"truncated": "false"},
+        {"ref_ids": "r1"},
+        {"ref_ids": [1]},
+        {"origin": "other"},
+        {"time": "2026-11-12T10:00:00"},
+        {"session_id": 7},
+    ],
+    ids=["filters-list", "truncated-string", "ref-ids-string", "ref-ids-int", "origin", "naive-time", "session-int"],
+)
+def test_a_malformed_log_line_is_skipped_and_counted(tmp_path: Path, line: dict[str, Any]) -> None:
+    settings = _settings(tmp_path, "a")
+    recall_log.append(settings, "tool", ["r1"], query="q")
+    path = recall_log.log_path(settings)
+    assert path is not None
+    good = json.loads(path.read_text(encoding="utf-8"))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({**good, **line}) + "\n")
+    records, malformed = count_module.read_log(count_module.Store("a", settings))
+    assert len(records) == 1 and malformed == 1
+
+
+def test_a_record_that_lost_only_query_text_still_shows_a_miss(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, "a")
+    recall_log.append(settings, "tool", ["r9"], query="é" * 1_500)  # the query is cut, the one id kept
+    (record,), _ = count_module.read_log(count_module.Store("a", settings))
+    assert record.truncated is False  # ids complete: the record can show the memory was not returned

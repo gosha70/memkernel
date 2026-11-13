@@ -8,10 +8,12 @@
    (whitespace collapsed); one repeat per memory and session, at the first match (D5).
 3. **Outcome** (D6), from the recall logs, before the failure's time: ``shown`` (a recall or hook block of that
    session returned the memory), ``missed`` (the session used the memory's store, and nothing returned it),
-   ``other store`` (the session never used that store), ``unknown`` (no log records for that session).
+   ``other store`` (the session never used that store), ``unknown`` (no log records for that session, or a cut-down
+   record of the memory's store before the failure, which cannot show that the memory was not returned).
 
-A hook record names its session; a tool record is paired with the transcript's own recall call (same query, within
-5 seconds, one to one, nearest first). A record whose candidates lie in more than one session is never guessed (D2).
+A hook record names its session; a tool record is paired with the transcript's own recall call (the same full
+query, by its hash, within 5 seconds, one to one, nearest first). A record whose candidates lie in more than one
+session is never guessed (D2).
 
 Usage:
     poetry run python eval/repeat-mistakes/count.py \\
@@ -50,6 +52,10 @@ LIMITS = (
     "only Bash output counts as a failure; errors seen through other tools are not",
     "a session whose recalls were not logged (log off, or ambiguous pairing) is unknown",
     "recalls made through the Python library, not the MCP tool or a hook, are not logged",
+    "whether a memory was flagged for review when a recall ran is not known: a recall that hid flagged memories "
+    "may have hidden it",
+    "a miss is reported as unknown when a record of that store with cut-down ref_ids came before the failure, or an "
+    "ambiguous record that may belong to the session could have returned the memory",
     "only Claude Code transcripts are read",
 )
 
@@ -78,7 +84,6 @@ class StoredError:
     tier: str
     checkpoint: bool
     session_id: str
-    needs_review: bool  # as the store holds it now: a flag set or cleared since the failure is not known
     time: datetime
     signature: str
 
@@ -92,6 +97,8 @@ class LogRecord:
     query: str
     filters: dict[str, Any]
     ref_ids: list[str]
+    query_sha256: str = ""
+    truncated: bool = False  # ref_ids were cut: not proof that a memory was not returned
 
 
 @dataclass
@@ -144,7 +151,6 @@ def stored_errors(store: Store) -> list[StoredError]:
                     memory.tier.value,
                     memory.checkpoint,
                     memory.session_id,
-                    memory.needs_review,
                     memory.timestamp,
                     signature,
                 )
@@ -152,40 +158,79 @@ def stored_errors(store: Store) -> list[StoredError]:
     return found
 
 
-def read_log(store: Store) -> list[LogRecord]:
-    """Every record of the store's recall log, rotated files included, oldest first."""
+def _parse(store: str, raw: Any) -> LogRecord | None:
+    """One log line as a record, or None when any field has the wrong type (a malformed line is never guessed)."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        when = datetime.fromisoformat(raw["time"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    fields = {
+        "origin": raw.get("origin"),
+        "session_id": raw.get("session_id", ""),
+        "query": raw.get("query", ""),
+        "query_sha256": raw.get("query_sha256", ""),
+    }
+    filters, ref_ids = raw.get("filters", {}), raw.get("ref_ids", [])
+    truncated, ids_cut = raw.get("truncated", False), raw.get("ref_ids_truncated", False)
+    if (
+        when.tzinfo is None
+        or fields["origin"] not in (recall_log.ORIGIN_TOOL, recall_log.ORIGIN_HOOK)
+        or not all(isinstance(value, str) for value in fields.values())
+        or not isinstance(filters, dict)
+        or not isinstance(ref_ids, list)
+        or not all(isinstance(ref, str) for ref in ref_ids)
+        or not isinstance(truncated, bool)
+        or not isinstance(ids_cut, bool)
+    ):
+        return None
+    return LogRecord(
+        store,
+        when,
+        fields["origin"],
+        fields["session_id"],
+        fields["query"],
+        filters,
+        ref_ids,
+        fields["query_sha256"],
+        ids_cut,  # a record that lost only query text still lists every id it returned
+    )
+
+
+def read_log(store: Store) -> tuple[list[LogRecord], int]:
+    """Every record of the store's recall log, rotated files included, oldest first; and how many lines were skipped
+    as malformed."""
     current = (
         Path(store.settings.state_dir)
         / recall_log.RECALL_LOG_DIR
         / store.settings.project_id
         / recall_log.RECALL_LOG_FILE
     )
-    records = []
+    records: list[LogRecord] = []
+    malformed = 0
     for path in [current, *current.parent.glob(f"{current.name}.[0-9]*")]:
         if not path.is_file():
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
-                raw = json.loads(line)
-                records.append(
-                    LogRecord(
-                        store.name,
-                        datetime.fromisoformat(raw["time"]),
-                        raw["origin"],
-                        raw.get("session_id", ""),
-                        raw.get("query", ""),
-                        raw.get("filters", {}),
-                        list(raw.get("ref_ids", [])),
-                    )
-                )
-            except (ValueError, KeyError, TypeError):
-                continue
-    return sorted(records, key=lambda r: r.time)
+                record = _parse(store.name, json.loads(line))
+            except json.JSONDecodeError:
+                record = None
+            if record is None:
+                malformed += 1
+            else:
+                records.append(record)
+    return sorted(records, key=lambda r: r.time), malformed
 
 
-def attribute(records: list[LogRecord], sessions: list[Session]) -> tuple[dict[str, list[LogRecord]], int]:
-    """Records per session (D2), and how many tool records stayed ambiguous or unpaired."""
+def attribute(
+    records: list[LogRecord], sessions: list[Session]
+) -> tuple[dict[str, list[LogRecord]], dict[str, list[LogRecord]], int]:
+    """Records per session (D2); per session, the ambiguous tool records that may be its own; and how many tool
+    records were not attributed (ambiguous or unpaired)."""
     by_session: dict[str, list[LogRecord]] = {}
+    possible: dict[str, list[LogRecord]] = {}
     pairs: list[tuple[timedelta, int, str, int]] = []
     candidate_sessions: dict[int, set[str]] = {}
     tool_records: list[LogRecord] = []
@@ -199,7 +244,7 @@ def attribute(records: list[LogRecord], sessions: list[Session]) -> tuple[dict[s
         for session in sessions:
             for call_index, call in enumerate(session.recalls):
                 gap = abs(call.time - record.time)
-                if call.query[: recall_log.QUERY_MAX_CHARS] == record.query and gap <= PAIR_WINDOW:
+                if gap <= PAIR_WINDOW and recall_log.query_hash(call.query) == record.query_sha256:
                     pairs.append((gap, index, session.session_id, call_index))
                     candidate_sessions.setdefault(index, set()).add(session.session_id)
     used_records: set[int] = set()
@@ -208,16 +253,22 @@ def attribute(records: list[LogRecord], sessions: list[Session]) -> tuple[dict[s
         if index in used_records or (session_id, call_index) in used_calls:
             continue
         if len(candidate_sessions[index]) > 1:
-            continue  # candidates in more than one session: never guessed
+            continue  # candidates in more than one session: never guessed, kept below as possible
         used_records.add(index)
         used_calls.add((session_id, call_index))
         by_session.setdefault(session_id, []).append(tool_records[index])
+    for index, candidates in candidate_sessions.items():
+        if len(candidates) > 1:
+            for session_id in candidates:
+                possible.setdefault(session_id, []).append(tool_records[index])
     unattributed = len(tool_records) - len(used_records)
-    return by_session, unattributed
+    return by_session, possible, unattributed
 
 
 def _excluded(record: LogRecord, error: StoredError) -> bool:
-    """True when the MCP recall's filters could not have returned the memory (every filter the log records)."""
+    """True when the MCP recall's filters could not have returned the memory.
+
+    ``include_needs_review`` is not judged: whether the memory was flagged when the recall ran is not known."""
     filters = record.filters
     if filters.get("type") and filters["type"] != error.type:
         return True
@@ -225,17 +276,24 @@ def _excluded(record: LogRecord, error: StoredError) -> bool:
         return True
     if filters.get("session_id_filter") and filters["session_id_filter"] != error.session_id:
         return True
-    if error.needs_review and not filters.get("include_needs_review"):
-        return True
     return bool(filters.get("checkpoint_only")) and not error.checkpoint
 
 
-def classify(error: StoredError, records: list[LogRecord], failure: datetime) -> tuple[str, dict[str, Any]]:
+def classify(
+    error: StoredError, records: list[LogRecord], failure: datetime, possible: list[LogRecord] | None = None
+) -> tuple[str, dict[str, Any]]:
     if not records:
         return UNKNOWN, {}
     before = [r for r in records if r.time < failure]
     if any(r.store == error.store and error.ref_id in r.ref_ids for r in before):
         return SHOWN, {}
+    if any(
+        r.store == error.store and r.time < failure and (error.ref_id in r.ref_ids or r.truncated)
+        for r in possible or []
+    ):
+        return UNKNOWN, {"ambiguous_record_may_have_shown": True}
+    if any(r.store == error.store and r.truncated for r in before):
+        return UNKNOWN, {"truncated_record_before_failure": True}
     if error.store in {r.store for r in records}:
         tool = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_TOOL]
         hook = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_HOOK]
@@ -249,8 +307,9 @@ def classify(error: StoredError, records: list[LogRecord], failure: datetime) ->
 
 def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
     errors = [e for store in stores for e in stored_errors(store)]
-    records = [r for store in stores for r in read_log(store)]
-    by_session, unattributed = attribute(records, sessions)
+    logs = [read_log(store) for store in stores]
+    records = [r for log, _ in logs for r in log]
+    by_session, possible, unattributed = attribute(records, sessions)
     repeats: list[Repeat] = []
     shown_without_repeat: set[str] = set()
     memories: dict[tuple[str, str], list[StoredError]] = {}
@@ -271,7 +330,7 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
                     shown_without_repeat.add(session.session_id)
                 continue
             failure, error = hit
-            outcome, evidence = classify(error, session_records, failure)
+            outcome, evidence = classify(error, session_records, failure, possible.get(session.session_id))
             repeats.append(
                 Repeat(store_name, ref_id, session.session_id, failure.isoformat(), error.signature, outcome, evidence)
             )
@@ -283,6 +342,7 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
         "by_outcome": {o: sum(r.outcome == o for r in repeats) for o in OUTCOMES},
         "shown_without_repeat": len(shown_without_repeat),
         "unattributed_tool_records": unattributed,
+        "malformed_log_records": sum(bad for _, bad in logs),
         "details": [asdict(r) for r in repeats],
         "limits": list(LIMITS),
     }
@@ -296,6 +356,8 @@ def render(report: dict[str, Any]) -> str:
         + ", ".join(f"{report['by_outcome'][o]} {o}" for o in OUTCOMES)
         + f". {report['shown_without_repeat']} later session(s) were shown a memory and did not repeat its error.",
     ]
+    if report["malformed_log_records"]:
+        lines.append(f"{report['malformed_log_records']} malformed recall-log line(s) were skipped.")
     if report["unattributed_tool_records"]:
         lines.append(f"{report['unattributed_tool_records']} tool record(s) could not be paired with a session.")
     for r in report["details"]:

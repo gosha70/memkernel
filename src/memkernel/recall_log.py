@@ -6,13 +6,16 @@ Off unless ``MEMKERNEL_RECALL_LOG`` is set, because it stores query text. Each M
 and so does each hook block that shows memories (amendment A1), under
 ``MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl``. Before an append that would pass
 ``recall_log_max_bytes`` the file is rotated (``recall.jsonl.1``, ``.2``, ...), keeping ``recall_log_max_files`` files;
-a single record larger than the limit keeps its first ``ref_ids`` (and then its query) up to the limit and is marked
-``truncated``. A write failure is logged once per process and never fails the recall. With an in-memory store there
-is no log. The lock is POSIX-only (``fcntl``): on Windows the log runs unlocked, with one warning per process.
+a single record larger than the limit gives up query text first, then trailing ``ref_ids``, and is marked
+``truncated`` (and ``ref_ids_truncated`` when ids were dropped); ``query_sha256`` always hashes the full query, so
+a record can be paired with its call either way.
+A write failure is logged once per process and never fails the recall. With an in-memory store there is no log.
+The lock is POSIX-only (``fcntl``): on Windows the log runs unlocked, with one warning per process.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -68,6 +71,7 @@ def append(
         "origin": origin,
         "session_id": session_id,
         "query": query[:QUERY_MAX_CHARS],
+        "query_sha256": query_hash(query),
         "filters": filters or {},
         "ref_ids": list(ref_ids),
     }
@@ -102,19 +106,48 @@ def _encode(record: dict[str, Any]) -> bytes:
     return (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
 
 
+def query_hash(query: str) -> str:
+    """The hash a record keeps of its full query; the count pairs records with transcript calls by it."""
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
 def _fit(record: dict[str, Any], max_bytes: int) -> bytes | None:
-    """The record as one line within ``max_bytes``: trailing ref_ids, then query text, are dropped and the record is
-    marked ``truncated``; None if even that does not fit."""
+    """The record as one line within ``max_bytes``: query text is cut first, then trailing ref_ids, and the record is
+    marked ``truncated``; None if even an empty query and no ref_ids do not fit. Both cuts are binary searches."""
     line = _encode(record)
     if len(line) <= max_bytes:
         return line
-    record = {**record, "ref_ids": list(record["ref_ids"]), "truncated": True}
-    while record["ref_ids"] and len(line := _encode(record)) > max_bytes:
-        record["ref_ids"].pop()
-    while record["query"] and len(line := _encode(record)) > max_bytes:
-        record["query"] = record["query"][: len(record["query"]) // 2]
-    line = _encode(record)
-    return line if len(line) <= max_bytes else None
+    refs = list(record["ref_ids"])
+    query = record["query"]
+
+    def size(query_chars: int, ref_count: int) -> int:
+        trial = {**record, "query": query[:query_chars], "ref_ids": refs[:ref_count], "truncated": True}
+        return len(_encode(trial))
+
+    keep_refs = len(refs)
+    if size(0, keep_refs) > max_bytes:
+        keep_refs = _largest(lambda n: size(0, n) <= max_bytes, len(refs))
+        if keep_refs < 0:
+            return None
+        keep_query = 0
+    else:
+        keep_query = _largest(lambda n: size(n, keep_refs) <= max_bytes, len(query))
+    fitted = {**record, "query": query[:keep_query], "ref_ids": refs[:keep_refs], "truncated": True}
+    if keep_refs < len(refs):
+        fitted["ref_ids_truncated"] = True  # the count cannot take this record as proof that a memory was missed
+    return _encode(fitted)
+
+
+def _largest(fits: Any, upper: int) -> int:
+    """The largest n in [0, upper] with fits(n), for a fits that holds up to some n and fails above it; -1 if none."""
+    low, high = -1, upper
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(middle):
+            low = middle
+        else:
+            high = middle - 1
+    return low
 
 
 def _rotate_if_needed(path: Path, incoming: int, max_bytes: int, max_files: int) -> None:

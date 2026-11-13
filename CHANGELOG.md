@@ -11,7 +11,7 @@ All notable changes to this project are documented here. The format follows
 - **A recall log and a repeated-mistake count** (#120; specs/memkernel-0-10-recall-log). With
   `MEMKERNEL_RECALL_LOG=1`, each MCP `recall`, and each hook block that shows memories, appends one line (time,
   query, filters, returned `ref_id`s, and the session id for hooks) to
-  `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, rotated by `MEMKERNEL_RECALL_LOG_MAX_BYTES` (5 MB) and
+  `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl` (with a hash of the full query), rotated by `MEMKERNEL_RECALL_LOG_MAX_BYTES` (5 MB, at least 4 KB) and
   `MEMKERNEL_RECALL_LOG_MAX_FILES` (10). Off by default, because it stores query text. `eval/repeat-mistakes/count.py`
   applies #112's rule to the stores, the recall logs and Claude Code's transcripts, and reports each repeat as shown,
   missed, other store or unknown. `recall`'s results, the MCP tools and the hook scripts are unchanged;
