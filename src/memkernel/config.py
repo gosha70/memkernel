@@ -19,6 +19,10 @@ ENV_PREFIX = "MEMKERNEL_"
 ENV_FILE = ".env"
 
 
+# The smallest recall-log file size: a record with an empty query, its filters and a session id always fits.
+RECALL_LOG_MIN_BYTES = 4_096
+
+
 class MemKernelSettings(BaseSettings):
     """All settings are configurable via MEMKERNEL_ prefixed env vars."""
 
@@ -38,6 +42,11 @@ class MemKernelSettings(BaseSettings):
     # memkernel's own state outside Chroma (memkernel-0-7): the wiki sync ledger. Resolved like
     # chroma_persist_path: a relative path is relative to the working directory of the process.
     state_dir: str = ".memkernel/state"
+    # The recall log (memkernel-0-10-recall-log): off by default, because it stores query text. When on, every MCP
+    # recall and every hook block that shows memories appends one line under state_dir/recall-log/<project_id>/.
+    recall_log: bool = False
+    recall_log_max_bytes: int = Field(default=5_000_000, ge=RECALL_LOG_MIN_BYTES)  # one log file before rotation
+    recall_log_max_files: int = Field(default=10, ge=1)  # files kept, the current one included
 
     # Embedding
     embedding_model: str = "all-MiniLM-L6-v2"

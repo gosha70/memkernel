@@ -9,6 +9,7 @@ from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 — runtime import required by MCPServer introspection
 
+from memkernel import recall_log
 from memkernel.core.models import DEFAULT_ASK_MODE, MemoryTier, MemoryType
 from memkernel.mcp.tools.errors import reported_errors
 
@@ -91,6 +92,21 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             top_k=top_k,
             include_needs_review=include_needs_review,
             order=order,
+        )
+        recall_log.append(
+            svc.settings,
+            recall_log.ORIGIN_TOOL,
+            [ref.ref_id for ref in results],
+            query=query,
+            filters={
+                "type": type,
+                "tier": tier,
+                "session_id_filter": session_id,
+                "checkpoint_only": checkpoint_only,
+                "top_k": top_k,
+                "include_needs_review": include_needs_review,
+                "order": order,
+            },
         )
         return json.dumps([ref.model_dump(mode="json") for ref in results])
 
