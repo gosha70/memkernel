@@ -115,6 +115,9 @@ NEEDS_REVIEW_KEY = "needs_review"
 REVIEW_REASON_KEY = "review_reason"
 REVIEW_REASON_CHANGED = "changed"
 REVIEW_REASON_MISSING = "missing"
+# The content hash of a decision's ``source`` file when the decision was created (memkernel-0-10-decision-revalidation
+# FR-001); absent, so empty, on older records and on decisions whose source was not a readable project file.
+SOURCE_HASH_KEY = "source_hash"
 # Wiki-import tags (memkernel-0-6, memkernel-0-7-wiki-scope): what the wiki import writes on a memory. The two
 # identity tags name the wiki a memory belongs to; only the import sets them (S8).
 WIKI_TAG = "wiki"
@@ -192,6 +195,7 @@ class Memory(BaseModel):
     parent_ref: str | None = None
     needs_review: bool = False
     review_reason: str = ""
+    source_hash: str = ""  # decisions only (memkernel-0-10-decision-revalidation FR-001)
     # 0.7: withdrawn without a replacement (memkernel-0-7 FR-001); absent, so live, in older stores.
     withdrawn_reason: str | None = None
     withdrawn_at: datetime | None = None
@@ -279,6 +283,9 @@ class ArtifactRef(BaseModel):
     timestamp: datetime
     tier: MemoryTier = MemoryTier.LONG_TERM
     importance: float = 0.5
+    # memkernel-0-10-decision-revalidation FR-004: a flagged decision is returned with its flag and reason.
+    needs_review: bool = False
+    review_reason: str = ""
 
 
 class SearchResult(BaseModel):

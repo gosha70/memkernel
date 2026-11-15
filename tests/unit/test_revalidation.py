@@ -84,7 +84,7 @@ def test_changed_file_flags_canonical_and_owned_chunks(tmp_path: Path) -> None:
     path.write_text(V2, encoding="utf-8")
     report = svc.revalidate()
     assert (report["checked"], report["changed"]) == (1, 1)
-    assert report["flagged"] == [{"ref_id": ref, "source": "src/app.py", "reason": "changed"}]
+    assert report["flagged"] == [{"ref_id": ref, "source": "src/app.py", "reason": "changed", "type": "code"}]
     memory = svc.get(ref, touch=False)
     assert memory is not None and memory.needs_review and memory.review_reason == "changed"
     chunks = store.list_all({"parent_ref": ref})
@@ -149,7 +149,7 @@ def test_absolute_source_inside_the_root_is_allowed(tmp_path: Path) -> None:
     path = _write(tmp_path, "src/app.py", V1)
     ref = svc.retain(V1, MemoryType.CODE, source=str(path))
     path.write_text(V2, encoding="utf-8")
-    assert svc.revalidate()["flagged"] == [{"ref_id": ref, "source": str(path), "reason": "changed"}]
+    assert svc.revalidate()["flagged"] == [{"ref_id": ref, "source": str(path), "reason": "changed", "type": "code"}]
 
 
 def test_unreadable_source_is_unknown(tmp_path: Path) -> None:
@@ -202,7 +202,9 @@ def test_consolidate_revalidate_flag(tmp_path: Path) -> None:
     path.write_text(V2, encoding="utf-8")
     assert "revalidated" not in svc.consolidate()
     report = svc.consolidate(revalidate=True)
-    assert report["revalidated"]["flagged"] == [{"ref_id": ref, "source": "src/app.py", "reason": "changed"}]
+    assert report["revalidated"]["flagged"] == [
+        {"ref_id": ref, "source": "src/app.py", "reason": "changed", "type": "code"}
+    ]
     assert report["purged"] == 0 and report["candidates"] == []
 
 
@@ -217,7 +219,8 @@ def test_session_start_lists_needs_review_only_when_flagged(tmp_path: Path) -> N
     path.write_text(V2, encoding="utf-8")
     text = lifecycle.on_session_start()
     assert (
-        f'{HEADING_NEEDS_REVIEW}\n- <stored-memory kind="review">src/app.py</stored-memory> — changed — {ref}\n' in text
+        f'{HEADING_NEEDS_REVIEW}\n- [code] <stored-memory kind="review">src/app.py</stored-memory> — changed — {ref}\n'
+        in text
     )
     assert "retain the file again as code" in text
     # the 0.3 headings are untouched

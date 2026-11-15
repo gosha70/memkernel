@@ -259,6 +259,8 @@ def build_artifact_refs(
                 timestamp=memory.timestamp,
                 tier=memory.tier,
                 importance=memory.importance,
+                needs_review=memory.needs_review,
+                review_reason=memory.review_reason,
             )
         )
     return refs

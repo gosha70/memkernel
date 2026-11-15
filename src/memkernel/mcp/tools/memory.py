@@ -81,6 +81,8 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         tier: working | short_term | long_term to restrict the search to one tier.
         include_needs_review: also return code memories whose source file changed or
         vanished since they were retained (flagged by revalidation; hidden by default).
+        Flagged decisions are always returned. Each result has needs_review and review_reason;
+        re-check a flagged decision's evidence before relying on it.
         """
         svc = _service(ctx)
         results = svc.recall(

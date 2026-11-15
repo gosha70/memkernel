@@ -104,7 +104,10 @@ _STORED_TAG_IN_TEXT = re.compile(rf"<(?=\s*/?\s*{STORED_TAG})", re.IGNORECASE)
 
 _CHECKPOINT_PREFIX = "SESSION CHECKPOINT — "
 _PROMOTE_HINT = "Call promote(ref_id, type, content) for anything that should outlive this session."
-_REVIEW_HINT = "These code memories no longer match their source; retain the file again as code to refresh them."
+_REVIEW_HINT = (
+    "These memories no longer match their source file. A decision: re-check its evidence before relying on it, and "
+    "retain a corrected one with supersedes. Code: retain the file again as code to refresh it."
+)
 
 
 class MemoryLifecycle:
@@ -459,7 +462,10 @@ def _needs_review_block(flagged: list[dict[str, Any]]) -> list[str]:
     if not flagged:
         return []
     shown = flagged[:NEEDS_REVIEW_MAX_LINES]
-    lines = [f"- {stored(f['source'], STORED_KIND_REVIEW)} — {f['reason']} — {f['ref_id']}" for f in shown]
+    lines = [
+        f"- [{f.get('type', 'code')}] {stored(f['source'], STORED_KIND_REVIEW)} — {f['reason']} — {f['ref_id']}"
+        for f in shown
+    ]
     if len(flagged) > len(shown):
         lines.append(f"… and {len(flagged) - len(shown)} more (consolidate(revalidate=true) lists all)")
     return ["", HEADING_NEEDS_REVIEW, *_fit(lines, NEEDS_REVIEW_BUDGET), _REVIEW_HINT]

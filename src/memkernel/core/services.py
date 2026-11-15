@@ -36,6 +36,7 @@ from memkernel.core.models import (
     REVIEW_REASON_CHANGED,
     REVIEW_REASON_KEY,
     REVIEW_REASON_MISSING,
+    SOURCE_HASH_KEY,
     SUPERSEDED_BY_KEY,
     WIKI_ID_TAG,
     WIKI_IDENTITY_TAGS,
@@ -203,7 +204,14 @@ def _artifact_ref(memory: Memory, score: float, preview_length: int) -> Artifact
         timestamp=memory.timestamp,
         tier=memory.tier,
         importance=memory.importance,
+        needs_review=memory.needs_review,
+        review_reason=memory.review_reason,
     )
+
+
+def _exempt_from_review_hiding(memory: Memory) -> bool:
+    """A flagged decision is still returned, marked, so its evidence is re-checked (decision-revalidation FR-003)."""
+    return memory.type == MemoryType.DECISION
 
 
 class MemoryService:
@@ -753,7 +761,21 @@ class MemoryService:
         if extra.document_id:
             metadata["document_id"] = extra.document_id
             metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
+        if type == MemoryType.DECISION and source:
+            source_hash = self._source_file_hash(source)
+            if source_hash is not None:
+                metadata[SOURCE_HASH_KEY] = source_hash  # new records only: a dedup hit keeps its own (FR-001)
         return metadata
+
+    def _source_file_hash(self, source: str) -> str | None:
+        """The content hash of ``source`` if it is a readable file under the project root, else None."""
+        path = self._resolve_source(source)
+        if path is None or not path.is_file():
+            return None
+        try:
+            return compute_content_hash(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            return None
 
     def _write_record(self, ref_id: str, content: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         """Authoritative store first; BM25 is a derived index whose failure is non-fatal."""
@@ -883,7 +905,7 @@ class MemoryService:
             memory = memories.get(ref.ref_id)
             if memory is None or memory.retired():
                 continue
-            if memory.needs_review and not include_needs_review:
+            if memory.needs_review and not include_needs_review and not _exempt_from_review_hiding(memory):
                 continue
             if memory.parent_ref:
                 # A code chunk lives and dies with its owner: dropped when the
@@ -977,7 +999,7 @@ class MemoryService:
         """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints, filtered like recall."""
         limit = top_k if top_k is not None else self._settings.search_top_k
         picked: list[ArtifactRef] = []
-        for candidate in self.checkpoints_newest_first():
+        for candidate in self.checkpoints_newest_first(include_flagged_decisions=True):
             if len(picked) >= limit:
                 break
             if (memory_type is not None and candidate.type != memory_type) or (
@@ -991,19 +1013,20 @@ class MemoryService:
                 picked.append(_artifact_ref(memory, 1.0, self._settings.preview_length))
         return picked
 
-    def checkpoints_newest_first(self) -> list[Memory]:
+    def checkpoints_newest_first(self, include_flagged_decisions: bool = False) -> list[Memory]:
         """Every live checkpoint record, newest first (ties by ``ref_id``), without content and without touching.
 
         Selected by metadata, so the newest is found however many older checkpoints a query would rank higher.
         Live as for :meth:`recall`, judged with this service's settings: not superseded, not flagged for review,
         not expired. Code-chunk and document-part records are left out: they are parts of a checkpoint, not one.
-        Read the chosen record with :meth:`get`.
+        Read the chosen record with :meth:`get`. ``include_flagged_decisions`` keeps flagged decisions; only
+        ``recall(order="newest")`` sets it, so the lifecycle's choice of the latest checkpoint is unchanged.
         """
         live = [
             m
             for m in self._vector_store.list_all({"checkpoint": True}, include_content=False)
             if not m.retired()
-            and not m.needs_review
+            and (not m.needs_review or (include_flagged_decisions and _exempt_from_review_hiding(m)))
             and m.parent_ref is None
             and not _is_document_part(m)
             and not memory_is_expired(m, self._settings)
@@ -1358,14 +1381,16 @@ class MemoryService:
         return resolved if resolved.is_relative_to(root) else None
 
     def revalidate(self) -> dict[str, Any]:
-        """Compare every live canonical `code` memory with its source file; flag or clear ``needs_review``.
+        """Compare every live canonical `code` memory, and every live `decision` with a ``source``, with its file.
 
         Whole-file hashing: the file's content hash (the same one retain uses)
         against the stored ``content_hash``. A missing file flags ``missing``, a
         different hash flags ``changed``, a matching file clears a flag; owned
         chunk records follow their canonical. Paths outside the project root
         or unreadable count as ``unknown`` and are left untouched. Nothing else
-        is written.
+        is written. A decision compares against the ``source_hash`` recorded when it
+        was created; one without it is flagged only when the file is missing
+        (memkernel-0-10-decision-revalidation FR-002). Each flagged item names its type.
         """
         report: dict[str, Any] = {"checked": 0, "changed": 0, "missing": 0, "cleared": 0, "unknown": 0, "flagged": []}
         records = self._vector_store.list_all({"type": MemoryType.CODE.value}, include_content=False)
@@ -1387,15 +1412,41 @@ class MemoryService:
                     report["unknown"] += 1
                     continue
                 reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.content_hash else ""
-            if reason:
-                report[reason] += 1
-                report["flagged"].append({"ref_id": memory.ref_id, "source": memory.source, "reason": reason})
-                if not (memory.needs_review and memory.review_reason == reason):
-                    self._set_review(memory.ref_id, True, reason)
-            elif memory.needs_review:
-                report["cleared"] += 1
-                self._set_review(memory.ref_id, False, "")
+            self._record_review(report, memory, reason)
+        for memory in self._vector_store.list_all({"type": MemoryType.DECISION.value}, include_content=False):
+            if memory.retired() or not memory.source:
+                continue
+            report["checked"] += 1
+            path = self._resolve_source(memory.source)
+            if path is None:
+                report["unknown"] += 1
+                continue
+            if not path.is_file():
+                reason = REVIEW_REASON_MISSING
+            elif memory.source_hash:
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    report["unknown"] += 1
+                    continue
+                reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.source_hash else ""
+            else:
+                reason = ""  # no hash from before: only a missing file can be told
+            self._record_review(report, memory, reason)
         return report
+
+    def _record_review(self, report: dict[str, Any], memory: Memory, reason: str) -> None:
+        """Flag ``memory`` for ``reason`` (or clear its flag when ``reason`` is empty) and count it in ``report``."""
+        if reason:
+            report[reason] += 1
+            report["flagged"].append(
+                {"ref_id": memory.ref_id, "source": memory.source, "reason": reason, "type": memory.type.value}
+            )
+            if not (memory.needs_review and memory.review_reason == reason):
+                self._set_review(memory.ref_id, True, reason)
+        elif memory.needs_review:
+            report["cleared"] += 1
+            self._set_review(memory.ref_id, False, "")
 
     def _set_review(self, ref_id: str, flag: bool, reason: str) -> None:
         """Write the review flag on a canonical and on its owned chunk records."""
