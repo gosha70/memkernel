@@ -56,6 +56,9 @@ jobs:
       - run: poetry install --no-interaction
       - name: Mypy
         run: poetry run mypy src/
+      - name: Mypy (maintained eval tools)
+        # Listed explicitly: only maintained tools, not the eval fixture and task trees.
+        run: poetry run mypy --strict eval/repeat-mistakes/count.py eval/repeat-mistakes/transcripts.py
 
   test:
     name: Tests
