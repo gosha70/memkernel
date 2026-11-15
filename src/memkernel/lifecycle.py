@@ -329,7 +329,8 @@ class MemoryLifecycle:
     def _memory_lines(self, memories: list[Memory], budget: int = CONTEXT_BUDGET) -> list[str]:
         preview = self._service.settings.preview_length
         lines = [
-            f"- [{m.type}] {stored(' '.join(m.content.split())[:preview], STORED_KIND_CONTEXT)} ({m.ref_id})"
+            f"- [{_label(m.type, m.needs_review, m.review_reason)}] "
+            f"{stored(' '.join(m.content.split())[:preview], STORED_KIND_CONTEXT)} ({m.ref_id})"
             for m in memories
         ]
         return _fit(lines, budget)
@@ -347,8 +348,18 @@ def _age(delta: timedelta) -> str:
     return f"{value} {unit}{'' if value == 1 else 's'}"
 
 
+def _label(memory_type: MemoryType, needs_review: bool, reason: str) -> str:
+    """A context line's type label; a flagged memory says so (decision-revalidation A1), e.g.
+    ``decision, needs review: changed``."""
+    return f"{memory_type}, needs review: {reason or 'flagged'}" if needs_review else f"{memory_type}"
+
+
 def _context_lines(refs: list[ArtifactRef]) -> list[str]:
-    return _fit([f"- [{r.type}] {stored(r.preview, STORED_KIND_CONTEXT)} ({r.ref_id})" for r in refs], CONTEXT_BUDGET)
+    lines = [
+        f"- [{_label(r.type, r.needs_review, r.review_reason)}] {stored(r.preview, STORED_KIND_CONTEXT)} ({r.ref_id})"
+        for r in refs
+    ]
+    return _fit(lines, CONTEXT_BUDGET)
 
 
 def _previous_sessions_block(drained: DrainResult) -> list[str]:

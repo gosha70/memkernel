@@ -185,3 +185,46 @@ def test_session_start_lists_a_flagged_decision_with_its_type(tmp_path: Path) ->
     text = MemoryLifecycle(svc, settings).on_session_start("startup")
     assert f'{HEADING_NEEDS_REVIEW}\n- [decision] <stored-memory kind="review">src/redact.py</stored-memory>' in text
     assert f"— changed — {decision}" in text and "A decision: re-check its evidence" in text
+
+
+# ── A1: the hook blocks' context lines mark flagged items ────────────────────
+
+
+FLAGGED_LABEL = "[decision, needs review: changed]"
+
+
+def _flagged_decision(tmp_path: Path) -> tuple[Any, MemKernelSettings, str]:
+    svc, settings = _service(tmp_path)
+    path = _write(tmp_path, "src/redact.py", V1)
+    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")
+    path.write_text(V2, encoding="utf-8")
+    svc.revalidate()
+    return svc, settings, decision
+
+
+def _context_line(text: str, ref: str) -> str:
+    return next(line for line in text.splitlines() if line.startswith("- [") and line.endswith(f"({ref})"))
+
+
+def test_the_startup_block_marks_a_flagged_decision(tmp_path: Path) -> None:
+    svc, settings, decision = _flagged_decision(tmp_path)
+    text = MemoryLifecycle(svc, settings).on_session_start("startup")
+    assert _context_line(text, decision).startswith(f"- {FLAGGED_LABEL} ")
+
+
+def test_the_compaction_blocks_mark_a_flagged_decision(tmp_path: Path) -> None:
+    svc, settings, decision = _flagged_decision(tmp_path)
+    svc.retain("SESSION CHECKPOINT\nCurrent: redaction redact_text contract.", MemoryType.EPISODE, checkpoint=True)
+    lifecycle = MemoryLifecycle(svc, settings)
+    recovery = lifecycle.on_session_start("compact")
+    assert _context_line(recovery, decision).startswith(f"- {FLAGGED_LABEL} ")
+    post = lifecycle.on_post_compact()
+    assert _context_line(post, decision).startswith(f"- {FLAGGED_LABEL} ")
+
+
+def test_an_unflagged_decision_keeps_the_plain_label(tmp_path: Path) -> None:
+    svc, settings = _service(tmp_path)
+    _write(tmp_path, "src/redact.py", V1)
+    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")
+    text = MemoryLifecycle(svc, settings).on_session_start("startup")
+    assert _context_line(text, decision).startswith("- [decision] ")

@@ -101,6 +101,8 @@ Status: approved by the owner, 2026-11-14 (D1–D4 with the dedup and hint clari
 
 - **D1 Startup list.** Flagged decisions appear in the session-start "Needs review" list, each line naming it a
   decision, with a type-aware hint (FR-005). The list keeps its 10-line cap.
+- **A1 (the owner's, 2026-11-15, review of #127).** The hook blocks' context lines (session start, compaction
+  recovery, `on_post_compact`) mark a flagged memory in its label, e.g. `[decision, needs review: changed]`.
 - **D2 The new result fields.** `needs_review` and `review_reason` on every `recall` result, for all
   types (a flagged `code` memory shows them when `include_needs_review=True`).
 - **D3 Which files get a hash.** Only a `source` under the project root that can be read, as `code`
