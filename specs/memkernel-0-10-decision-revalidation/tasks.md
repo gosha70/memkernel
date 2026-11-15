@@ -7,10 +7,11 @@
   a legacy hashless dedup hit)
 
 ## US2: recall and startup
-- [ ] `_filter_live` returns flagged decisions (FR-003); `ArtifactRef` fields (FR-004, D2)
+- [ ] `_filter_live` and `_newest_checkpoints()` (via `include_flagged_decisions`, default off) return flagged decisions (FR-003); `ArtifactRef` fields from both
+  builders (FR-004, D2); a test for the newest-checkpoint path (SC-3c)
 - [ ] Startup "Needs review" list per D1, with a type-aware hint (FR-005)
 - [ ] Tests: recall marks, code still hidden, the startup list; a 0.9.x store fixture (SC-4)
 
 ## US3: docs and checks
 - [ ] README, CHANGELOG (FR-006)
-- [ ] #57 replay re-run (SC-3); fast suite, ruff, mypy strict, coverage
+- [ ] #57 replay re-run (SC-3b); fast suite, ruff, mypy strict, coverage
