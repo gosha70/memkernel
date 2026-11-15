@@ -81,6 +81,8 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         tier: working | short_term | long_term to restrict the search to one tier.
         include_needs_review: also return code memories whose source file changed or
         vanished since they were retained (flagged by revalidation; hidden by default).
+        Flagged decisions are always returned. Each result has needs_review and review_reason;
+        re-check a flagged decision's evidence before relying on it.
         """
         svc = _service(ctx)
         results = svc.recall(
@@ -174,8 +176,8 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         often they were recalled). Call promote(ref_id, type, content) for the keepers.
         synthesize=true also asks the configured external reasoner to draft long-term
         statements under "suggested" (empty with the built-in local reasoner).
-        revalidate=true first checks every code memory against its source file and
-        flags changed or missing ones (report under "revalidated").
+        revalidate=true first checks every code memory, and every decision with a source,
+        against its file and flags changed or missing ones (report under "revalidated").
         """
         svc = _service(ctx)
         return json.dumps(

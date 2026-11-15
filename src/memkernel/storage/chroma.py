@@ -23,6 +23,7 @@ from memkernel.core.models import (
     NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
     REVIEW_REASON_KEY,
+    SOURCE_HASH_KEY,
     STORE_LOCK_NAMES,
     STORE_LOCK_TAGS,
     SUPERSEDED_BY_KEY,
@@ -197,6 +198,7 @@ def _memory_from_chroma(
         parent_ref=str(meta[PARENT_REF_KEY]) if meta.get(PARENT_REF_KEY) else None,
         needs_review=bool(meta.get(NEEDS_REVIEW_KEY, False)),
         review_reason=str(meta.get(REVIEW_REASON_KEY) or ""),
+        source_hash=str(meta.get(SOURCE_HASH_KEY) or ""),
         withdrawn_reason=str(meta[WITHDRAWN_REASON_KEY]) if meta.get(WITHDRAWN_REASON_KEY) else None,
         withdrawn_at=datetime.fromisoformat(str(meta[WITHDRAWN_AT_KEY])) if meta.get(WITHDRAWN_AT_KEY) else None,
     )

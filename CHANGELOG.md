@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Decisions that cite a file are revalidated** (#123; specs/memkernel-0-10-decision-revalidation). A new decision
+  records the hash of its `source` file (a readable file under the project root) as `source_hash`; revalidation
+  flags it `changed` or `missing`, and a decision from before this release, without a hash, only `missing`. A
+  flagged decision is **not hidden**: `recall` returns it, and every `recall` result now carries `needs_review` and
+  `review_reason` (additive). Flagged `code` memories stay hidden as before. The session-start `### Needs review`
+  list names each item's type, with a hint for both. `revalidate()`'s flagged items gain a `type` key.
 - **A recall log and a repeated-mistake count** (#120; specs/memkernel-0-10-recall-log). With
   `MEMKERNEL_RECALL_LOG=1`, each MCP `recall`, and each hook block that shows memories, appends one line (time,
   query, filters, returned `ref_id`s, and the session id for hooks) to

@@ -104,7 +104,10 @@ _STORED_TAG_IN_TEXT = re.compile(rf"<(?=\s*/?\s*{STORED_TAG})", re.IGNORECASE)
 
 _CHECKPOINT_PREFIX = "SESSION CHECKPOINT — "
 _PROMOTE_HINT = "Call promote(ref_id, type, content) for anything that should outlive this session."
-_REVIEW_HINT = "These code memories no longer match their source; retain the file again as code to refresh them."
+_REVIEW_HINT = (
+    "These memories no longer match their source file. A decision: re-check its evidence before relying on it, and "
+    "retain a corrected one with supersedes. Code: retain the file again as code to refresh it."
+)
 
 
 class MemoryLifecycle:
@@ -147,7 +150,7 @@ class MemoryLifecycle:
             *(self._memory_lines(context, CONTEXT_BUDGET - len("\n".join(debt))) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
-        lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
+        lines.extend(_needs_review_block(self._flagged(report.get("revalidated", {}).get("flagged", []))))
         lines.extend(_store_health_block(report.get("health", {})))
         wiki_index = Path(self._settings.wiki_dir) / "index.md" if self._settings.wiki_dir else None
         if wiki_index is not None and wiki_index.is_file():
@@ -300,6 +303,17 @@ class MemoryLifecycle:
 
         return session_spool.drain(self._settings, session_id, checkpointed)
 
+    def _flagged(self, found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """This pass's flagged items, then every other memory still flagged in the store (one whose file could not be
+        read this time keeps its flag): the review list shows durable flags, not only those found again (FR-005)."""
+        listed = {item["ref_id"] for item in found}
+        durable = [
+            {"ref_id": m.ref_id, "source": m.source, "reason": m.review_reason, "type": m.type.value}
+            for m in self._service.list_memories(tier=MemoryTier.LONG_TERM)
+            if m.needs_review and m.parent_ref is None and m.ref_id not in listed
+        ]
+        return [*found, *sorted(durable, key=lambda item: item["ref_id"])]
+
     def _startup_context(self) -> list[Memory]:
         """Live long-term memories without a query: by type (CONTEXT_TYPE_ORDER), importance, recency (H1)."""
         rank = {t: i for i, t in enumerate(CONTEXT_TYPE_ORDER)}
@@ -326,7 +340,8 @@ class MemoryLifecycle:
     def _memory_lines(self, memories: list[Memory], budget: int = CONTEXT_BUDGET) -> list[str]:
         preview = self._service.settings.preview_length
         lines = [
-            f"- [{m.type}] {stored(' '.join(m.content.split())[:preview], STORED_KIND_CONTEXT)} ({m.ref_id})"
+            f"- [{_label(m.type, m.needs_review, m.review_reason)}] "
+            f"{stored(' '.join(m.content.split())[:preview], STORED_KIND_CONTEXT)} ({m.ref_id})"
             for m in memories
         ]
         return _fit(lines, budget)
@@ -344,8 +359,18 @@ def _age(delta: timedelta) -> str:
     return f"{value} {unit}{'' if value == 1 else 's'}"
 
 
+def _label(memory_type: MemoryType, needs_review: bool, reason: str) -> str:
+    """A context line's type label; a flagged memory says so (decision-revalidation A1), e.g.
+    ``decision, needs review: changed``."""
+    return f"{memory_type}, needs review: {reason or 'flagged'}" if needs_review else f"{memory_type}"
+
+
 def _context_lines(refs: list[ArtifactRef]) -> list[str]:
-    return _fit([f"- [{r.type}] {stored(r.preview, STORED_KIND_CONTEXT)} ({r.ref_id})" for r in refs], CONTEXT_BUDGET)
+    lines = [
+        f"- [{_label(r.type, r.needs_review, r.review_reason)}] {stored(r.preview, STORED_KIND_CONTEXT)} ({r.ref_id})"
+        for r in refs
+    ]
+    return _fit(lines, CONTEXT_BUDGET)
 
 
 def _previous_sessions_block(drained: DrainResult) -> list[str]:
@@ -459,7 +484,10 @@ def _needs_review_block(flagged: list[dict[str, Any]]) -> list[str]:
     if not flagged:
         return []
     shown = flagged[:NEEDS_REVIEW_MAX_LINES]
-    lines = [f"- {stored(f['source'], STORED_KIND_REVIEW)} — {f['reason']} — {f['ref_id']}" for f in shown]
+    lines = [
+        f"- [{f.get('type', 'code')}] {stored(f['source'], STORED_KIND_REVIEW)} — {f['reason']} — {f['ref_id']}"
+        for f in shown
+    ]
     if len(flagged) > len(shown):
         lines.append(f"… and {len(flagged) - len(shown)} more (consolidate(revalidate=true) lists all)")
     return ["", HEADING_NEEDS_REVIEW, *_fit(lines, NEEDS_REVIEW_BUDGET), _REVIEW_HINT]

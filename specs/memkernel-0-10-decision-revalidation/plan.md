@@ -27,10 +27,11 @@ origin:
    `storage/chroma.py`).
 2. **Revalidate**: extend `revalidate()` to live `decision` memories with a `source` (FR-002); `flagged` items gain
    the memory's type, so the startup list can name them (D1).
-3. **Recall**: `_filter_live` lets flagged decisions through (FR-003); `build_artifact_refs` fills `needs_review`
-   and `review_reason` (FR-004).
+3. **Recall**: `_filter_live`, and `_newest_checkpoints()` through `checkpoints_newest_first(include_flagged_decisions=True)`,
+   let flagged decisions through; the default stays unchanged for the lifecycle (FR-003);
+   `build_artifact_refs()` and `_artifact_ref()` fill `needs_review` and `review_reason` (FR-004).
 4. **Lifecycle**: the "Needs review" list per D1.
-5. **Tests**: the #57 probe as a unit test (SC-1), the legacy and clearing cases (SC-2), the replay re-run (SC-3),
+5. **Tests**: the #57 probe as a unit test (SC-1), the legacy and clearing cases (SC-2), the dedup cases (SC-3), the replay re-run (SC-3b), the newest-checkpoint path (SC-3c),
    a 0.9.x store fixture (SC-4).
 6. **Docs**: README and CHANGELOG.
 
