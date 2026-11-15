@@ -1430,6 +1430,9 @@ class MemoryService:
                     report["unknown"] += 1
                     continue
                 reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.source_hash else ""
+            elif memory.needs_review and memory.review_reason != REVIEW_REASON_MISSING:
+                report["unknown"] += 1  # no hash: a present file disproves only a missing flag, not this one
+                continue
             else:
                 reason = ""  # no hash from before: only a missing file can be told
             self._record_review(report, memory, reason)

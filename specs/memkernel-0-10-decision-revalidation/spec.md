@@ -47,7 +47,8 @@ Status: approved by the owner, 2026-11-14 (D1–D4 with the dedup and hint clari
 - **FR-002 Revalidate decisions.** `revalidate()` branches on type: `code` is unchanged; live `decision` memories
   with a `source` are checked against `source_hash`: missing file → `missing`; a different hash → `changed`; a match
   clears the flag. A decision without a `source_hash` (retained before this change, or whose file was unreadable
-  then) is flagged only when the file is missing, and a present file clears a `missing` flag. Paths outside the
+  then) is flagged only when the file is missing; a present file clears only a `missing` flag, and any other flag
+  is kept and counted `unknown`, since nothing can disprove it. Paths outside the
   project root or unreadable files count as `unknown`, as for `code`. A superseded or withdrawn decision is not
   checked: `recall` already hides it. Each `flagged` item gains a `type` key (an additive change to the report).
 - **FR-003 Flagged decisions are returned.** `recall` returns flagged `decision` memories, with the flag in the
@@ -61,7 +62,8 @@ Status: approved by the owner, 2026-11-14 (D1–D4 with the dedup and hint clari
   filled for every result by both builders (`build_artifact_refs()` and `_artifact_ref()`); the preview and existing
   fields do not change.
 - **FR-005 Startup list (D1).** Flagged decisions appear in the session-start "Needs review" list, each line naming
-  its type; the hint becomes type-aware: re-check a flagged decision's evidence and retain a corrected one with
+  its type; the list shows this pass's flags and every other memory still flagged in the store (one whose file
+  could not be read this time keeps its flag); the hint becomes type-aware: re-check a flagged decision's evidence and retain a corrected one with
   `supersedes`, or retain a flagged code file again to refresh it.
 - **FR-006 Docs.** README (revalidation section, `recall` description), the `recall` tool's docstring (the new
   fields, and `include_needs_review` no longer needed for decisions), CHANGELOG under `[Unreleased]`.

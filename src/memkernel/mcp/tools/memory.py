@@ -176,8 +176,8 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         often they were recalled). Call promote(ref_id, type, content) for the keepers.
         synthesize=true also asks the configured external reasoner to draft long-term
         statements under "suggested" (empty with the built-in local reasoner).
-        revalidate=true first checks every code memory against its source file and
-        flags changed or missing ones (report under "revalidated").
+        revalidate=true first checks every code memory, and every decision with a source,
+        against its file and flags changed or missing ones (report under "revalidated").
         """
         svc = _service(ctx)
         return json.dumps(

@@ -150,7 +150,7 @@ class MemoryLifecycle:
             *(self._memory_lines(context, CONTEXT_BUDGET - len("\n".join(debt))) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
-        lines.extend(_needs_review_block(report.get("revalidated", {}).get("flagged", [])))
+        lines.extend(_needs_review_block(self._flagged(report.get("revalidated", {}).get("flagged", []))))
         lines.extend(_store_health_block(report.get("health", {})))
         wiki_index = Path(self._settings.wiki_dir) / "index.md" if self._settings.wiki_dir else None
         if wiki_index is not None and wiki_index.is_file():
@@ -302,6 +302,17 @@ class MemoryLifecycle:
             return any(window.start <= m.timestamp <= window.end or tag in m.tags for m in checkpoints)
 
         return session_spool.drain(self._settings, session_id, checkpointed)
+
+    def _flagged(self, found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """This pass's flagged items, then every other memory still flagged in the store (one whose file could not be
+        read this time keeps its flag): the review list shows durable flags, not only those found again (FR-005)."""
+        listed = {item["ref_id"] for item in found}
+        durable = [
+            {"ref_id": m.ref_id, "source": m.source, "reason": m.review_reason, "type": m.type.value}
+            for m in self._service.list_memories(tier=MemoryTier.LONG_TERM)
+            if m.needs_review and m.parent_ref is None and m.ref_id not in listed
+        ]
+        return [*found, *sorted(durable, key=lambda item: item["ref_id"])]
 
     def _startup_context(self) -> list[Memory]:
         """Live long-term memories without a query: by type (CONTEXT_TYPE_ORDER), importance, recency (H1)."""

@@ -87,19 +87,44 @@ def test_restoring_the_file_clears_the_flag(tmp_path: Path) -> None:
     assert report["cleared"] == 1 and svc.get(decision).needs_review is False
 
 
-def test_a_hashless_decision_is_flagged_only_when_its_file_is_missing(tmp_path: Path) -> None:
-    """A decision from before this change (no source_hash) loads, and only a missing file can be told."""
+def _raw_metadata(svc: Any, ref: str) -> dict[str, Any]:
+    raw = svc._vector_store._collection.get(ids=[ref], include=["metadatas"])
+    return dict(raw["metadatas"][0])
+
+
+def test_a_pre_0_10_decision_without_the_key_is_flagged_only_when_its_file_is_missing(tmp_path: Path) -> None:
+    """SC-4: a decision whose metadata has no source_hash key at all, as a 0.9.x store holds it."""
     svc, _ = _service(tmp_path)
+    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")  # no file yet: no key written
+    assert SOURCE_HASH_KEY not in _raw_metadata(svc, decision) and svc.get(decision).source_hash == ""
     path = _write(tmp_path, "src/redact.py", V1)
-    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")
-    svc._vector_store.update_metadata(decision, {SOURCE_HASH_KEY: ""})  # as a 0.9.x store holds it
-    assert svc.get(decision).source_hash == ""
-    path.write_text(V2, encoding="utf-8")
     assert svc.revalidate()["flagged"] == []
+    path.write_text(V2, encoding="utf-8")
+    assert svc.revalidate()["flagged"] == []  # a change cannot be told without a hash
     path.unlink()
     assert [f["reason"] for f in svc.revalidate()["flagged"]] == ["missing"]
     _write(tmp_path, "src/redact.py", V2)
-    assert svc.revalidate()["cleared"] == 1 and svc.get(decision).source_hash == ""  # never hashed later
+    assert svc.revalidate()["cleared"] == 1
+    assert SOURCE_HASH_KEY not in _raw_metadata(svc, decision)  # never hashed later
+
+
+def test_an_empty_source_hash_reads_as_hashless(tmp_path: Path) -> None:
+    svc, _ = _service(tmp_path)
+    path = _write(tmp_path, "src/redact.py", V1)
+    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")
+    svc._vector_store.update_metadata(decision, {SOURCE_HASH_KEY: ""})
+    path.write_text(V2, encoding="utf-8")
+    assert svc.get(decision).source_hash == "" and svc.revalidate()["flagged"] == []
+
+
+def test_a_hashless_decision_keeps_a_flag_its_present_file_cannot_disprove(tmp_path: Path) -> None:
+    svc, _ = _service(tmp_path)
+    decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")  # hashless
+    _write(tmp_path, "src/redact.py", V1)
+    svc._set_review(decision, True, "changed")  # a flag from an earlier check
+    report = svc.revalidate()
+    assert report["cleared"] == 0 and report["unknown"] == 1
+    assert svc.get(decision).needs_review is True and svc.get(decision).review_reason == "changed"
 
 
 @pytest.mark.parametrize("source", ["../outside.py", "src/missing-at-retain.py"], ids=["outside-root", "no-file"])
@@ -228,3 +253,16 @@ def test_an_unflagged_decision_keeps_the_plain_label(tmp_path: Path) -> None:
     decision = svc.retain(DECISION, MemoryType.DECISION, source="src/redact.py")
     text = MemoryLifecycle(svc, settings).on_session_start("startup")
     assert _context_line(text, decision).startswith("- [decision] ")
+
+
+def test_session_start_lists_a_flag_whose_file_could_not_be_read_this_time(tmp_path: Path) -> None:
+    svc, settings, decision = _flagged_decision(tmp_path)
+    path = tmp_path / "src" / "redact.py"
+    path.chmod(0)  # unreadable now: this pass reports unknown and keeps the flag
+    try:
+        report = svc.revalidate()
+        assert report["unknown"] == 1 and report["flagged"] == []
+        text = MemoryLifecycle(svc, settings).on_session_start("startup")
+    finally:
+        path.chmod(0o644)
+    assert HEADING_NEEDS_REVIEW in text and f"— changed — {decision}" in text

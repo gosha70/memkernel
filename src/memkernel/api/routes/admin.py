@@ -54,6 +54,6 @@ async def collections(request: Request) -> list[dict[str, Any]]:
 
 @router.post("/revalidate")
 async def revalidate(request: Request) -> dict[str, Any]:
-    """Check every code memory against its source file; flag changed or missing ones (needs_review)."""
+    """Check every code memory and every decision with a source against its file; flag changed or missing ones."""
     svc = _svc(request)
     return svc.revalidate()
