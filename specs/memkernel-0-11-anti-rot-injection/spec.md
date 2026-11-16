@@ -150,7 +150,8 @@ Status: approved by the owner, 2026-11-15 (D1–D5), amended from the review of 
 
 ## A5: the floor is dropped (the owner's rule, 2026-11-16)
 
-**Calibration record** (`eval/anti-rot-128/calibrate.py` at `d1da898`, results in `eval/anti-rot-128/calibration.json`):
+**Calibration record** (`eval/anti-rot-128/calibrate.py` at `d1da898`, rerun at the build commit `1137816` with the
+same outcome; results in `eval/anti-rot-128/calibration.json`):
 embedding `sentence-transformers/all-MiniLM-L6-v2` at revision `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`; sentence-transformers 5.7.0,
 chromadb 1.5.9, torch 2.14.1; the #57 crowded store at code-copilot-team `00d49c0`.
 - Lowest required-target similarity, checkpoint-shaped: 0.251; candidate floor 0.2.
