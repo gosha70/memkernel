@@ -1,6 +1,6 @@
 # Spec: anti-rot injection, an absolute floor and consistent chain collapse for the hook blocks (#128)
 
-Status: approved by the owner, 2026-11-15 (D1–D5 exactly as proposed).
+Status: approved by the owner, 2026-11-15 (D1–D5), amended 2026-11-16 from the review of #131 (A1–A3).
 
 ## Checked facts (`main` at `baff4dd`)
 
@@ -14,7 +14,11 @@ Status: approved by the owner, 2026-11-15 (D1–D5 exactly as proposed).
   result has relevance 1.0; RRF is rank-based. The absolute signal before normalisation is the dense cosine
   similarity, `1 − distance` from the store's `search_dense` port (collections use `hnsw:space: cosine`).
 - **The similarity scale depends on the embedding model,** which is a setting (`MEMKERNEL_EMBEDDING_MODEL`, default
-  `all-MiniLM-L6-v2`).
+  `all-MiniLM-L6-v2`). Production loads the model by name without a revision; the #57 runner pins revision
+  `1110a243` and records library versions. `build_service(..., embedding=...)` accepts any injected embedder while
+  the setting stays at its default, and `MemoryLifecycle` may be given settings other than `service.settings`, so
+  the setting alone does not identify the embedder in use.
+- **Cosine similarity ranges from −1 to 1,** so a floor of `0` still filters (negative similarities).
 - **`_distinct()`** drops items equal to the checkpoint or an earlier item, and the live `promoted_from` source of a
   promoted memory that is also shown. Wiki `corrects:` already supersedes the corrected records. An exported memory
   and the page imported from it cannot be linked (the import does not keep `memkernel_ref`).
@@ -32,22 +36,35 @@ Status: approved by the owner, 2026-11-15 (D1–D5 exactly as proposed).
 - **FR-001 Hook selector.** One function chooses the memories a hook block shows from a `recall()` result. It
   embeds the block's query and the candidates' content with the service's embedding port (at most 10 texts per
   block; no store port changes, and BM25-only candidates are scored too), takes each candidate's cosine similarity
-  to the query (D1), keeps those at or above the floor (D3), then applies `_distinct()`.
+  to the query (D1), keeps those at or above the floor (D3), then applies `_distinct()`. With no active floor
+  (`None`), it keeps every candidate. If embedding fails, the block falls back to today's behaviour (no floor) and
+  one warning is logged per process (a module-level flag, as the recall log uses).
 - **FR-002 Paths (D2).** The selector is used by compact recovery with a checkpoint (the checkpoint text is the
   query) and by `on_post_compact()` when a checkpoint exists, with the latest checkpoint's text as its query instead
-  of today's fixed query. `on_post_compact()` without a checkpoint keeps its fixed query and applies no floor.
+  of today's fixed query, fetching 10 candidates (as compact recovery does) before the selector and `_distinct()`
+  narrow them to 5. `on_post_compact()` without a checkpoint keeps its fixed query and applies no floor.
   Normal startup keeps `_startup_context()` and `_distinct()`, with no floor.
 - **FR-003 Abstention (D4).** When nothing remains after the floor and `_distinct()`, the block's context section
   shows one abstention line instead of memories.
 - **FR-004 Consistent collapse.** `on_post_compact()` applies `_distinct()`, so promoted-chain collapse is the same
   on all three hook paths. Imported-page collapse is not built (it needs provenance metadata; deferred).
 - **FR-005 MCP recall unchanged.** No change to `recall`'s results, ranking or the MCP tools.
-- **FR-006 Calibration and measurement.** The build calibrates the floor by running the #57 corpus and its
-  later-task queries through the selector (D5), records in this spec the embedding model, the corpus and runner
-  commit, the raw per-case similarities, retained hits, distractors that pass and abstentions, and the chosen
-  value, and measures injected characters per block before and after. The ordinary #57 replay runs as a
+- **FR-006 Calibration and measurement.** The build calibrates the floor (D5) on the #57 corpus's **crowded** store
+  (frozen: code-copilot-team `00d49c0`), with the embedding pinned to `all-MiniLM-L6-v2` revision `1110a243` as the
+  #57 runner does. It runs the complete hook paths, compact recovery and `on_post_compact()`, with their real
+  candidate windows (10 candidates each). The query is **checkpoint-shaped**: for each #57 case, a checkpoint in the
+  form the agents save, built from one fixed template with the case's later task as its `Current:` line:
+  `SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: <later task>\nNext: implement it and run the
+  tests.\nOpen: none.` (no line from the case's expected answer). The bare later-task line is run too, and both
+  results are recorded; the floor is chosen from the checkpoint-shaped run. It records in this spec the model and
+  revision, library versions, the corpus and runner commit, raw per-case similarities, retained hits, distractors
+  that pass, and **retrieval misses (the seed not in the candidate window) separately from floor abstentions (in the
+  window, below the floor)**, and the chosen value; and measures injected characters per block before and after. The ordinary #57 replay runs as a
   regression check of FR-005.
-- **FR-007 Docs.** README (the hooks section and, per D3, the configuration table), CHANGELOG.
+- **FR-007 Docs.** README (the hooks section and, per D3, the configuration table). CHANGELOG: the floor and
+  abstention under Added; under **Changed**, that `on_post_compact()` now queries by the latest checkpoint's text
+  (when one exists) and fetches 10 candidates, and applies the same promoted-chain collapse as the other hook
+  paths.
 
 ## Constraints / What NOT to Build
 
@@ -69,17 +86,41 @@ Status: approved by the owner, 2026-11-15 (D1–D5 exactly as proposed).
   floor; the values are recorded here.
 - **SC-4** The ordinary #57 replay has the same rankings as `results-k5.json`.
 - **SC-5** Fast suite, ruff, mypy strict, coverage ≥ 80%; MCP tool set unchanged.
+- **SC-6 (D2)** With a checkpoint, `on_post_compact()` queries by the checkpoint's text, never the fixed query;
+  without one, it uses the fixed query and no floor applies.
+- **SC-7 (D3)** With the setting unset: the factory-built embedder for the model named `all-MiniLM-L6-v2` gets the
+  calibrated floor; an injected embedder, another model, or a local path (even one holding the default model) gets
+  no floor and one warning; with the setting given, that value applies to any embedder. A value outside [−1, 1], or
+  not finite, is refused at settings load; unset means no floor.
+- **SC-8** If the selector's embedding call fails, the block shows today's unfiltered result and logs one warning.
 
 ## Decisions (the owner's, 2026-11-15)
 
 - **D1 The signal.** Dense cosine similarity alone.
 - **D2 `on_post_compact()`'s query.** The latest checkpoint's text. Without a checkpoint, the fixed query, with no
   floor.
-- **D3 Where the floor lives.** A setting, `MEMKERNEL_HOOK_RELEVANCE_FLOOR`. When it is unset, the calibrated default
-  applies only with the default embedding model (`all-MiniLM-L6-v2`); with any other model the floor is off and one
-  warning says to set it, so a calibration for one model is never applied to another silently.
+- **D3 Where the floor lives, and when it is on** (with A1). A setting, `MEMKERNEL_HOOK_RELEVANCE_FLOOR`: a finite
+  number in [−1, 1], or unset. Unset means the floor is off (`None`), never `0` (A2). When it is unset, the
+  calibrated default applies only to the embedder `build_service()` creates itself for the model named
+  `all-MiniLM-L6-v2`, which the factory marks as calibrated; an injected or unknown embedder, another model name, or
+  a local path, even one holding the default model (its bytes cannot be checked), gets no floor and one warning
+  saying to set the value. The lifecycle reads both the setting (`service.settings`) and the embedder's identity from
+  `service`, never from its own settings. Setting the value is an explicit choice and applies to any embedder.
 - **D4 The abstention line.** "No stored memory is close enough to this work; use recall() to search."
-- **D5 The calibration rule.** The highest floor at which every #57 seed passes for its own later task. The spec
-  records the embedding model, the corpus and runner commit, the raw per-case similarities, retained hits,
-  distractors and abstentions. If no floor above zero keeps every seed, the default is `0` (no floor) and the spec
-  reports the calibration as failed; no other value is chosen.
+- **D5 The calibration rule** (with A2, A3). From the checkpoint-shaped run, the floor is the lowest per-case
+  similarity of a seed to its own query, **minus a margin of 0.05**, rounded down to two decimals: the margin covers
+  real checkpoints that are wordier or less on-topic than the template. Every seed still passes by construction (the
+  floor is below the lowest seed); the price is that the floor sits 0.05 lower than D5's original rule would put it,
+  so more distractors may pass, and the spec records how many. The risk that remains: a real checkpoint far
+  from its task can still fall below the floor, and the block then abstains; the README says so and how to lower the
+  setting. The spec records the embedding model and revision, the corpus and runner commit, the raw per-case
+  similarities for both query shapes, retained hits, distractors that pass, retrieval misses and abstentions. If the
+  result is not above zero, calibration has failed: the default is unset (`None`, no floor), and the spec reports
+  the failure.
+
+## Amendments (the owner's, 2026-11-16, review of #131)
+
+- **A1** The embedder in use, not the model setting, decides whether the calibrated default applies (D3).
+- **A2** "No floor" is unset (`None`), not `0`, since cosine can be negative (D3, D5).
+- **A3** Calibration uses checkpoint-shaped queries as well as the bare later-task lines; `on_post_compact()` fetches
+  10 candidates; D5 takes a 0.05 margin; CHANGELOG lists the `on_post_compact()` query change under Changed.

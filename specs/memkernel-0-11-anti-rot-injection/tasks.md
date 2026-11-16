@@ -6,7 +6,8 @@
 - [ ] Floor value per D3; unit tests for SC-1 and SC-2
 
 ## US2: calibration
-- [ ] Calibration runner over the #57 corpus through the selector (FR-006, D5); record SC-3 in the spec
+- [ ] Calibration runner over the #57 crowded store through the full hook paths, checkpoint-shaped and bare queries
+  (FR-006, D5 with the 0.05 margin); record SC-3 in the spec
 - [ ] #57 replay regression (SC-4)
 
 ## US3: docs and checks
