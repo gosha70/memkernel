@@ -7,7 +7,7 @@
     "torch": "2.14.1"
   },
   "cct_commit": "00d49c0a9eb51e9bf234cee70490889b151cd550",
-  "runner_commit": "d1da8983bed54ea0c23802888f7191bb725b63cf",
+  "runner_commit": "1137816e8896e3179deaf87283abeec9a6b6c8cc",
   "margin": 0.05,
   "template": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: {task}\nNext: implement it and run the tests.\nOpen: none.",
   "lowest_target_similarity": 0.2509506271189637,
