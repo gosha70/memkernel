@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-16
+
+The first release after 0.8.0 (a 0.9.0 prepared on 2026-11-08 was never tagged or published; this one includes it).
+memkernel runs on the mcp 2.x SDK (#95), so `memkernel[wiki]` and `wiki-studio[mcp]` install into one environment.
+Decisions that cite a file are revalidated and returned flagged (#123); an opt-in recall log and a repeated-mistake
+count make repeats measurable (#120); the agent template gains decision records (#57); `on_post_compact()` chooses
+its context like compaction recovery (#128); and the curation debt ranks wiki-studio 0.9.0's conflict findings
+(#111).
+
+### Breaking
+
+- **memkernel requires the mcp 2.x Python SDK** (`mcp>=2.3,<3`; #95, ADR-011), so `memkernel[wiki]` and
+  `wiki-studio[mcp]` install into one environment. Tools, their arguments and results, `memory://status`, the
+  transports and the `MEMKERNEL_*` settings are unchanged, and hosts need no change: the server accepts the same
+  protocol versions as before. Breaks Python code that embeds the server: `create_server()` returns
+  `MCPServer[MemKernelContext]` instead of `FastMCP[...]`, and an environment pinned to `mcp<2` no longer resolves.
+  A tool's error message for a caller's mistake still reaches the client; the text of an unexpected crash no
+  longer does.
+
 ### Added
 
 - **Decisions that cite a file are revalidated** (#123; specs/memkernel-0-10-decision-revalidation). A new decision
@@ -41,21 +60,6 @@ All notable changes to this project are documented here. The format follows
 - From the #57 replay (`eval/decisions-57/`, results in `docs/research/implementation-decisions-57.md`): the
   template looks decisions up with `top_k=5`, not 3, and asks for a first line that fits recall's 200-character
   preview.
-
-## [0.9.0] - 2026-11-08
-
-memkernel runs on the mcp 2.x SDK (#95), so `memkernel[wiki]` and `wiki-studio[mcp]` install into one environment,
-and the curation debt ranks wiki-studio 0.9.0's conflict findings (#111).
-
-### Changed
-
-- **memkernel requires the mcp 2.x Python SDK** (`mcp>=2.3,<3`; #95, ADR-011), so `memkernel[wiki]` and
-  `wiki-studio[mcp]` install into one environment. Tools, their arguments and results, `memory://status`, the
-  transports and the `MEMKERNEL_*` settings are unchanged, and hosts need no change: the server accepts the same
-  protocol versions as before. Breaks Python code that embeds the server: `create_server()` returns
-  `MCPServer[MemKernelContext]` instead of `FastMCP[...]`, and an environment pinned to `mcp<2` no longer resolves.
-  A tool's error message for a caller's mistake still reaches the client; the text of an unexpected crash no
-  longer does.
 - New end-to-end tests run the server as a subprocess over stdio and Streamable HTTP; a `slow` one runs the
   installed `memkernel` command.
 - The curation debt section ranks wiki-studio 0.9.0's conflict findings (#111): `open-conflict`,
