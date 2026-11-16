@@ -76,3 +76,20 @@ def test_a_promoted_memory_and_its_source_never_both_appear(path: str) -> None:
     svc.retain(CHECKPOINT, MemoryType.EPISODE, checkpoint=True)
     text = lifecycle.on_post_compact() if path == "post-compact" else lifecycle.on_session_start(path)
     assert promoted in text and source not in text, path
+
+
+def test_post_compact_counts_an_access_only_for_the_memories_it_shows() -> None:
+    lifecycle, svc = _lifecycle()
+    for i in range(12):
+        svc.retain(f"migrate the user store to Postgres: decision {i}", MemoryType.DECISION)
+    svc.retain(CHECKPOINT, MemoryType.EPISODE, checkpoint=True)
+    window = [r.ref_id for r in svc.recall(CHECKPOINT, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False)]
+    before = {ref: svc.get(ref, touch=False).access_count for ref in window}
+    text = lifecycle.on_post_compact()
+    shown = [ref for ref in window if ref in text]
+    dropped = [ref for ref in window if ref not in text]
+    assert len(window) == HOOK_CANDIDATES and len(shown) == 5 and dropped
+    for ref in shown:
+        assert svc.get(ref, touch=False).access_count == before[ref] + 1
+    for ref in dropped:
+        assert svc.get(ref, touch=False).access_count == before[ref]

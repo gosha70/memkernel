@@ -215,9 +215,11 @@ class MemoryLifecycle:
         latest = self._latest_checkpoint_memory()
         # FR-002 (D2): the latest checkpoint is the query when there is one; without one, the fixed query.
         query = latest.content if latest is not None else POST_COMPACT_FIXED_QUERY
-        refs = self._service.recall(query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES)
+        refs = self._service.recall(query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False)
         found = [self._service.get(r.ref_id, touch=False) for r in refs]
         context = _distinct([m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K)
+        for memory in context:  # an access counts only for a memory the block shows, not for every candidate
+            self._service.get(memory.ref_id)
         candidates = self._service.consolidate(limit=CANDIDATE_LIMIT, purge=False)["candidates"]
         lines = [
             HEADING_POST_COMPACT,
