@@ -37,7 +37,7 @@ from memkernel.core.models import MemoryTier, MemoryType
 from memkernel.wiki.curation import curation_debt_lines
 
 if TYPE_CHECKING:
-    from memkernel.core.models import ArtifactRef, Memory
+    from memkernel.core.models import Memory
     from memkernel.core.services import MemoryService
     from memkernel.session_spool import DrainResult, SessionWindow
 
@@ -70,6 +70,10 @@ CHECKPOINT_IMPORTANCE = 0.8
 CANDIDATE_LIMIT = 5
 SESSION_START_CONTEXT_TOP_K = 6
 POST_COMPACT_CONTEXT_TOP_K = 5
+# memkernel-0-11-anti-rot-injection: candidates a recall-based hook block fetches before _distinct() narrows them to
+# POST_COMPACT_CONTEXT_TOP_K (compact recovery and on_post_compact alike).
+HOOK_CANDIDATES = 10
+POST_COMPACT_FIXED_QUERY = "decisions conventions architecture"
 # Startup context without a query (memkernel-0-7-hooks H1): these types first, in this order, then the rest.
 CONTEXT_TYPE_ORDER = (MemoryType.DECISION, MemoryType.CONVENTION, MemoryType.PROCEDURE, MemoryType.FACT)
 # Output budget (FR-003): Claude Code caps injected hook output at 10,000 characters; each hook's block stays under
@@ -209,9 +213,13 @@ class MemoryLifecycle:
         the block shows is written to the recall log; without one there is nothing to attribute it to, so nothing is.
         """
         latest = self._latest_checkpoint_memory()
-        context = self._service.recall(
-            "decisions conventions architecture", tier=MemoryTier.LONG_TERM, top_k=POST_COMPACT_CONTEXT_TOP_K
-        )
+        # FR-002 (D2): the latest checkpoint is the query when there is one; without one, the fixed query.
+        query = latest.content if latest is not None else POST_COMPACT_FIXED_QUERY
+        refs = self._service.recall(query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False)
+        found = [self._service.get(r.ref_id, touch=False) for r in refs]
+        context = _distinct([m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K)
+        for memory in context:  # an access counts only for a memory the block shows, not for every candidate
+            self._service.get(memory.ref_id)
         candidates = self._service.consolidate(limit=CANDIDATE_LIMIT, purge=False)["candidates"]
         lines = [
             HEADING_POST_COMPACT,
@@ -224,12 +232,12 @@ class MemoryLifecycle:
             ),
             "",
             HEADING_CONTEXT,
-            *(_context_lines(context) or ["No prior memories found."]),
+            *(self._memory_lines(context) or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(candidates))
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         shown = [latest.ref_id] if latest is not None else []
-        shown += [r.ref_id for r in context] + [c["ref_id"] for c in candidates]
+        shown += [m.ref_id for m in context] + [c["ref_id"] for c in candidates]
         text = _finish(lines)
         return self._logged(text, BLOCK_POST_COMPACT, shown, session_id) if session_id else text
 
@@ -274,13 +282,12 @@ class MemoryLifecycle:
         checkpoint = self._service.get(chosen.ref_id, touch=False) if chosen is not None else None
         if checkpoint is not None:  # H1: the work in progress is the query
             refs = self._service.recall(
-                checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=2 * POST_COMPACT_CONTEXT_TOP_K, touch=False
+                checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False
             )
             found = [self._service.get(r.ref_id, touch=False) for r in refs]
-            candidates = [m for m in found if m is not None]
+            context = _distinct([m for m in found if m is not None], checkpoint, POST_COMPACT_CONTEXT_TOP_K)
         else:
-            candidates = self._startup_context()
-        context = _distinct(candidates, checkpoint, POST_COMPACT_CONTEXT_TOP_K)
+            context = _distinct(self._startup_context(), checkpoint, POST_COMPACT_CONTEXT_TOP_K)
         lines = [HEADING_POST_COMPACT, "", HEADING_CHECKPOINT]
         lines.extend(self._checkpoint_lines(checkpoint) if checkpoint is not None else ["No checkpoint found."])
         lines.extend(["", HEADING_CONTEXT, *(self._memory_lines(context) or ["No prior memories found."])])
@@ -363,14 +370,6 @@ def _label(memory_type: MemoryType, needs_review: bool, reason: str) -> str:
     """A context line's type label; a flagged memory says so (decision-revalidation A1), e.g.
     ``decision, needs review: changed``."""
     return f"{memory_type}, needs review: {reason or 'flagged'}" if needs_review else f"{memory_type}"
-
-
-def _context_lines(refs: list[ArtifactRef]) -> list[str]:
-    lines = [
-        f"- [{_label(r.type, r.needs_review, r.review_reason)}] {stored(r.preview, STORED_KIND_CONTEXT)} ({r.ref_id})"
-        for r in refs
-    ]
-    return _fit(lines, CONTEXT_BUDGET)
 
 
 def _previous_sessions_block(drained: DrainResult) -> list[str]:

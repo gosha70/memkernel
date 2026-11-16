@@ -1,6 +1,6 @@
 # Spec: anti-rot injection, an absolute floor and consistent chain collapse for the hook blocks (#128)
 
-Status: approved by the owner, 2026-11-15 (D1–D5), amended from the review of #131: A1–A3 on 2026-11-15, A4 on 2026-11-16.
+Status: approved by the owner, 2026-11-15 (D1–D5), amended from the review of #131: A1–A3 on 2026-11-15, A4 on 2026-11-16. **Amended by A5 on 2026-11-16: the floor is dropped; what ships is the `on_post_compact()` change (FR-002 without the floor, FR-004).**
 
 ## Checked facts (`main` at `baff4dd`)
 
@@ -147,3 +147,28 @@ Status: approved by the owner, 2026-11-15 (D1–D5), amended from the review of 
   the default unset.
 - **A3** Calibration uses checkpoint-shaped queries as well as the bare later-task lines; `on_post_compact()` fetches
   10 candidates; D5 takes a 0.05 margin; CHANGELOG lists the `on_post_compact()` query change under Changed.
+
+## A5: the floor is dropped (the owner's rule, 2026-11-16)
+
+**Calibration record** (`eval/anti-rot-128/calibrate.py` at `d1da898`, rerun at the build commit `1137816` with the
+same outcome; results in `eval/anti-rot-128/calibration.json`):
+embedding `sentence-transformers/all-MiniLM-L6-v2` at revision `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`; sentence-transformers 5.7.0,
+chromadb 1.5.9, torch 2.14.1; the #57 crowded store at code-copilot-team `00d49c0`.
+- Lowest required-target similarity, checkpoint-shaped: 0.251; candidate floor 0.2.
+- Failures: missing from the window 0, removed by the floor 0, final five 2
+  (the conflict case "Destructive git commands require confirmation": its partner ranks 10th of 10 candidates, beyond
+  the five shown, with or without a floor). Calibration failed, so no default floor.
+- At the candidate floor, the floor changed 0 of 12 checkpoint-shaped cases; no case abstained.
+- Five off-topic checkpoints (work unrelated to the corpus) scored a top window similarity of 0.27, 0.38, 0.33, 0.27, 0.37: as high as the
+  needed records. So the floor was **not shown to work with this model and this query shape**; it may still work with
+  another model or query shape. The shared checkpoint template ("read the code involved… implement it and run the
+  tests") may inflate the off-topic scores, since its lines are about development work like the corpus.
+
+**The owner's rule** (2026-11-16): if off-topic checkpoints fell clearly below 0.20, ship the floor as a setting
+without the revision check; if not, drop the floor. They did not, so:
+- **Dropped:** FR-001's floor and similarity scoring, FR-003 (abstention), D1, D3 (the setting, the revision check,
+  the calibrated flag), D4, D5 as a shipping rule, SC-1, SC-3 (kept as the record above), SC-7, SC-8.
+- **Ships:** `on_post_compact()` queries by the latest checkpoint's text when one exists (the fixed query otherwise),
+  fetches 10 candidates, and applies `_distinct()` like the other hook paths (FR-002 without the floor, FR-004,
+  SC-2, SC-6); compact recovery fetches the same 10 (`HOOK_CANDIDATES`). MCP `recall` is unchanged (FR-005, SC-4).
+- **The conflict-partner finding** is recorded on #123.

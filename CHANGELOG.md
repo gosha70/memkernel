@@ -26,6 +26,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`on_post_compact()` now chooses its context like compaction recovery** (#128; specs/memkernel-0-11-anti-rot-injection,
+  amendment A5). It queries by the latest checkpoint's text when there is one (the fixed "decisions conventions
+  architecture" query otherwise), fetches 10 candidates, and applies the same collapse as the other hook paths, so a
+  promoted memory and its source never both appear. Compaction recovery fetches the same 10. The absolute relevance
+  floor #128 proposed was calibrated and dropped: with the default embedding and checkpoint-shaped queries it changed
+  no block, and unrelated work scored as high as the needed records, so it was not shown to work with this model and
+  query shape (`eval/anti-rot-128/`).
 - The agent instructions template (`templates/claude-memory-instructions.md`) gains **decision records** (#57): a
   one-line summary plus `requirement`, `chosen`, `rejected`, `evidence` and `revisit-when`, retained with the cited
   file in `source`. Agents recall decisions before adding a helper, dependency or module, check a decision's

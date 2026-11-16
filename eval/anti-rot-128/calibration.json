@@ -1,0 +1,1553 @@
+{
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "versions": {
+    "sentence-transformers": "5.7.0",
+    "chromadb": "1.5.9",
+    "torch": "2.14.1"
+  },
+  "cct_commit": "00d49c0a9eb51e9bf234cee70490889b151cd550",
+  "runner_commit": "1137816e8896e3179deaf87283abeec9a6b6c8cc",
+  "margin": 0.05,
+  "template": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: {task}\nNext: implement it and run the tests.\nOpen: none.",
+  "lowest_target_similarity": 0.2509506271189637,
+  "candidate_floor": 0.2,
+  "failures": {
+    "missing_from_window": 0,
+    "removed_by_floor": 0,
+    "final_five": 2
+  },
+  "calibrated_floor": null,
+  "calibration_failed": true,
+  "cases": [
+    {
+      "title": "Trace archive reuses the ingest redaction path",
+      "kind": "reuse",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Add a durable archive that stores the full text of each turn for search and export.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Trace archive reuses the ingest redaction path"
+      ],
+      "window": {
+        "cct-spec:sa-search": 0.429280849960251,
+        "Never archive raw JSONL": 0.39338294556099335,
+        "Trace archive reuses the ingest redaction path": 0.367731793882057,
+        "cct-spec:session-analytics-trace-archive-a": 0.36926029865949955,
+        "cct-spec:session-analytics-export": 0.41648892360429857,
+        "cct-spec:session-analytics-correlate": 0.4093466199735081,
+        "cct-spec:session-analytics": 0.3583542993687597,
+        "cct-spec:sa-trace-tree": 0.33808790712621806,
+        "cct-spec:sa-feedback": 0.32541734395980776,
+        "cct-spec:memkernel-integration": 0.3845816564015898
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:sa-search",
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:session-analytics-export"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:sa-search",
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:session-analytics-export"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:sa-search",
+          "Never archive raw JSONL",
+          "Trace archive reuses the ingest redaction path",
+          "cct-spec:session-analytics-trace-archive-a",
+          "cct-spec:session-analytics-export"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Trace archive reuses the ingest redaction path",
+      "kind": "reuse",
+      "shape": "bare",
+      "query": "Add a durable archive that stores the full text of each turn for search and export.",
+      "targets": [
+        "Trace archive reuses the ingest redaction path"
+      ],
+      "window": {
+        "cct-spec:sa-search": 0.3197240020754015,
+        "Trace archive reuses the ingest redaction path": 0.26645108924152533,
+        "Never archive raw JSONL": 0.2613536426980005,
+        "cct-spec:session-analytics-trace-archive-a": 0.2403932947762954,
+        "cct-spec:session-analytics-export": 0.24416178415415055,
+        "ADR-009-rlm-studio-for-documents": 0.25333669178874324,
+        "cct-spec:sa-feedback": 0.17171968181596123,
+        "cct-spec:wiki-audit-trail": 0.300870647658916,
+        "cct-spec:sa-trace-tree": 0.13838195323999308,
+        "cct-spec:wiki-audit-flush": 0.1952945432563541
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:sa-search",
+            "Trace archive reuses the ingest redaction path",
+            "Never archive raw JSONL",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:session-analytics-export"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:sa-search",
+            "Trace archive reuses the ingest redaction path",
+            "Never archive raw JSONL",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:session-analytics-export"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 6,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:sa-search",
+          "Trace archive reuses the ingest redaction path",
+          "Never archive raw JSONL",
+          "cct-spec:session-analytics-trace-archive-a",
+          "cct-spec:session-analytics-export"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Benchmark step reuses the one correlate scan seam",
+      "kind": "reuse",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Add a pipeline step that links benchmark runs to sessions and reports live progress.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Benchmark step reuses the one correlate scan seam"
+      ],
+      "window": {
+        "(successor) benchmark step": 0.5174764353435475,
+        "Benchmark step reuses the one correlate scan seam": 0.5174764353435475,
+        "cct-spec:session-analytics-correlate": 0.5267408233588926,
+        "cct-spec:session-analytics": 0.42688405115286726,
+        "cct-spec:routing-shadow": 0.4431968203172613,
+        "cct-spec:session-analytics-watch": 0.46967738385543645,
+        "cct-spec:session-analytics-outcomes": 0.4665791107488918,
+        "cct-spec:sa-expectations": 0.4042989178342611,
+        "cct-spec:auto-build-cap-alerts": 0.3189847623271007,
+        "The clusters view is not an explorer": 0.3536665833424993
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:session-analytics-correlate",
+            "cct-spec:session-analytics",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:session-analytics-correlate",
+            "cct-spec:session-analytics",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "(successor) benchmark step",
+          "Benchmark step reuses the one correlate scan seam",
+          "cct-spec:session-analytics-correlate",
+          "cct-spec:session-analytics",
+          "cct-spec:routing-shadow"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Benchmark step reuses the one correlate scan seam",
+      "kind": "reuse",
+      "shape": "bare",
+      "query": "Add a pipeline step that links benchmark runs to sessions and reports live progress.",
+      "targets": [
+        "Benchmark step reuses the one correlate scan seam"
+      ],
+      "window": {
+        "(successor) benchmark step": 0.5591216799296466,
+        "Benchmark step reuses the one correlate scan seam": 0.5591216799296466,
+        "cct-spec:session-analytics-correlate": 0.5880268403116218,
+        "cct-spec:session-analytics-outcomes": 0.5358952442894049,
+        "cct-spec:session-analytics": 0.5280453632505698,
+        "cct-spec:session-analytics-watch": 0.5170165870768026,
+        "cct-spec:routing-shadow": 0.4915126469956598,
+        "cct-spec:session-analytics-similarity-embed": 0.3733864566312789,
+        "cct-spec:auto-build-cap-alerts": 0.36014475894005293,
+        "cct-spec:sa-expectations": 0.45063526837843604
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:session-analytics-correlate",
+            "cct-spec:session-analytics-outcomes",
+            "cct-spec:session-analytics"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:session-analytics-correlate",
+            "cct-spec:session-analytics-outcomes",
+            "cct-spec:session-analytics"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "(successor) benchmark step",
+          "Benchmark step reuses the one correlate scan seam",
+          "cct-spec:session-analytics-correlate",
+          "cct-spec:session-analytics-outcomes",
+          "cct-spec:session-analytics"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+      "kind": "native-vs-dependency",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Add task fetching for the SWE-bench Verified adapter.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "SWE-bench fetch uses the stdlib rows API, not Parquet"
+      ],
+      "window": {
+        "SWE-bench fetch uses the stdlib rows API, not Parquet": 0.3756526777920888,
+        "cct-spec:pi-sandbox-hardening": 0.36980130278557855,
+        "cct-spec:routing-recovery": 0.3475281831369735,
+        "cct-spec:benchmark-harness": 0.280378593194,
+        "cct-spec:routing-shadow": 0.317496417839468,
+        "cct-spec:sa-harness-version": 0.36651998385496243,
+        "cct-spec:benchmark-bench-driver": 0.2746970908286657,
+        "cct-spec:session-analytics-correlate": 0.3533380902334998,
+        "cct-spec:unattended-cross-harness-execution": 0.29202946688031894,
+        "Benchmark step reuses the one correlate scan seam": 0.38706135478204273
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "SWE-bench fetch uses the stdlib rows API, not Parquet",
+            "cct-spec:pi-sandbox-hardening",
+            "cct-spec:routing-recovery",
+            "cct-spec:benchmark-harness",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "SWE-bench fetch uses the stdlib rows API, not Parquet",
+            "cct-spec:pi-sandbox-hardening",
+            "cct-spec:routing-recovery",
+            "cct-spec:benchmark-harness",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "SWE-bench fetch uses the stdlib rows API, not Parquet",
+          "cct-spec:pi-sandbox-hardening",
+          "cct-spec:routing-recovery",
+          "cct-spec:benchmark-harness",
+          "cct-spec:routing-shadow"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "SWE-bench fetch uses the stdlib rows API, not Parquet",
+      "kind": "native-vs-dependency",
+      "shape": "bare",
+      "query": "Add task fetching for the SWE-bench Verified adapter.",
+      "targets": [
+        "SWE-bench fetch uses the stdlib rows API, not Parquet"
+      ],
+      "window": {
+        "SWE-bench fetch uses the stdlib rows API, not Parquet": 0.5196401735936625,
+        "cct-spec:benchmark-harness": 0.3234778424932331,
+        "cct-spec:benchmark-bench-driver": 0.32621817284072624,
+        "cct-spec:cct-command-naming": 0.30378764686370335,
+        "cct-spec:claude-code-2026-09-adoption": 0.2821428409158632,
+        "cct-spec:llm-wiki-groundwork": 0.2962903294071028,
+        "cct-spec:benchmark-aider-backend": 0.267075661945481,
+        "cct-spec:routing-recovery": 0.2595897001036565,
+        "cct-spec:sa-trace-tree": 0.27903007964299764,
+        "cct-spec:session-analytics-outcomes": 0.34614531902281953
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "SWE-bench fetch uses the stdlib rows API, not Parquet",
+            "cct-spec:benchmark-harness",
+            "cct-spec:benchmark-bench-driver",
+            "cct-spec:cct-command-naming",
+            "cct-spec:claude-code-2026-09-adoption"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "SWE-bench fetch uses the stdlib rows API, not Parquet",
+            "cct-spec:benchmark-harness",
+            "cct-spec:benchmark-bench-driver",
+            "cct-spec:cct-command-naming",
+            "cct-spec:claude-code-2026-09-adoption"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "SWE-bench fetch uses the stdlib rows API, not Parquet",
+          "cct-spec:benchmark-harness",
+          "cct-spec:benchmark-bench-driver",
+          "cct-spec:cct-command-naming",
+          "cct-spec:claude-code-2026-09-adoption"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Judge statistics and charts stay in the stdlib",
+      "kind": "native-vs-dependency",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Compute the judge-calibration correlation and render the report charts.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Judge statistics and charts stay in the stdlib"
+      ],
+      "window": {
+        "cct-spec:sa-expectations": 0.4521649820466528,
+        "Judge statistics and charts stay in the stdlib": 0.40278582301097,
+        "The clusters view is not an explorer": 0.44498659830693077,
+        "cct-spec:session-analytics": 0.4476312638613842,
+        "cct-spec:routing-shadow": 0.35991280777705215,
+        "cct-spec:sa-feedback": 0.37803297494058347,
+        "cct-spec:routing-calibration": 0.30415141678427265,
+        "Benchmark step reuses the one correlate scan seam": 0.49236470351896616,
+        "cct-spec:cost-cap-visibility": 0.30187025230433695,
+        "(successor) benchmark step": 0.49236470351896616
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:sa-expectations",
+            "Judge statistics and charts stay in the stdlib",
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:sa-expectations",
+            "Judge statistics and charts stay in the stdlib",
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics",
+            "cct-spec:routing-shadow"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:sa-expectations",
+          "Judge statistics and charts stay in the stdlib",
+          "The clusters view is not an explorer",
+          "cct-spec:session-analytics",
+          "cct-spec:routing-shadow"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Judge statistics and charts stay in the stdlib",
+      "kind": "native-vs-dependency",
+      "shape": "bare",
+      "query": "Compute the judge-calibration correlation and render the report charts.",
+      "targets": [
+        "Judge statistics and charts stay in the stdlib"
+      ],
+      "window": {
+        "Judge statistics and charts stay in the stdlib": 0.49800348188444443,
+        "cct-spec:sa-expectations": 0.34448861453770263,
+        "cct-spec:routing-calibration": 0.22627881653146473,
+        "cct-spec:session-analytics-cost-tracking": 0.31198830670652494,
+        "cct-spec:session-analytics": 0.25807720880898943,
+        "cct-spec:sa-feedback": 0.23504608958375994,
+        "cct-spec:session-analytics-similarity-embed": 0.15059003485828862,
+        "cct-spec:session-analytics-export": 0.2070995526396568,
+        "cct-spec:routing-shadow": 0.1709392454636274,
+        "cct-spec:cost-cap-visibility": 0.18451078471135848
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Judge statistics and charts stay in the stdlib",
+            "cct-spec:sa-expectations",
+            "cct-spec:routing-calibration",
+            "cct-spec:session-analytics-cost-tracking",
+            "cct-spec:session-analytics"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Judge statistics and charts stay in the stdlib",
+            "cct-spec:sa-expectations",
+            "cct-spec:routing-calibration",
+            "cct-spec:session-analytics-cost-tracking",
+            "cct-spec:session-analytics"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 6,
+      "at_floor": {
+        "displayed": [
+          "Judge statistics and charts stay in the stdlib",
+          "cct-spec:sa-expectations",
+          "cct-spec:routing-calibration",
+          "cct-spec:session-analytics-cost-tracking",
+          "cct-spec:session-analytics"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Never bypass a git lock with an alternate index",
+      "kind": "rejected-for-safety",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: A commit fails because `.git/index.lock` exists; make the commit go through.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Never bypass a git lock with an alternate index"
+      ],
+      "window": {
+        "Never bypass a git lock with an alternate index": 0.46631470873137815,
+        "cct-spec:wiki-audit-flush": 0.4369410221389729,
+        "Benchmark step reuses the one correlate scan seam": 0.36546995093500123,
+        "Destructive git commands require confirmation": 0.3812859405633656,
+        "(successor) benchmark step": 0.36546995093500123,
+        "cct-spec:infra-verification-gate": 0.3572489582405078,
+        "cct-spec:auto-build-resume-terminated": 0.3060554877206224,
+        "cct-spec:auto-build-verification-contract": 0.3267929619293893,
+        "cct-spec:pi-sandbox-hardening": 0.4573744883242213,
+        "cct-spec:unattended-cross-harness-execution": 0.30202160524499017
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:wiki-audit-flush",
+            "Benchmark step reuses the one correlate scan seam",
+            "Destructive git commands require confirmation",
+            "(successor) benchmark step"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:wiki-audit-flush",
+            "Benchmark step reuses the one correlate scan seam",
+            "Destructive git commands require confirmation",
+            "(successor) benchmark step"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "Never bypass a git lock with an alternate index",
+          "cct-spec:wiki-audit-flush",
+          "Benchmark step reuses the one correlate scan seam",
+          "Destructive git commands require confirmation",
+          "(successor) benchmark step"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Never bypass a git lock with an alternate index",
+      "kind": "rejected-for-safety",
+      "shape": "bare",
+      "query": "A commit fails because `.git/index.lock` exists; make the commit go through.",
+      "targets": [
+        "Never bypass a git lock with an alternate index"
+      ],
+      "window": {
+        "Never bypass a git lock with an alternate index": 0.6789420341247733,
+        "cct-spec:wiki-audit-flush": 0.46719025590016494,
+        "Destructive git commands require confirmation": 0.39962393680433295,
+        "cct-spec:wiki-audit-trail": 0.3168126915771387,
+        "cct-spec:infra-verification-gate": 0.2997423158789308,
+        "cct-spec:review-provider-error": 0.29832911561455877,
+        "cct-spec:auto-build-resume-terminated": 0.24063910149867548,
+        "Balanced profile denies destructive git commands": 0.24955824009612015,
+        "cct-spec:pi-worktree-lifecycle": 0.34272109786995425,
+        "cct-spec:team-developer-aliases": 0.2719174529863485
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:wiki-audit-flush",
+            "Destructive git commands require confirmation",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:infra-verification-gate"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:wiki-audit-flush",
+            "Destructive git commands require confirmation",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:infra-verification-gate"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "Never bypass a git lock with an alternate index",
+          "cct-spec:wiki-audit-flush",
+          "Destructive git commands require confirmation",
+          "cct-spec:wiki-audit-trail",
+          "cct-spec:infra-verification-gate"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Never archive raw JSONL",
+      "kind": "rejected-for-safety",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Add full-text trace retention; the simplest source is the original JSONL files.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Never archive raw JSONL"
+      ],
+      "window": {
+        "Never archive raw JSONL": 0.43677911778226475,
+        "Trace archive reuses the ingest redaction path": 0.3610963240467595,
+        "cct-spec:routing-shadow": 0.34410218860130665,
+        "cct-spec:session-analytics": 0.32145490343969313,
+        "cct-spec:session-analytics-trace-archive-a": 0.29670899869478334,
+        "cct-spec:api-probe-error-hardening": 0.2990258711201736,
+        "cct-spec:sa-trace-tree": 0.2787858434774232,
+        "cct-spec:session-analytics-correlate": 0.3563806304929475,
+        "cct-spec:pi-sandbox-hardening": 0.2874536291448818,
+        "cct-spec:sa-search": 0.2884602715345414
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics",
+            "cct-spec:session-analytics-trace-archive-a"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics",
+            "cct-spec:session-analytics-trace-archive-a"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "Never archive raw JSONL",
+          "Trace archive reuses the ingest redaction path",
+          "cct-spec:routing-shadow",
+          "cct-spec:session-analytics",
+          "cct-spec:session-analytics-trace-archive-a"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Never archive raw JSONL",
+      "kind": "rejected-for-safety",
+      "shape": "bare",
+      "query": "Add full-text trace retention; the simplest source is the original JSONL files.",
+      "targets": [
+        "Never archive raw JSONL"
+      ],
+      "window": {
+        "Never archive raw JSONL": 0.47959364988059305,
+        "Trace archive reuses the ingest redaction path": 0.34691023699961215,
+        "cct-spec:session-analytics-trace-archive-a": 0.2890990171445859,
+        "cct-spec:wiki-audit-trail": 0.30099489969048415,
+        "cct-spec:sa-trace-tree": 0.2094566500168116,
+        "cct-spec:sa-search": 0.23819815773658823,
+        "cct-spec:session-analytics": 0.18731425005215793,
+        "cct-spec:wiki-audit-flush": 0.22702404240908172,
+        "cct-spec:wiki-ingest-pipeline": 0.24336740837096668,
+        "cct-spec:sa-threads": 0.1892393493116622
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:sa-trace-tree"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Never archive raw JSONL",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:sa-trace-tree"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 7,
+      "at_floor": {
+        "displayed": [
+          "Never archive raw JSONL",
+          "Trace archive reuses the ingest redaction path",
+          "cct-spec:session-analytics-trace-archive-a",
+          "cct-spec:wiki-audit-trail",
+          "cct-spec:sa-trace-tree"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Benchmark UI was backend-free, one-shot and Studio-only",
+      "kind": "stale",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "(successor) benchmark step"
+      ],
+      "window": {
+        "cct-spec:session-analytics-correlate": 0.4594485506969325,
+        "(successor) benchmark step": 0.39911587196289927,
+        "Benchmark step reuses the one correlate scan seam": 0.39911587196289927,
+        "cct-spec:routing-shadow": 0.4027621561698127,
+        "cct-spec:session-analytics-outcomes": 0.3283549909673107,
+        "cct-spec:sa-expectations": 0.3476166946810131,
+        "cct-spec:session-analytics-watch": 0.3634684119888292,
+        "cct-spec:session-analytics": 0.33161574657193843,
+        "cct-spec:routing-eval": 0.2713285081392989,
+        "cct-spec:sa-trace-tree": 0.25711015336000376
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:session-analytics-correlate",
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics-outcomes"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:session-analytics-correlate",
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics-outcomes"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:session-analytics-correlate",
+          "(successor) benchmark step",
+          "Benchmark step reuses the one correlate scan seam",
+          "cct-spec:routing-shadow",
+          "cct-spec:session-analytics-outcomes"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Benchmark UI was backend-free, one-shot and Studio-only",
+      "kind": "stale",
+      "shape": "bare",
+      "query": "The Benchmark page feels empty and passive; make it explain what a benchmark run is and let the user link runs from the page.",
+      "targets": [
+        "(successor) benchmark step"
+      ],
+      "window": {
+        "cct-spec:session-analytics-correlate": 0.28250579631524236,
+        "(successor) benchmark step": 0.2466636670541385,
+        "Benchmark step reuses the one correlate scan seam": 0.2466636670541385,
+        "cct-spec:routing-shadow": 0.27728578465221243,
+        "cct-spec:session-analytics-outcomes": 0.21492571666942445,
+        "cct-spec:sa-expectations": 0.290107338405342,
+        "cct-spec:benchmark-harness": 0.2192897026187373,
+        "cct-spec:routing-eval": 0.24261910125766312,
+        "cct-spec:runs-attempt-history": 0.16965955803734864,
+        "cct-spec:harness-studio-nav": 0.1424545858493502
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:session-analytics-correlate",
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics-outcomes"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:session-analytics-correlate",
+            "(successor) benchmark step",
+            "Benchmark step reuses the one correlate scan seam",
+            "cct-spec:routing-shadow",
+            "cct-spec:session-analytics-outcomes"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 7,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:session-analytics-correlate",
+          "(successor) benchmark step",
+          "Benchmark step reuses the one correlate scan seam",
+          "cct-spec:routing-shadow",
+          "cct-spec:session-analytics-outcomes"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "merge.require_green_ci was never read",
+      "kind": "stale",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "(successor) green-CI correction"
+      ],
+      "window": {
+        "(successor) green-CI correction": 0.5425894941502143,
+        "cct-spec:auto-build-loop-pr-profile": 0.38793608457392437,
+        "cct-spec:auto-build-visual-gate": 0.3764572711135402,
+        "cct-spec:auto-build-loop-driver": 0.3691800149544887,
+        "cct-spec:pi-sandbox-hardening": 0.39206624325836825,
+        "cct-spec:review-provider-error": 0.3734191785434378,
+        "cct-spec:auto-build-loop-review-engine": 0.31813634510763117,
+        "cct-spec:auto-build-run-surface": 0.32418749974795963,
+        "cct-spec:cost-cap-visibility": 0.3263687140966295,
+        "cct-spec:auto-build-conformance-evaluator": 0.3629710147947251
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "(successor) green-CI correction",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:auto-build-visual-gate",
+            "cct-spec:auto-build-loop-driver",
+            "cct-spec:pi-sandbox-hardening"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "(successor) green-CI correction",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:auto-build-visual-gate",
+            "cct-spec:auto-build-loop-driver",
+            "cct-spec:pi-sandbox-hardening"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "(successor) green-CI correction",
+          "cct-spec:auto-build-loop-pr-profile",
+          "cct-spec:auto-build-visual-gate",
+          "cct-spec:auto-build-loop-driver",
+          "cct-spec:pi-sandbox-hardening"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "merge.require_green_ci was never read",
+      "kind": "stale",
+      "shape": "bare",
+      "query": "Set `merge.require_green_ci` to true so the driver refuses to merge without green CI.",
+      "targets": [
+        "(successor) green-CI correction"
+      ],
+      "window": {
+        "(successor) green-CI correction": 0.646606982756788,
+        "cct-spec:auto-build-loop-pr-profile": 0.32689120245602543,
+        "cct-spec:auto-build-visual-gate": 0.31696850502437235,
+        "cct-spec:auto-build-run-surface": 0.30431491146528333,
+        "cct-spec:auto-build-loop-driver": 0.28458561299381147,
+        "cct-spec:auto-build-loop-review-engine": 0.2977599389800847,
+        "cct-spec:review-provider-error": 0.30269842879123965,
+        "cct-spec:auto-build-conformance-evaluator": 0.28149002547613244,
+        "cct-spec:auto-build-unattended-core": 0.2866810643348706,
+        "cct-spec:auto-build-loop-reviewer-panel": 0.25882148611564
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "(successor) green-CI correction",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:auto-build-visual-gate",
+            "cct-spec:auto-build-run-surface",
+            "cct-spec:auto-build-loop-driver"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "(successor) green-CI correction",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:auto-build-visual-gate",
+            "cct-spec:auto-build-run-surface",
+            "cct-spec:auto-build-loop-driver"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "(successor) green-CI correction",
+          "cct-spec:auto-build-loop-pr-profile",
+          "cct-spec:auto-build-visual-gate",
+          "cct-spec:auto-build-run-surface",
+          "cct-spec:auto-build-loop-driver"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "The clusters view is not an explorer",
+      "kind": "false-reuse-trap",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Add filtering, drill-down and a graph visualization to the clusters page.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "The clusters view is not an explorer"
+      ],
+      "window": {
+        "The clusters view is not an explorer": 0.5256492231522345,
+        "cct-spec:session-analytics-similarity-cluster": 0.44803610764103086,
+        "cct-spec:session-analytics": 0.3752442352276491,
+        "cct-spec:sa-trace-tree": 0.3653817292628449,
+        "cct-spec:pi-sandbox-hardening": 0.3901551006964528,
+        "cct-spec:session-analytics-export": 0.2845352319677792,
+        "Benchmark step reuses the one correlate scan seam": 0.34189648376116166,
+        "cct-spec:cost-cap-visibility": 0.29819038342180315,
+        "cct-spec:sa-search": 0.3141288556871927,
+        "(successor) benchmark step": 0.34189648376116166
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics-similarity-cluster",
+            "cct-spec:session-analytics",
+            "cct-spec:sa-trace-tree",
+            "cct-spec:pi-sandbox-hardening"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics-similarity-cluster",
+            "cct-spec:session-analytics",
+            "cct-spec:sa-trace-tree",
+            "cct-spec:pi-sandbox-hardening"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "The clusters view is not an explorer",
+          "cct-spec:session-analytics-similarity-cluster",
+          "cct-spec:session-analytics",
+          "cct-spec:sa-trace-tree",
+          "cct-spec:pi-sandbox-hardening"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "The clusters view is not an explorer",
+      "kind": "false-reuse-trap",
+      "shape": "bare",
+      "query": "Add filtering, drill-down and a graph visualization to the clusters page.",
+      "targets": [
+        "The clusters view is not an explorer"
+      ],
+      "window": {
+        "The clusters view is not an explorer": 0.5216404191845013,
+        "cct-spec:session-analytics-similarity-cluster": 0.33121306058118904,
+        "cct-spec:sa-trace-tree": 0.22488512141583286,
+        "cct-spec:session-analytics": 0.30130483159788257,
+        "cct-spec:session-analytics-cost-tracking": 0.1625541697534707,
+        "cct-spec:sa-search": 0.18545969624237232,
+        "cct-spec:harness-studio-nav": 0.14534814866533233,
+        "cct-spec:auto-build-loop-reviewer-panel": 0.131673308849022,
+        "cct-spec:session-analytics-export": 0.0721481902430929,
+        "cct-spec:cost-cap-visibility": 0.15350917385100077
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics-similarity-cluster",
+            "cct-spec:sa-trace-tree",
+            "cct-spec:session-analytics",
+            "cct-spec:session-analytics-cost-tracking"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "The clusters view is not an explorer",
+            "cct-spec:session-analytics-similarity-cluster",
+            "cct-spec:sa-trace-tree",
+            "cct-spec:session-analytics",
+            "cct-spec:session-analytics-cost-tracking"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 3,
+      "at_floor": {
+        "displayed": [
+          "The clusters view is not an explorer",
+          "cct-spec:session-analytics-similarity-cluster",
+          "cct-spec:sa-trace-tree",
+          "cct-spec:session-analytics"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": true
+      }
+    },
+    {
+      "title": "Config redaction is not free-text redaction",
+      "kind": "false-reuse-trap",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Redact free-text transcript excerpts before writing them to a new log path.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Trace archive reuses the ingest redaction path"
+      ],
+      "window": {
+        "cct-spec:session-analytics-trace-archive-a": 0.425686258105793,
+        "Trace archive reuses the ingest redaction path": 0.45528253725502027,
+        "cct-spec:sa-feedback": 0.3388872885271191,
+        "cct-spec:sa-search": 0.39154832792513505,
+        "Never archive raw JSONL": 0.4412572629411303,
+        "cct-spec:pi-sandbox-hardening": 0.31907039778026414,
+        "cct-spec:wiki-audit-flush": 0.3014858016698663,
+        "cct-spec:auto-build-admission": 0.34300365152416346,
+        "cct-spec:memkernel-integration": 0.33688506921641376,
+        "Config redaction is not free-text redaction": 0.24753763787612043
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:session-analytics-trace-archive-a",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:sa-feedback",
+            "cct-spec:sa-search",
+            "Never archive raw JSONL"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:session-analytics-trace-archive-a",
+            "Trace archive reuses the ingest redaction path",
+            "cct-spec:sa-feedback",
+            "cct-spec:sa-search",
+            "Never archive raw JSONL"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:session-analytics-trace-archive-a",
+          "Trace archive reuses the ingest redaction path",
+          "cct-spec:sa-feedback",
+          "cct-spec:sa-search",
+          "Never archive raw JSONL"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Config redaction is not free-text redaction",
+      "kind": "false-reuse-trap",
+      "shape": "bare",
+      "query": "Redact free-text transcript excerpts before writing them to a new log path.",
+      "targets": [
+        "Trace archive reuses the ingest redaction path"
+      ],
+      "window": {
+        "cct-spec:session-analytics-trace-archive-a": 0.398992640756823,
+        "cct-spec:wiki-audit-flush": 0.28963050047252026,
+        "cct-spec:wiki-audit-trail": 0.3128298481231126,
+        "cct-spec:sa-search": 0.34265076376524306,
+        "Config redaction is not free-text redaction": 0.28601637458708584,
+        "Trace archive reuses the ingest redaction path": 0.44897741951376274,
+        "Never archive raw JSONL": 0.40467915908345525,
+        "cct-spec:llm-wiki-groundwork": 0.2286124335721963,
+        "cct-spec:sa-feedback": 0.2551002132219592,
+        "cct-spec:session-analytics-privacy-granularity": 0.3185610005571521
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:wiki-audit-flush",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:sa-search",
+            "Config redaction is not free-text redaction"
+          ],
+          "judged": false
+        },
+        "post-compact": {
+          "displayed": [
+            "cct-spec:session-analytics-trace-archive-a",
+            "cct-spec:wiki-audit-flush",
+            "cct-spec:wiki-audit-trail",
+            "cct-spec:sa-search",
+            "Config redaction is not free-text redaction"
+          ],
+          "judged": false
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 9,
+      "at_floor": {
+        "displayed": [
+          "cct-spec:session-analytics-trace-archive-a",
+          "cct-spec:wiki-audit-flush",
+          "cct-spec:wiki-audit-trail",
+          "cct-spec:sa-search",
+          "Config redaction is not free-text redaction"
+        ],
+        "judged": false,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Destructive git commands require confirmation",
+      "kind": "conflict",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Recover a project by running `git reset --hard origin/main`.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Destructive git commands require confirmation",
+        "Balanced profile denies destructive git commands"
+      ],
+      "window": {
+        "Destructive git commands require confirmation": 0.4011028445300969,
+        "cct-spec:pi-worktree-lifecycle": 0.37793945385440536,
+        "cct-spec:auto-build-loop-pr-profile": 0.3104185683877539,
+        "Never bypass a git lock with an alternate index": 0.30858990196315045,
+        "cct-spec:team-developer-aliases": 0.3373429962617404,
+        "Balanced profile denies destructive git commands": 0.2509506271189637,
+        "cct-spec:wiki-audit-flush": 0.29354496421125786,
+        "cct-spec:pi-sandbox-hardening": 0.418305040784918,
+        "cct-spec:review-loop-clock": 0.27152893721528853,
+        "cct-spec:infra-verification-gate": 0.31336639705973485
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": false
+        },
+        "post-compact": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": false
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 8,
+      "at_floor": {
+        "displayed": [
+          "Destructive git commands require confirmation",
+          "cct-spec:pi-worktree-lifecycle",
+          "cct-spec:auto-build-loop-pr-profile",
+          "Never bypass a git lock with an alternate index",
+          "cct-spec:team-developer-aliases"
+        ],
+        "judged": false,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Destructive git commands require confirmation",
+      "kind": "conflict",
+      "shape": "bare",
+      "query": "Recover a project by running `git reset --hard origin/main`.",
+      "targets": [
+        "Destructive git commands require confirmation",
+        "Balanced profile denies destructive git commands"
+      ],
+      "window": {
+        "Destructive git commands require confirmation": 0.3628396124925014,
+        "cct-spec:pi-worktree-lifecycle": 0.3107723438400956,
+        "Never bypass a git lock with an alternate index": 0.31296325317762,
+        "cct-spec:auto-build-loop-pr-profile": 0.2178022268656894,
+        "Balanced profile denies destructive git commands": 0.18677207291080544,
+        "cct-spec:team-developer-aliases": 0.29532701074192574,
+        "cct-spec:wiki-audit-flush": 0.1770768540397164,
+        "cct-spec:review-loop-clock": 0.12561673096665077,
+        "cct-spec:wiki-audit-trail": 0.20767990134917522,
+        "cct-spec:auto-build-branded-launcher": 0.11766425626254273
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "cct-spec:pi-worktree-lifecycle",
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:auto-build-loop-pr-profile",
+            "Balanced profile denies destructive git commands"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "cct-spec:pi-worktree-lifecycle",
+            "Never bypass a git lock with an alternate index",
+            "cct-spec:auto-build-loop-pr-profile",
+            "Balanced profile denies destructive git commands"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [
+        "Balanced profile denies destructive git commands"
+      ],
+      "distractors_passing": 5,
+      "at_floor": {
+        "displayed": [
+          "Destructive git commands require confirmation",
+          "cct-spec:pi-worktree-lifecycle",
+          "Never bypass a git lock with an alternate index",
+          "cct-spec:auto-build-loop-pr-profile",
+          "cct-spec:team-developer-aliases"
+        ],
+        "judged": false,
+        "abstained": false,
+        "changed_by_floor": true
+      }
+    },
+    {
+      "title": "Balanced profile denies destructive git commands",
+      "kind": "conflict",
+      "shape": "checkpoint",
+      "query": "SESSION CHECKPOINT\nDone: read the code involved.\nCurrent: Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.\nNext: implement it and run the tests.\nOpen: none.",
+      "targets": [
+        "Balanced profile denies destructive git commands",
+        "Destructive git commands require confirmation"
+      ],
+      "window": {
+        "Destructive git commands require confirmation": 0.4633664911008953,
+        "Balanced profile denies destructive git commands": 0.341214148277761,
+        "cct-spec:pi-worktree-lifecycle": 0.40020126058050204,
+        "cct-spec:auto-build-loop-pr-profile": 0.32727167243366,
+        "cct-spec:team-developer-aliases": 0.3576392229958349,
+        "Never bypass a git lock with an alternate index": 0.3499561868673432,
+        "cct-spec:unattended-cross-harness-execution": 0.3016169186857053,
+        "cct-spec:session-analytics-privacy-granularity": 0.31028826910052965,
+        "cct-spec:infra-verification-gate": 0.3326542536648414,
+        "cct-spec:auto-build-loop-driver": 0.25562501720319486
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "Balanced profile denies destructive git commands",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "Balanced profile denies destructive git commands",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 8,
+      "at_floor": {
+        "displayed": [
+          "Destructive git commands require confirmation",
+          "Balanced profile denies destructive git commands",
+          "cct-spec:pi-worktree-lifecycle",
+          "cct-spec:auto-build-loop-pr-profile",
+          "cct-spec:team-developer-aliases"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    },
+    {
+      "title": "Balanced profile denies destructive git commands",
+      "kind": "conflict",
+      "shape": "bare",
+      "query": "Recover a project by running `git reset --hard origin/main` in a project initialized with `--permissions balanced`.",
+      "targets": [
+        "Balanced profile denies destructive git commands",
+        "Destructive git commands require confirmation"
+      ],
+      "window": {
+        "Destructive git commands require confirmation": 0.42983894462946887,
+        "Balanced profile denies destructive git commands": 0.35866010531556203,
+        "cct-spec:pi-worktree-lifecycle": 0.32994040662357405,
+        "cct-spec:auto-build-loop-pr-profile": 0.23855378596189555,
+        "cct-spec:team-developer-aliases": 0.31700987480987475,
+        "cct-spec:session-analytics-privacy-granularity": 0.20816494591964552,
+        "Never bypass a git lock with an alternate index": 0.34090514779854636,
+        "cct-spec:auto-build-branded-launcher": 0.17121843619650548,
+        "cct-spec:copilot-reviewer-setup": 0.13130857574743113,
+        "cct-spec:unattended-cross-harness-execution": 0.1864979248168349
+      },
+      "real_blocks": {
+        "compact-recovery": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "Balanced profile denies destructive git commands",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": true
+        },
+        "post-compact": {
+          "displayed": [
+            "Destructive git commands require confirmation",
+            "Balanced profile denies destructive git commands",
+            "cct-spec:pi-worktree-lifecycle",
+            "cct-spec:auto-build-loop-pr-profile",
+            "cct-spec:team-developer-aliases"
+          ],
+          "judged": true
+        }
+      },
+      "missing_from_window": [],
+      "removed_by_floor": [],
+      "distractors_passing": 5,
+      "at_floor": {
+        "displayed": [
+          "Destructive git commands require confirmation",
+          "Balanced profile denies destructive git commands",
+          "cct-spec:pi-worktree-lifecycle",
+          "cct-spec:auto-build-loop-pr-profile",
+          "cct-spec:team-developer-aliases"
+        ],
+        "judged": true,
+        "abstained": false,
+        "changed_by_floor": false
+      }
+    }
+  ],
+  "off_topic": [
+    {
+      "task": "Fix the CSS grid so the recipe cards wrap on narrow phone screens in the bakery storefront.",
+      "window_top": [
+        0.269,
+        0.261,
+        0.257,
+        0.244,
+        0.227
+      ],
+      "displayed": {
+        "compact-recovery": [
+          0.227,
+          0.219,
+          0.209,
+          0.206,
+          0.182
+        ],
+        "post-compact": [
+          0.227,
+          0.219,
+          0.209,
+          0.206,
+          0.182
+        ]
+      }
+    },
+    {
+      "task": "Tune the PID gains so the drone holds altitude in gusty wind without oscillating.",
+      "window_top": [
+        0.376,
+        0.358,
+        0.353,
+        0.334,
+        0.332
+      ],
+      "displayed": {
+        "compact-recovery": [
+          0.376,
+          0.358,
+          0.353,
+          0.334,
+          0.332
+        ],
+        "post-compact": [
+          0.376,
+          0.358,
+          0.353,
+          0.334,
+          0.332
+        ]
+      }
+    },
+    {
+      "task": "Reconcile the quarterly sales spreadsheet: the VLOOKUP returns #N/A for renamed product codes.",
+      "window_top": [
+        0.33,
+        0.314,
+        0.29,
+        0.289,
+        0.258
+      ],
+      "displayed": {
+        "compact-recovery": [
+          0.314,
+          0.29,
+          0.258,
+          0.252,
+          0.248
+        ],
+        "post-compact": [
+          0.314,
+          0.29,
+          0.258,
+          0.252,
+          0.248
+        ]
+      }
+    },
+    {
+      "task": "Add a dark mode toggle to the iOS weather app and persist the choice in UserDefaults.",
+      "window_top": [
+        0.274,
+        0.26,
+        0.241,
+        0.228,
+        0.202
+      ],
+      "displayed": {
+        "compact-recovery": [
+          0.274,
+          0.241,
+          0.228,
+          0.189,
+          0.188
+        ],
+        "post-compact": [
+          0.274,
+          0.241,
+          0.228,
+          0.189,
+          0.188
+        ]
+      }
+    },
+    {
+      "task": "Clean the survey dataset: drop duplicate respondents and impute missing ages by region median.",
+      "window_top": [
+        0.37,
+        0.36,
+        0.354,
+        0.329,
+        0.323
+      ],
+      "displayed": {
+        "compact-recovery": [
+          0.37,
+          0.36,
+          0.354,
+          0.323,
+          0.321
+        ],
+        "post-compact": [
+          0.37,
+          0.36,
+          0.354,
+          0.323,
+          0.321
+        ]
+      }
+    }
+  ]
+}
