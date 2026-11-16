@@ -380,6 +380,7 @@ system_context = memory.on_session_start()       # checkpoint, long-term context
 ...
 memory.on_pre_compact(summary)                   # checkpoint episode (only if summary is not blank) + consolidation
 recovered = memory.on_post_compact()             # what to re-inject after your own compaction
+                                                 # (context chosen by the latest checkpoint, as compaction recovery does)
 memory.on_session_end(summary)                   # final checkpoint + consolidation
 
 # Driving it from Claude Code's hook events instead (what templates/hooks/ do):

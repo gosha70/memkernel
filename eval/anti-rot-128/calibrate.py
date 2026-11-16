@@ -3,9 +3,11 @@
 """Calibrate a hook relevance floor (memkernel-0-11-anti-rot-injection FR-006, D5), and keep the evidence.
 
 The floor was dropped after this run (spec amendment A5): it calibrated to 0.20, changed no checkpoint-shaped block,
-and off-topic checkpoints scored as high as the needed records. The runner stays so the evidence can be reproduced:
-it computes similarities with the store's own embedder and simulates the floor as the dropped selector did (the
-candidate window filtered by the floor, then the real ``_distinct()`` to five), beside the real hook blocks.
+and off-topic checkpoints scored as high as the needed records, so it was not shown to work with this model and
+query shape (the shared checkpoint template may inflate the off-topic scores). The runner stays so the evidence can
+be reproduced: it computes similarities with the store's own embedder and simulates the floor as the dropped
+selector did (the candidate window filtered by the floor, then the real ``_distinct()`` to five), beside the real
+hook blocks.
 
 Runs the #57 corpus's crowded store (code-copilot-team 00d49c0, the embedding pinned at revision 1110a243) through
 the complete hook paths, compact recovery and ``on_post_compact()``, with each case's later task inside a

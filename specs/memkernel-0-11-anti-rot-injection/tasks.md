@@ -12,3 +12,8 @@
 
 ## US3: docs and checks
 - [ ] README, CHANGELOG (FR-007); fast suite, ruff, mypy strict, coverage (SC-5)
+
+## A5 (2026-11-16): floor dropped
+- [x] Calibration runner and record (FR-006); floor dropped per the owner's rule
+- [x] `on_post_compact()`: checkpoint query, 10 candidates, `_distinct()` (FR-002, FR-004)
+- [x] Tests for SC-2 and SC-6 on `on_post_compact()`; README, CHANGELOG (Changed); checks; #57 replay (SC-4)
