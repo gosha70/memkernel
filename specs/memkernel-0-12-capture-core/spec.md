@@ -1,6 +1,6 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
-Status: draft, 2026-11-16. Decisions D1–D7 are the owner's (2026-11-16; D6's values proposed by this spec and
+Status: draft, 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
 approved).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
@@ -151,7 +151,8 @@ approved).
   tagged `origin:capture`, the same outcomes (shown, missed, other store, unknown) apart from the agent-stored ones.
 - **FR-012 Settings and docs.** `MEMKERNEL_CAPTURE` (bool, default `false`) in the README configuration table, with
   what is read and stored, the redaction coverage and its limits. README hooks section: capture at startup.
-  CHANGELOG under Added.
+  CHANGELOG under Added. Both the README and the CHANGELOG entry say, per D8, that the failed-then-fixed extractor
+  captures rarely (1 pair in 289 failures across 65 transcripts) and that S3 adds the extractors with real yield.
 
 ## Constraints / What NOT to Build
 
@@ -223,6 +224,10 @@ approved).
     trailing filter pipe (a trailing `2>&1` alone does not change the status), or it sets `pipefail`
     (`set -o pipefail`). The owner's decision for passes, extended to failures by the owner on 2026-11-16.
   - **"Same program and target" matching is not built** for now.
+- **D8 Yield.** S2 ships as the pipeline's first slice: the spool, the reader, the key, redaction, the startup run
+  and the #120 hookup, with failed-then-fixed commands as its one extractor. That extractor captures rarely: 1 pair
+  in 289 failures across 65 transcripts (the yield fact above). S3 adds the extractors with real yield. The README
+  says both (FR-012).
 
 ## D6 Values (approved)
 

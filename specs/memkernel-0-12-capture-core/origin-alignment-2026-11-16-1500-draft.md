@@ -79,3 +79,12 @@ failures, 1 pair). The yield decision is not made and the spec states none.
 Verdict: aligned
 Confidence: high
 The yield sentence is quoted verbatim in the origin file. Verdict: aligned. Confidence: high.
+
+## Re-check after the yield decision (2026-11-16)
+
+Origin line checked: the owner's yield decision (origin file, last section). D8 records it; FR-012 requires the
+README (and CHANGELOG) to say the extractor captures rarely, with the numbers, and that S3 adds the extractors with
+real yield. No decision remains open.
+
+Verdict: aligned
+Confidence: high
