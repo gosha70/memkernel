@@ -1,7 +1,7 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
-Status: draft, 2026-11-16. Decisions D1–D6 are the owner's (2026-11-16; D6's values proposed by this spec and
-approved). D7, the command-matching rule, is open.
+Status: draft, 2026-11-16. Decisions D1–D7 are the owner's (2026-11-16; D6's values proposed by this spec and
+approved).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
 
@@ -26,10 +26,19 @@ approved). D7, the command-matching rule, is open.
     whose content starts with `<tool_use_error>`;
   - some results have no `is_error` key (an `Edit` result, for example); absent means false;
   - entries without a message (`last-prompt`, `api-request` and others) are interleaved with the conversation.
-- **Yield of the matching rule** (same transcripts): 289 `Bash` results with a non-zero exit, main thread only. A
-  later passing run of the **exact** command (whitespace collapsed) follows 2 of them; of the command **with a
-  trailing pipe or `2>&1` removed**, 12; of the command's **first two words** (after `cd … &&` and `VAR=…`
-  prefixes), 193, but two words such as `poetry run` or `git push` do not identify a command.
+- **Yield of the matching rule** (same transcripts): 289 `Bash` results with a non-zero exit, main thread only.
+  - **The D7 rule** (trailing `| tail`, `| head`, `| grep` and `2>&1` removed): a later passing run follows **2**
+    of them. In **1**, the passing run's exit status is the command's own; that pair is the one cut into
+    `fixtures/failed-then-fixed.jsonl`. The other passed through `2>&1 | tail -20` without `pipefail`, so its
+    exit status was `tail`'s.
+  - **With D7's failure rule as well** (a failure's non-zero exit must be the command's own): 249 of the 289 are
+    failures, and the result is still **1** pair, the same one.
+  - **Exact** command (whitespace collapsed): 2, the same two.
+  - An earlier count of 12 used a looser rule that dropped everything after the **first** pipe or `2>&1`, so
+    different commands matched (for example `git diff --stat | tail -1 && python3 …` and `git diff --stat`). It
+    measured nothing D7 uses.
+  - The command's **first two words** (after `cd … &&` and `VAR=…` prefixes): 193, but two words such as
+    `poetry run` or `git push` do not identify a command.
 - **The #120 reader** (`eval/repeat-mistakes/transcripts.py`) reads a folder of transcripts by `sessionId`: each
   session's window, its `Bash` outputs and its `recall` calls. The count (`count.py`) treats a memory's
   backtick-quoted span containing one of `ERROR_WORDS` as a stored error.
@@ -77,9 +86,11 @@ approved). D7, the command-matching rule, is open.
   each file of its folder through the port and merges sessions by id, as its own reader does today; it drops that
   reader and keeps its fixture test passing.
 - **FR-005 Extractor: failed-then-fixed commands.** A **failure** is a `Bash` step with `is_error` true whose
-  result starts with `Exit code ` (so a denial or a harness block, which never ran, is not one). A **pass** is a
-  `Bash` step that has a result without `is_error` true; a step with no result (an interrupted session) is neither. If a later pass in the same session runs the same command, under the D7
-  matching rule, one record is extracted. A command that prints an error but exits 0 is not a failure and is not
+  result starts with `Exit code ` (so a denial or a harness block, which never ran, is not one), and whose non-zero
+  exit status is the command's own (D7). A **pass** is a
+  `Bash` step that has a result without `is_error` true, and whose exit status is the command's own (D7); a step
+  with no result (an interrupted session) is neither. If a later pass in the same session is a rerun of the failed
+  command (D7), one record is extracted. A command that prints an error but exits 0 is not a failure and is not
   captured; the README says so. Its content:
   - ``Command `<command>` failed: `<error line>`. It passed later in the same session, after: <fix steps>.``
     Each of the command, the error line and every fix step is collapsed to one line, with its backticks removed, so
@@ -149,6 +160,7 @@ approved). D7, the command-matching rule, is open.
 - No automatic promotion of captured records; no new MCP tool; no new runtime dependency.
 - No detached worker: capture runs inside the startup hook.
 - No version supersede and no re-scan of committed sessions (D1).
+- No "same program and target" matching (D7).
 - Capture never holds the spool lock while it reads or stores, so the SessionEnd hook's 1.5-second budget is
   unaffected; `commit()` takes the lock only to rewrite the file.
 
@@ -164,7 +176,12 @@ approved). D7, the command-matching rule, is open.
   - `failed-then-fixed.jsonl` (a `pytest` run exits 1, a test file is edited, the same run passes) yields one record
     with the FR-005 content and FR-003 tags;
   - `not-captured.jsonl` (a denial, a harness block, and an error printed with exit status 0) yields none;
-  - a failure with no passing rerun and a sidechain failure yield none; fail, pass, fail, pass yields two.
+  - a failure with no passing rerun and a sidechain failure yield none; fail, pass, fail, pass yields two;
+  - a rerun that exits 0 through a trailing `| tail` without `pipefail` is not a pass, and yields none; the same
+    rerun with `set -o pipefail` yields one;
+  - `cmd | grep X` exiting 1 because `grep` matched nothing, then `cmd | grep X` or `cmd` passing, yields none: the
+    exit status was `grep`'s, so it is not a failure; the same with `set -o pipefail`, where `cmd` itself failed,
+    yields one.
 
   The cut keeps the fields the adapter reads, with `is_error` and the `Exit code` prefix unchanged, and shortens
   results longer than 600 characters. A test asserts the fixtures still hold the `Exit code 1` failure and the
@@ -198,19 +215,14 @@ approved). D7, the command-matching rule, is open.
 - **D5 Promotion candidates.** Captured records stay out.
 
 - **D6 Values.** The table below, proposed by this spec, approved by the owner on 2026-11-16.
-
-## D7 The command-matching rule (open)
-
-[NEEDS CLARIFICATION]: Which later command counts as a rerun of the failed one? The yield fact above shows the exact
-rule finds 2 pairs in 289 failures. Options:
-- **Exact** (whitespace collapsed): precise; finds almost nothing.
-- **Exact after removing a trailing output filter** (` | tail …`, ` | head …`, ` | grep …`, `2>&1`): still precise;
-  12 pairs.
-- **The same program and target** (for example the same `pytest` path or `ruff` path): more pairs, but needs a
-  per-tool definition of "target".
-
-Recommendation: exact after removing a trailing output filter. It keeps the record trustworthy, and the yield is
-measured again on real use through the #120 count before anything looser is built.
+- **D7 Rerun and pass.**
+  - **A rerun** is the same command, whitespace collapsed, after removing trailing `| tail …`, `| head …`,
+    `| grep …` and `2>&1` (the owner's words). This spec's reading: a trailing filter is a final pipeline segment that contains no other `|`, `;`, `&`, `<`
+    or `>`; removal repeats until none is left, so `cmd 2>&1 | tail -20` becomes `cmd`.
+  - **A run counts as passed, or as failed,** only when its exit status is the command's own: the command has no
+    trailing filter pipe (a trailing `2>&1` alone does not change the status), or it sets `pipefail`
+    (`set -o pipefail`). The owner's decision for passes, extended to failures by the owner on 2026-11-16.
+  - **"Same program and target" matching is not built** for now.
 
 ## D6 Values (approved)
 

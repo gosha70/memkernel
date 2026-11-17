@@ -58,3 +58,24 @@ Confidence: high
 
 Round-5 fixes (pass definition, stat wording, fixture cut) are wording only. Verdict: aligned. Confidence: high.
 Round-6 fixes (SC-1 layout, the race case) are wording only. Verdict: aligned. Confidence: high.
+
+## Re-check after D7 (2026-11-16)
+
+Origin line checked: the owner's D7 decision (origin file, last section). D7 is recorded as decided, with the rerun
+and pass rules in the owner's terms; "same program and target" is a constraint; the yield under D7 (2 pairs, 1 with
+the command's own exit status) replaces the earlier count of 12, which came from a looser rule. No open question
+remains.
+
+Verdict: aligned
+Confidence: high
+The D7 label (owner words vs. this spec's reading) is wording only. Verdict: aligned. Confidence: high.
+
+## Re-check after the failure rule (2026-11-16)
+
+Origin line checked: the owner's failure rule (origin file, last section). D7 and FR-005 now require the command's
+own exit status for a failure as well as a pass; SC-1 has the `| grep` case; the yield fact adds the recount (249
+failures, 1 pair). The yield decision is not made and the spec states none.
+
+Verdict: aligned
+Confidence: high
+The yield sentence is quoted verbatim in the origin file. Verdict: aligned. Confidence: high.
