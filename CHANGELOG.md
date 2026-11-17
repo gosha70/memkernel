@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Capture, opt-in** (#134; specs/memkernel-0-12-capture-core). With `MEMKERNEL_CAPTURE=1`, normal startup reads
+  the transcripts of sessions that ended since and stores each failed-then-fixed command (a `Bash` command that
+  failed with its own exit code, then passed when run again) as a short-term observation, redacted best-effort.
+  It captures rarely: 1 pair in 289 failures across 65 transcripts; later extractors (#59, S3) add the ones with
+  real yield. Captured records are never promotion candidates, are keyed so an interrupted capture stores nothing
+  twice, and run within 3 seconds and 20 records per startup. Off on Windows (no file locking). The session spool
+  keeps ended sessions until they are captured, and a `TranscriptReaderPort` reads Claude Code's transcripts.
+
+### Changed
+
+- **The repeated-mistake count** (#136, reported by DIADE on #112) reads subagent transcripts and reports their
+  repeats apart; counts a repeat only for a `Bash` run that failed with its own exit code, and names the command;
+  ignores single-word stored errors; and reports errors from captured records apart. Its README section lists what
+  it cannot detect, including piped commands without `pipefail`.
+
 ## [0.9.0] - 2026-11-16
 
 The first release after 0.8.0 (a 0.9.0 prepared on 2026-11-08 was never tagged or published; this one includes it).

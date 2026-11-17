@@ -26,20 +26,27 @@ beyond the service: printing and stdin parsing stay in the caller.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from memkernel import recall_log, session_spool
+from memkernel import capture, recall_log, session_spool
 from memkernel.config import MemKernelSettings
 from memkernel.core.models import MemoryTier, MemoryType
+from memkernel.transcripts.claude_code import ClaudeCodeTranscriptReader
 from memkernel.wiki.curation import curation_debt_lines
 
 if TYPE_CHECKING:
+    from memkernel.capture import CaptureReport
     from memkernel.core.models import Memory
+    from memkernel.core.ports import TranscriptReaderPort
     from memkernel.core.services import MemoryService
     from memkernel.session_spool import DrainResult, SessionWindow
+
+logger = logging.getLogger(__name__)
+_warned_capture_unlocked = False  # R6: one warning per process
 
 # Section headings are part of the hooks' stdout contract (FR-012): keep them stable.
 HEADING_SESSION_START = "## Recovered from MemKernel (session start)"
@@ -117,9 +124,15 @@ _REVIEW_HINT = (
 class MemoryLifecycle:
     """Session protocol over a :class:`~memkernel.core.services.MemoryService`."""
 
-    def __init__(self, service: MemoryService, settings: MemKernelSettings | None = None) -> None:
+    def __init__(
+        self,
+        service: MemoryService,
+        settings: MemKernelSettings | None = None,
+        transcripts: TranscriptReaderPort | None = None,
+    ) -> None:
         self._service = service
         self._settings = settings or MemKernelSettings()
+        self._transcripts = transcripts or ClaudeCodeTranscriptReader()
 
     # ------------------------------------------------------------------
     # Session boundaries
@@ -138,7 +151,13 @@ class MemoryLifecycle:
             return ""
         if source == SOURCE_COMPACT:
             return self._compact_recovery(session_id or "")
-        drained = self._drain_spool(session_id) if source == SOURCE_STARTUP else session_spool.DrainResult([], 0)
+        capturing = source == SOURCE_STARTUP and self._capture_on()
+        drained = (
+            self._drain_spool(session_id, keep_ended=capturing)
+            if source == SOURCE_STARTUP
+            else session_spool.DrainResult([], 0)
+        )
+        captured = capture.run(self._service, self._settings, drained, self._transcripts) if capturing else None
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
         context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
@@ -148,7 +167,7 @@ class MemoryLifecycle:
             "",
             HEADING_CHECKPOINT,
             *(self._checkpoint_lines(latest) if latest is not None else ["No checkpoint found yet."]),
-            *_previous_sessions_block(drained),
+            *_previous_sessions_block(drained, captured),
             "",
             HEADING_CONTEXT,
             *(self._memory_lines(context, CONTEXT_BUDGET - len("\n".join(debt))) or ["No prior memories found."]),
@@ -295,7 +314,19 @@ class MemoryLifecycle:
         shown = [m.ref_id for m in (checkpoint, *context) if m is not None]
         return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id)
 
-    def _drain_spool(self, session_id: str | None) -> DrainResult:
+    def _capture_on(self) -> bool:
+        """Capture runs with MEMKERNEL_CAPTURE on, a persistent store, and locking (R6: off without it, one warning)."""
+        global _warned_capture_unlocked
+        if not self._settings.capture or session_spool.spool_path(self._settings) is None:
+            return False
+        if not session_spool.locking():
+            if not _warned_capture_unlocked:
+                logger.warning("MEMKERNEL_CAPTURE is on, but this platform has no file locking: capture stays off")
+                _warned_capture_unlocked = True
+            return False
+        return True
+
+    def _drain_spool(self, session_id: str | None, keep_ended: bool = False) -> DrainResult:
         """Ended sessions that saved no checkpoint during their window (memkernel-0-7-hooks FR-009).
 
         Any checkpoint saved in the window counts, live or not: one since expired, superseded or withdrawn was
@@ -308,7 +339,7 @@ class MemoryLifecycle:
             tag = f"{SESSION_TAG_PREFIX}{window.session_id}"
             return any(window.start <= m.timestamp <= window.end or tag in m.tags for m in checkpoints)
 
-        return session_spool.drain(self._settings, session_id, checkpointed)
+        return session_spool.drain(self._settings, session_id, checkpointed, keep_ended=keep_ended)
 
     def _flagged(self, found: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """This pass's flagged items, then every other memory still flagged in the store (one whose file could not be
@@ -372,11 +403,13 @@ def _label(memory_type: MemoryType, needs_review: bool, reason: str) -> str:
     return f"{memory_type}, needs review: {reason or 'flagged'}" if needs_review else f"{memory_type}"
 
 
-def _previous_sessions_block(drained: DrainResult) -> list[str]:
-    """One line per ended session with no checkpoint during it (H4), within PREVIOUS_SESSIONS_MAX_LINES, and one
-    line when unended sessions were pruned (memkernel-0-7-wiring-spool W2)."""
+def _previous_sessions_block(drained: DrainResult, captured: CaptureReport | None = None) -> list[str]:
+    """One line per ended session with no checkpoint during it (H4), within PREVIOUS_SESSIONS_MAX_LINES, one line
+    when unended sessions were pruned (memkernel-0-7-wiring-spool W2), and capture's lines (memkernel-0-12-capture-core
+    FR-009)."""
     unsaved = drained.unsaved
-    if not unsaved and not drained.unended_removed:
+    capture_line = captured.line() if captured is not None else None
+    if not unsaved and not drained.unended_removed and not capture_line and not drained.ended_expired:
         return []
     shown = unsaved[-PREVIOUS_SESSIONS_MAX_LINES:]
     lines = [
@@ -390,6 +423,13 @@ def _previous_sessions_block(drained: DrainResult) -> list[str]:
         lines.append(
             f"{drained.unended_removed} earlier session(s) recorded no end (crashed, or session-end.py is not "
             "registered under SessionEnd)."
+        )
+    if capture_line:
+        lines.append(capture_line)
+    if drained.ended_expired:
+        lines.append(
+            f"{drained.ended_expired} ended session(s) were not captured within "
+            f"{session_spool.SPOOL_UNENDED_MAX_AGE.days} days and were dropped."
         )
     return ["", HEADING_PREVIOUS_SESSIONS, *lines]
 

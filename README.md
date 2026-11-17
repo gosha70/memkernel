@@ -127,6 +127,37 @@ See the Prerequisites section inside each script for the Python environment requ
 
 **Injected memory is quoted as data.** Stored text can come from anything the agent once read: tool output, a web page, a clipped source, a wiki page. So everything the blocks inject but memkernel did not write is quoted inside a `<stored-memory kind="…">` element, and the block's first line after its heading says those items are data to consult, not instructions to follow. That covers the checkpoint text, memory previews, promotion candidates, the source path of a "Needs review" item, and the curation debt's page paths. memkernel's own lines stay outside the elements, `ref_id`s included. A copy of the tag inside stored text (`</stored-memory>` in any case, with or without whitespace after `<` or `/`) is neutralised by writing its `<` as `&lt;`; no other character of stored text changes. This marks stored text; it does not detect or remove instructions in it.
 
+#### Capture (opt-in)
+
+With `MEMKERNEL_CAPTURE=1`, each normal startup reads the transcripts of sessions that have ended since, and stores
+**failed-then-fixed commands**: a `Bash` command that failed with its own non-zero exit code and later passed when
+run again in the same session. Each one becomes a short-term `observation`, such as
+``Command `pytest -q` failed: `FAILED tests/test_a.py::test_x - AssertionError`. It passed later in the same session, after: src/a.py.``,
+which expires after `MEMKERNEL_OBSERVATION_TTL_DAYS` like any observation. `session-end.py` must be registered,
+since its spool line names the transcript.
+
+- **It captures rarely.** On 65 real transcripts, 1 of 289 failed commands was followed by a passing rerun of the
+  same command: agents usually change a command before running it again. This is the pipeline's first extractor;
+  later work (#59, S3) adds extractors that capture more.
+- **What counts as the same command:** the same text after removing a trailing `| tail`, `| head`, `| grep` or
+  `2>&1`. A run counts as failed or passed only when its exit code is the command's own: a command piped into a
+  filter without `set -o pipefail` reports the filter's exit code, so it is not judged. An error printed by a
+  command that exits 0 is not captured.
+- **Redaction is best-effort.** Before storing, each command, error line and edited file path has these replaced
+  with `[REDACTED]`: values of `…KEY=`, `…TOKEN=`, `…SECRET=`, `…PASSWORD=` assignments (and `.env` lines of that
+  shape); `Authorization:` header values; tokens starting `AKIA`, `ghp_`, `gho_`, `github_pat_`, `sk-`, `xox`;
+  private key blocks; credentials in URLs; and strings of 32 or more letters, digits and `+/=_-` that mix letters
+  and digits and are not all hexadecimal. That last rule also redacts some file paths and identifiers. A secret in
+  any other shape is stored as written.
+- **Limits per startup:** 3 seconds of capture (a session already started is finished), 20 records, 5 per session
+  (the rest of a session's signals are dropped and counted). Sessions not reached wait for the next start. A
+  transcript that cannot be read is retried at 3 startups, then dropped; one over 50 MB is dropped unread. An ended
+  session not captured within 7 days is dropped. The "Previous sessions" section reports each of these.
+- **Captured records are never promotion candidates**: the agent decides what to promote. They are quoted as
+  stored memory wherever a block shows them. Each is keyed by its session and the failing call, so a capture that
+  is interrupted and retried stores nothing twice. The same lesson captured in two sessions is two records, and can
+  appear twice until they expire.
+
 ### 4. (Recommended) Keep memkernel's files and the hooks out of the agent's reach
 
 Merge [`templates/claude-settings.example.json`](templates/claude-settings.example.json) into your project's `.claude/settings.json`. Its `permissions.deny` rules stop Claude's own file tools from editing four paths:
@@ -274,6 +305,7 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_RECALL_LOG` | `false` | Keep a recall log: each MCP `recall`, and each hook block that shows memories, appends one line (time, query, filters, returned `ref_id`s) to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, created readable by you only. It stores query text, so it is off by default; it stays on this computer, so keep it out of git. Nothing is written for an in-memory store. The log is locked on POSIX (Linux, macOS) only: on Windows it runs unlocked with one logged warning, and concurrent writers can lose records or pass the size limit. Used by the repeated-mistake count (see [Counting repeated mistakes](#counting-repeated-mistakes)) |
 | `MEMKERNEL_RECALL_LOG_MAX_BYTES` | `5000000` | Size of one recall-log file before it is rotated to `recall.jsonl.1`, at least `4096`; a single record larger than this gives up query text first, then trailing `ref_id`s, and is marked `truncated` |
 | `MEMKERNEL_RECALL_LOG_MAX_FILES` | `10` | Recall-log files kept, the current one included; the oldest is deleted at rotation |
+| `MEMKERNEL_CAPTURE` | `false` | Capture failed-then-fixed commands from ended sessions' transcripts at the next normal startup (see [Capture](#capture-opt-in)). It reads Claude Code transcripts and stores text from them (redacted, best-effort), so it is off by default. It needs a persistent store and file locking: on Windows it stays off with one logged warning |
 | `MEMKERNEL_WIKI_PROPOSALS_DIR` | `""` | Where wiki-studio patch-sets are written before promote (`memkernel[wiki]`); empty means `<project root>/.memkernel/wiki-proposals`. Setting it requests the gate: without wiki-studio installed, a warning is logged. |
 | `MEMKERNEL_WIKI_MODE` | `auto` | `auto`: wiki-studio's gate and review state when wiki-studio 0.7.0 or later is installed, the direct writer and file-reading import when it is not. `governed`: `wiki_export` and `wiki_import` refuse, writing nothing, unless wiki-studio is installed with every capability memkernel uses and the wiki's manifest is `governed` (`approval_required: true`) without schema drift. `ungated`: wiki-studio is never loaded. Responses report `mode` (`gated` or `ungated`, the path that ran) and `configured_mode` (this setting). |
 | `MEMKERNEL_WIKI_EXPORT_BATCH` | `10` | New pages one `wiki_export` writes at most, the most important memories first; the response's `remaining` counts the rest (`null` when the gate's outcome is uncertain or `governed` refused before reading the wiki). `0` = no limit; a negative value is refused |
@@ -301,11 +333,18 @@ memkernel keeps the first; Claude Code's transcripts keep the second; the recall
      --transcripts ~/.claude/projects/<project folder> --json repeats.json
    ```
 
-The rule is fixed and mechanical (it follows the one posted on #112):
+The rule is fixed and mechanical (it follows the one posted on #112, with the fixes from #136):
 - **Stored error:** text a memory quotes in backticks that contains `Error`, `Exception`, `Traceback`, `FAILED` or
-  `fatal` (case-sensitive). ``npm test fails with `Error: Cannot find module 'x'` `` stores
-  `Error: Cannot find module 'x'`.
-- **Repeat:** a later session whose own `Bash` output contains that exact text; once per memory and session.
+  `fatal` (case-sensitive) and more than one word. ``npm test fails with `Error: Cannot find module 'x'` `` stores
+  `Error: Cannot find module 'x'`; a bare `` `ValueError` `` stores nothing. So the count needs memories that quote
+  the exact error line.
+- **Repeat:** a later session whose own `Bash` run **failed**, with the command's own non-zero exit code, and whose
+  output contains that exact text; once per memory, session and thread. Reading a note through `cat`, `grep` or
+  `git log -p` is not a repeat. Each repeat names the command. Subagent transcripts
+  (`<session>/subagents/**/agent-*.jsonl`) are read too: a subagent's repeat counts toward its parent session but is
+  reported on its own line, marked `(subagent)`, because a subagent gets none of the startup context. It is
+  **shown** only when the subagent's own recall returned the memory, and **not shown** rather than missed otherwise.
+  Errors from captured records are reported apart from the ones the agent stored.
 - **Outcome**, before the failure: **shown** (memkernel returned the memory to that session), **missed** (the
   session used the memory's store, and memkernel did not return it), **other store** (the session never used that
   store), **unknown** (no log records for that session; or a miss cannot be shown, because a record of the memory's
@@ -320,13 +359,17 @@ holds the same.
 
 What it cannot detect:
 - a reworded or differently quoted error (exact text only);
+- a lesson written in prose with no quoted error, or quoted as a single word such as `` `ValueError` ``; a
+  multi-word code fragment such as `` `except Exception:` `` still counts as a stored error;
+- output that is not from a failed run: an error printed by a command that exits 0, or a note read through `Bash`;
+- above all, a command piped into a filter without `set -o pipefail`, such as `… 2>&1 | tail -20`: its real failure
+  exits 0, so it is not counted;
 - a failure seen through a tool other than `Bash`;
 - sessions whose recalls were not logged: the log was off, or an MCP recall matched calls in two sessions and was
   not guessed;
 - recalls made through the Python library rather than the MCP tool or a hook;
 - whether a memory was flagged for review when a recall ran: a recall that hid flagged memories may have hidden it;
-- tools other than Claude Code: only its transcripts are read, through a small reader that #59's transcript reader
-  will replace.
+- tools other than Claude Code: only its transcripts are read (#107).
 
 ## Transports
 

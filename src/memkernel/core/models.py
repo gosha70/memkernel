@@ -129,6 +129,14 @@ WIKI_PATH_TAG = "wiki-path:"
 WIKI_ID_TAG = "wiki-id:"
 WIKI_IDENTITY_TAGS = (WIKI_PATH_TAG, WIKI_ID_TAG)
 WIKI_IMPORT_TAG_PREFIXES = (WIKI_PAGE_TAG, WIKI_PAGE_TYPE_TAG, PAGE_KEY_TAG, PAGE_SHA_TAG, *WIKI_IDENTITY_TAGS)
+# Captured records (memkernel-0-12-capture-core FR-003): what capture writes on each record, and its source. Their
+# key is (session, call, extractor); the version is a tag only (D1).
+CAPTURE_SOURCE = "capture"
+CAPTURE_ORIGIN_TAG = "origin:capture"
+CAPTURE_SESSION_TAG = "origin-session:"
+CAPTURE_CALL_TAG = "origin-call:"
+CAPTURE_EXTRACTOR_TAG = "origin-extractor:"
+CAPTURE_VERSION_TAG = "origin-version:"
 # Store locks (memkernel-0-7-store-locks L2): the names a caller may take with ``VectorStorePort.exclusive``.
 STORE_LOCK_WIKI_IMPORT = "wiki-import"
 STORE_LOCK_TAGS = "tags"  # held by ``merge_tags``, the only writer of a record's tags
@@ -253,6 +261,10 @@ def has_wiki_identity(tags: list[str]) -> bool:
     return any(tag.startswith(WIKI_IDENTITY_TAGS) for tag in tags)
 
 
+class TranscriptTooLargeError(OSError):
+    """A transcript is larger than the reader was allowed to read (memkernel-0-12-capture-core FR-008)."""
+
+
 class LockReentryError(RuntimeError):
     """A thread took a store lock it already holds (memkernel-0-7-store-locks L2): store locks are not re-entrant."""
 
@@ -305,3 +317,34 @@ class SearchQuery(BaseModel):
     session_id_filter: str | None = None
     checkpoint_only: bool = False
     top_k: int = 5
+
+
+class ToolStep(BaseModel):
+    """One tool call in a coding session's transcript, with its result (memkernel-0-12-capture-core FR-004).
+
+    ``uuid`` is the transcript entry holding the result; several results can share it, ``tool_use_id`` cannot (R2).
+    ``agent_id`` is empty on the main thread; a subagent's steps carry ``sidechain`` and its id (R12, R15).
+    """
+
+    uuid: str = ""
+    tool_use_id: str
+    time: datetime
+    tool: str
+    command: str = ""
+    file_path: str = ""
+    query: str = ""
+    has_result: bool = False
+    is_error: bool = False
+    denied: bool = False
+    result: str = ""
+    sidechain: bool = False
+    agent_id: str = ""
+
+
+class TranscriptSession(BaseModel):
+    """One session read from a transcript: its window and its tool steps in order."""
+
+    session_id: str
+    start: datetime
+    end: datetime
+    steps: list[ToolStep] = []
