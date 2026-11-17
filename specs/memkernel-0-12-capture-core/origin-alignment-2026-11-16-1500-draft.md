@@ -88,3 +88,37 @@ real yield. No decision remains open.
 
 Verdict: aligned
 Confidence: high
+
+## Re-check after R1–R6 (2026-11-16)
+
+Origin lines checked: #134 requirement 2 ("only after its extracted records are durably stored"), requirement 3
+("neither loses nor duplicates a signal"), and the owner's go on the review (origin file, last section).
+- R1 (no content dedup for captured records), R2 (key on `tool_use_id`), R3 (one capture at a time) and R5 (a
+  readable file without the session is a miss) make requirements 2 and 3 hold where the draft did not.
+- R2 amends D1's key element, by the owner's decision; plan.md's `origin_claim` keeps the issue's words ("record
+  UUID") as the origin, and D1 records the amendment.
+- R4 (per-session cap dropped and counted) and R6 (no capture without locking) are within D3 and D2.
+
+Verdict: aligned
+Confidence: high
+
+## Re-check after R7–R9 (2026-11-17)
+
+Origin lines checked: #134's "The #120 count then uses the adapter instead of its own copy" and "How captured
+records feed the #120 count", and the owner's message of 2026-11-17 (origin/2026-11-17-owner-diade.md, items 2
+and 3), added to plan.md's transcripts with DIADE's report as a URL.
+- R7 (subagent files and sidechain lines for the count only), R8 (repeats only from FR-005 failures, the command
+  in the evidence) and R9 (multi-word stored errors) are the owner's fixes to the count S2 moves onto the adapter.
+- The order note records item 3.
+
+Verdict: aligned
+Confidence: high
+
+## Re-check after R10–R11 (2026-11-17)
+
+Origin line checked: the owner's decisions items 1–2 (origin/2026-11-17-owner-diade.md, last section) and #136's
+items 3 and 5. R10 and R11 are the two review notes the owner approved; FR-011's README list now matches #136
+item 5.
+
+Verdict: aligned
+Confidence: high

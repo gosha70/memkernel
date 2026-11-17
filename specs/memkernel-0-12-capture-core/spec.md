@@ -1,7 +1,7 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
 Status: draft, 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
-approved).
+approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R11 by the owner on 2026-11-17, from DIADE's report on #112).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
 
@@ -10,13 +10,21 @@ approved).
   once, because they are removed. `SessionWindow` has no `transcript_path`, though the SessionEnd hook writes one on
   the `ended` line (`templates/hooks/session-end.py`). Unended sessions older than `SPOOL_UNENDED_MAX_AGE` (7 days)
   are removed and counted. A line whose event is not `started` or `ended` is removed as malformed.
+- **The spool is unlocked without `fcntl`** (Windows): `session_spool.locked()` then does nothing, so concurrent
+  appends and rewrites can lose lines (`session_spool.locking()` reports it).
+- **A `retain()` dedup hit rewrites provenance** (`services.py`, `_refresh_existing`): identical content and type
+  return the existing record, with its `session_id` replaced and its `timestamp` set to now, and tags merged. The
+  #120 count judges a stored error by that timestamp (`count.py`, `stored_at`): a session that starts before it is
+  not a repeat.
 - **The drain runs only at normal startup** (`on_session_start`, `source == "startup"`), before `consolidate()`.
 - **The SessionEnd hook has a 1.5-second budget** and imports only the settings; it holds the spool lock while it
   appends.
 - **Claude Code's transcript** (JSONL, one entry per line; checked on a local transcript): each entry has `uuid`,
   `sessionId`, `timestamp` and `isSidechain`. A tool result is a `tool_result` part of a user message, with
   `tool_use_id`, `content` and `is_error`; a denied tool call's entry also carries `toolDenialKind`. A `tool_use`
-  part has `id`, `name` and `input` (`command` for `Bash`, `file_path` for `Edit`/`Write`).
+  part has `id`, `name` and `input` (`command` for `Bash`, `file_path` for `Edit`/`Write`). **One entry can carry
+  several tool results** under one `uuid`: 941 of the 24,466 entries with tool results in the 65 local transcripts
+  do; `tool_use_id` differs per result, and no entry `uuid` repeats.
 - **`is_error` on real transcripts** (checked 2026-11-16 on the 65 local Claude Code transcripts of the owner's
   projects):
   - a `Bash` command that exits non-zero has `is_error: true`, and its content starts with `Exit code <n>`;
@@ -41,7 +49,14 @@ approved).
     `poetry run` or `git push` do not identify a command.
 - **The #120 reader** (`eval/repeat-mistakes/transcripts.py`) reads a folder of transcripts by `sessionId`: each
   session's window, its `Bash` outputs and its `recall` calls. The count (`count.py`) treats a memory's
-  backtick-quoted span containing one of `ERROR_WORDS` as a stored error.
+  backtick-quoted span containing one of `ERROR_WORDS` as a stored error, a single word such as `ValueError`
+  included. It counts any later `Bash` output that contains the span as a repeat, whether or not the command
+  failed, so a `cat NOTES.md` that quotes the stored error is a repeat. Its evidence does not name the command.
+  (Reported by DIADE on #112, issuecomment-6940516688, and checked against `count.py` at `7f26012`.)
+- **Subagent transcripts** are written to `<project folder>/<sessionId>/subagents/agent-*.jsonl`, with
+  `isSidechain: true` and the parent's `sessionId` (checked 2026-11-17: 228 such files in the local transcripts;
+  each of the 112 whose first line has a `sessionId` names its parent folder's session). The #120 reader globs
+  `*.jsonl` in the folder only, so it never reads them (DIADE, the same comment).
 - **Promotion candidates** come from `MemoryService.consolidate()`: live, non-long-term, non-checkpoint records that
   are not a promoted memory's source, ranked by importance × (1 + access count). The MCP `consolidate` tool and the
   startup block both use it.
@@ -73,18 +88,24 @@ approved).
 - **FR-002 Commit after store.** Capture stores a session's records, then commits the session. A capture that fails
   or is interrupted before the commit leaves the session for the next start; records already stored are not stored
   again (FR-003).
-- **FR-003 Key (D1).** Each record carries tags `origin:capture`, `origin-session:<session id>`,
-  `origin-record:<uuid>` (the failing `tool_result` entry's `uuid`), `origin-extractor:failed-then-fixed` and
-  `origin-version:<n>`, and is stored with `session_id` = the captured session and `source` = `capture`. Once
-  per session, before storing, capture lists the store's records with that `session_id` and `source=capture`
-  (metadata only, filtered in the store) and skips any extracted record whose record and extractor tags match one
-  of them, whatever its `origin-version`: the version is not part of the key. Identical content is also deduplicated by `retain()`.
-- **FR-004 Port and adapter.** `TranscriptReaderPort.read(path)` returns every session in one transcript file, each
-  with its window and its main-thread tool steps in order: entry `uuid`, time, tool name, the input's `command`, `file_path` or `query`, `is_error`, whether
+- **FR-003 Key (D1, R2) and identity (R1).** Each record carries tags `origin:capture`,
+  `origin-session:<session id>`, `origin-call:<tool_use_id>` (the failing result's `tool_use_id`),
+  `origin-extractor:failed-then-fixed` and `origin-version:<n>`, and is stored with `session_id` = the captured
+  session and `source` = `capture`. Once per session, before storing, capture lists the store's records with that
+  `session_id` and `source=capture` (metadata only, filtered in the store) and skips any extracted record whose call
+  and extractor tags match one of them, whatever its `origin-version`: the version is not part of the key.
+  - **No content dedup (R1).** Captured records are stored with `retain()`'s content dedup off, so the key alone is
+    their identity: an identical record from another session is a new record, and a stored record's `session_id`,
+    `timestamp` and tags are never rewritten by a later capture. `retain()` gains the keyword this needs; agent
+    writes are unchanged.
+- **FR-004 Port and adapter.** `TranscriptReaderPort.read(path, include_sidechains=False)` returns every session in
+  one transcript file, each with its window and its tool steps in order (main-thread only by default): entry `uuid`, `tool_use_id`, time, tool name, the input's `command`, `file_path` or `query`, `is_error`, whether
   it was denied, and the result text. The Claude Code adapter (`src/memkernel/transcripts/claude_code.py`) skips
-  sidechain entries and unreadable lines. Capture takes the session it is capturing from the result. The #120 count reads
-  each file of its folder through the port and merges sessions by id, as its own reader does today; it drops that
-  reader and keeps its fixture test passing.
+  unreadable lines, and sidechain entries unless `include_sidechains` is true. Capture reads main-thread steps only. Capture takes the session it is capturing from the result; a readable file without that session is a miss
+  (FR-008, R5). The #120 count (R7) reads every
+  transcript under its folder, the subagent files `<sessionId>/subagents/*.jsonl` included, through the port with
+  `include_sidechains=True`, and merges sessions by id, so a subagent's steps belong to its parent session. It drops
+  its own reader and keeps its fixture test passing.
 - **FR-005 Extractor: failed-then-fixed commands.** A **failure** is a `Bash` step with `is_error` true whose
   result starts with `Exit code ` (so a denial or a harness block, which never ran, is not one), and whose non-zero
   exit status is the command's own (D7). A **pass** is a
@@ -123,16 +144,28 @@ approved).
 - **FR-007 When capture runs (D2, D3, D6).** With capture off, no capture code runs and the spool behaves as today:
   `drain()` removes every ended session, writes no `reported` or `capture_missed` line, and opens no transcript.
   With capture on: at normal startup, after the drain and before `consolidate()`, when
-  `MEMKERNEL_CAPTURE` is on and the store is persistent. Sessions are taken oldest end first. Capture stops starting
-  sessions once `CAPTURE_TIME_BUDGET` has passed or `CAPTURE_MAX_RECORDS` records were stored this run. The budget is
-  a soft stop: a session already started is finished, so the run can pass the budget by one session, bounded by
-  `CAPTURE_TRANSCRIPT_MAX_BYTES` and `CAPTURE_SESSION_MAX_RECORDS`. The hook templates set no timeout, so Claude
-  Code's default for command hooks (60 seconds) applies to the whole SessionStart hook;
-  the 3-second budget leaves most of it to loading the store and model and to `consolidate()`. Sessions not reached stay for the
-  next start.
+  `MEMKERNEL_CAPTURE` is on and the store is persistent.
+  - **One capture at a time (R3).** Capture takes `capture.lock` beside the project's spool file
+    (`MEMKERNEL_STATE_DIR/session-spool/<project_id>/`) with a non-blocking exclusive lock, and holds it from the
+    key lookup through storing and the commit. If another startup holds it, this start skips capture (no wait, no
+    report line). The spool lock is separate and is still taken only by `commit()` and the drain, so the SessionEnd
+    hook's 1.5-second budget is unaffected. The lock sits beside the spool because a session is only ever in its
+    own project's spool.
+  - **No locking, no capture (R6).** Where locks are unavailable (`session_spool.locking()` false, Windows), capture
+    stays off even with `MEMKERNEL_CAPTURE` on, with one warning per process, and the spool behaves as with
+    capture off.
+  - **The per-session cap (R4).** A session keeps its first `CAPTURE_SESSION_MAX_RECORDS` signals in transcript
+    order; the rest are dropped when the session is committed, never deferred, and counted in the startup report.
+  - **Order and budget.** Sessions are taken oldest end first. Capture stops starting sessions once
+    `CAPTURE_TIME_BUDGET` has passed or `CAPTURE_MAX_RECORDS` records were stored this run. The budget is a soft
+    stop: a session already started is finished, so the run can pass the budget by one session, bounded by
+    `CAPTURE_TRANSCRIPT_MAX_BYTES` and `CAPTURE_SESSION_MAX_RECORDS`. The hook templates set no timeout, so Claude
+    Code's default for command hooks (60 seconds) applies to the whole SessionStart hook; the 3-second budget leaves
+    most of it to loading the store and model and to `consolidate()`. Sessions not reached stay for the next start.
 - **FR-008 Missing or unreadable transcript.**
-  - **Missing or unreadable** (no `transcript_path`, or a path that is not a readable regular file): one
-    `capture_missed` line. At the `CAPTURE_MISS_LIMIT`th miss, the session is committed (removed) and counted.
+  - **Missing or unreadable** (no `transcript_path`, a path that is not a readable regular file, or a readable file
+    that does not contain the session (R5)): one `capture_missed` line. A file that contains the session but yields
+    no signal is not a miss: the session is committed. At the `CAPTURE_MISS_LIMIT`th miss, the session is committed (removed) and counted.
   - **Too large** (over `CAPTURE_TRANSCRIPT_MAX_BYTES`): unreadable, and since the size will not shrink, the session
     is committed (removed) at once, with no retries, and counted with the unreadable ones. The size is checked with
     a `stat()` before any read, so the file is never read. A file that grows past the cap after the `stat()` is
@@ -141,16 +174,33 @@ approved).
     under the cap is read in full, and its read time counts against `CAPTURE_TIME_BUDGET` like the rest of that
     session's capture (the soft stop of FR-007). A session with no `started` line is committed without capture.
 - **FR-009 Startup report.** When capture ran or dropped anything, the previous-sessions block gains one line:
-  records stored, sessions captured, sessions left for the next start, and transcripts given up on.
+  records stored, sessions captured, sessions left for the next start, transcripts given up on, and signals dropped
+  over the per-session cap.
 - **FR-010 Promotion candidates (D5).** `consolidate()` leaves out records tagged `origin:capture`, for the startup
   block and the MCP tool alike. Captured records are otherwise ordinary memories: `recall`, `list_memories`, the
   startup context and `promote` see them, they expire under `observation_ttl_days` (7) like any short-term
   observation (memkernel has no count-based eviction), and every hook block quotes them as stored memory (#85), as it quotes
   every memory.
-- **FR-011 #120 count.** The count reads transcripts through the adapter and reports, for stored errors from records
-  tagged `origin:capture`, the same outcomes (shown, missed, other store, unknown) apart from the agent-stored ones.
+- **FR-011 #120 count.** The count reads transcripts through the adapter (FR-004) and reports, for stored errors
+  from records tagged `origin:capture`, the same outcomes (shown, missed, other store, unknown) apart from the
+  agent-stored ones. Three fixes to how it counts (R8, R9):
+  - **A repeat needs a failed run (R8).** A later `Bash` output is a repeat only when its run is a failure under
+    FR-005 (`is_error` true, an `Exit code` result, and the command's own exit status), so a note or listing read
+    through `Bash` (`cat`, `grep`, `git diff`) is not one.
+  - **The evidence names the command (R8).** Each repeat's evidence includes the failing run's command (redacted
+    per FR-006, cut to `CAPTURE_TEXT_MAX`).
+  - **A stored error has more than one word (R9).** A backticked span is a stored error only when it contains one
+    of `ERROR_WORDS` and more than one word, so a bare `ValueError` or `except` fragment is not one. `ERROR_WORDS`
+    and this rule live in `src/` with the extractor (FR-005), and the count imports them.
+  - **Subagent repeats are reported apart (R10).** A subagent does not get its parent's startup context, so a repeat
+    found in a subagent's steps is marked `(subagent)` and counted on its own line of the report, never as a
+    memory that was shown and missed.
+  - The README's "What it cannot detect" list gains (#136): a prose lesson with no quoted error; a single-word
+    signature; output that is not from a failed run (an error printed with exit status 0, a note read through
+    `Bash`); and that a multi-word code fragment such as `except Exception:` still counts as a signature (R11).
 - **FR-012 Settings and docs.** `MEMKERNEL_CAPTURE` (bool, default `false`) in the README configuration table, with
-  what is read and stored, the redaction coverage and its limits. README hooks section: capture at startup.
+  what is read and stored, the redaction coverage and its limits, and that capture stays off where locking is
+  unavailable (Windows, R6). README hooks section: capture at startup.
   CHANGELOG under Added. Both the README and the CHANGELOG entry say, per D8, that the failed-then-fixed extractor
   captures rarely (1 pair in 289 failures across 65 transcripts) and that S3 adds the extractors with real yield.
 
@@ -163,12 +213,13 @@ approved).
 - No version supersede and no re-scan of committed sessions (D1).
 - No "same program and target" matching (D7).
 - Capture never holds the spool lock while it reads or stores, so the SessionEnd hook's 1.5-second budget is
-  unaffected; `commit()` takes the lock only to rewrite the file.
+  unaffected; `commit()` takes the lock only to rewrite the file. Capture's own lock is `capture.lock` (R3).
+- No capture without locking (R6).
 
 ## Key Entities
 
 - **Captured record:** a short-term `observation` with the FR-003 tags.
-- **Key:** (session, record UUID, extractor), from the tags.
+- **Key:** (session, `tool_use_id`, extractor), from the tags (D1 as amended, R2).
 - **Tool step:** what the adapter returns per tool call (FR-004).
 
 ## Success Criteria
@@ -192,23 +243,40 @@ approved).
   interrupted before the commit and retried after an upgrade (a higher `origin-version`) stores nothing for the
   records already captured. A session committed under one version, then an upgrade and a restart: nothing new is
   stored for it.
+  - **Two sessions with identical extracted content (R1)** give two records, each with its own session and
+    timestamp; capturing the second leaves the first record's `session_id`, `timestamp` and tags unchanged.
+  - **A batched entry (R2)** holding two failing results under one `uuid`, both later fixed, gives two records; a
+    capture interrupted after storing one of them stores only the other on the retry.
+  - **Two processes (R3)** running startup capture at once on the same spool store each signal once; the one that
+    did not get `capture.lock` skips capture.
 - **SC-3** With capture off, no transcript is opened and the spool behaves as on `main` (existing spool tests pass
   unchanged); with capture on, an unsaved session is reported once, though it stays in the spool until committed.
 - **SC-4** A session with a missing transcript is dropped at the `CAPTURE_MISS_LIMIT`th start and counted in the
-  startup report; an oversized one is dropped at the first start, without being read, and counted.
+  startup report; an oversized one is dropped at the first start, without being read, and counted; a readable
+  transcript without the session counts as a miss (R5), and one with the session but no signal is committed.
 - **SC-5** Capture stops at `CAPTURE_MAX_RECORDS` and when the time budget has passed (an injected clock); the rest
-  is captured at the next start.
+  is captured at the next start. A transcript with `CAPTURE_SESSION_MAX_RECORDS` + 1 signals stores the first
+  `CAPTURE_SESSION_MAX_RECORDS`, commits the session, and reports one dropped (R4).
+- **SC-5b** With locking unavailable (`locking()` patched false) and `MEMKERNEL_CAPTURE` on, no transcript is opened,
+  the spool behaves as with capture off, and one warning is logged (R6).
 - **SC-6** Each FR-006 pattern is redacted in a command, an error line and a file path.
 - **SC-7** `consolidate()` never returns a captured record as a candidate; a captured record in the startup context
   is inside a stored-memory element.
 - **SC-8** The #120 count runs on the adapter, its fixture test passes, and a captured error is reported apart from
-  agent-stored ones.
+  agent-stored ones. On a fake transcript folder:
+  - a session that only runs `cat NOTES.md`, whose output quotes the stored error, has no repeat (R8);
+  - a session whose subagent (`<sessionId>/subagents/agent-1.jsonl`, sidechain lines) runs the failing command has
+    a repeat, attributed to the parent session, marked `(subagent)` and reported on its own line, whose evidence
+    names the command (R7, R8, R10);
+  - a memory whose only backticked error text is `ValueError` has no stored error (R9).
+  DIADE's tests, if they land first (see the note below), keep passing through the move.
 - **SC-9** Fast suite, ruff, mypy strict, coverage ≥ 80%; MCP tool set unchanged.
 
 ## Decisions (the owner's, 2026-11-16)
 
-- **D1 Key.** (session, record UUID, extractor), with the extractor version as a tag. No version supersede; a
-  session is captured once, under the version installed then.
+- **D1 Key.** (session, `tool_use_id`, extractor), with the extractor version as a tag. No version supersede; a
+  session is captured once, under the version installed then. (Amended by the owner, R2: the key named the record
+  UUID, which several results in one entry share.)
 - **D2 Default.** Capture is off by default.
 - **D3 Where it runs.** In the startup hook, with a time budget and a per-run record cap; the spec sets both (D6).
 - **D4 Redaction.** The listed shapes plus token prefixes, private key blocks, credentials in URLs and `.env`-style
@@ -242,3 +310,32 @@ Module constants in `capture.py`, not settings, so the configuration table grows
 | `CAPTURE_TRANSCRIPT_MAX_BYTES` | 50 MB | Reading a larger file could pass the budget on its own. |
 | `CAPTURE_TEXT_MAX` | 300 characters | One error line or command, not an excerpt (#59 D3). |
 | `CAPTURE_FIX_STEPS` | 5 | Enough to say what fixed it, short enough for a memory line. |
+
+## Amendments (the owner's, 2026-11-16, from the review of #135 at `ce8de50`)
+
+- **R1** Captured records skip `retain()`'s content dedup, so a later capture never rewrites a stored record's
+  session, timestamp or tags (FR-003, SC-2).
+- **R2** The key uses the failing result's `tool_use_id`, not the entry `uuid` (D1, FR-003, FR-004, SC-2).
+- **R3** One capture at a time: a non-blocking `capture.lock` held from lookup through commit (FR-007, SC-2).
+- **R4** Signals over the per-session cap are dropped at commit and counted (FR-007, FR-009, SC-5).
+- **R5** A readable transcript without the session is a miss (FR-004, FR-008, SC-4).
+- **R6** No capture where locking is unavailable (FR-007, SC-5b, README).
+
+## Amendments (the owner's, 2026-11-17, from DIADE's report on #112, tracked in #136)
+
+- **R7** The #120 count reads subagent transcripts: the subfolder files and their sidechain lines, through an
+  `include_sidechains` option that only the count turns on (FR-004, SC-8).
+- **R8** A repeat counts only when the run failed under FR-005's definition, and each repeat's evidence names the
+  command (FR-011, SC-8).
+- **R9** A stored error is a backticked span with an error word and more than one word (FR-011, SC-8). Single-word
+  signatures are dropped, not reported separately.
+- **R10** Subagent repeats are marked `(subagent)` and reported apart, since a subagent has no startup context
+  (FR-011, SC-8).
+- **R11** "What it cannot detect" says a multi-word code fragment (`except Exception:`) still counts as a signature
+  (FR-011).
+
+These fixes are tracked in #136, which #135 fixes.
+
+**Order.** DIADE's tests for the count should land before S2 or with it. FR-004 already requires the count's
+fixture test to keep passing through the reader's move into `src/`, so their fixtures would guard the new reader
+too. A PR against the current `eval/repeat-mistakes/transcripts.py` alone would conflict with S2 moving that file.

@@ -9,8 +9,10 @@ origin:
   urls:
     - https://github.com/gosha70/memkernel/issues/134
     - https://github.com/gosha70/memkernel/issues/59
+    - https://github.com/gosha70/memkernel/issues/112#issuecomment-6940516688
   transcripts:
     - specs/memkernel-0-12-capture-core/origin/2026-11-16-issue-134.md
+    - specs/memkernel-0-12-capture-core/origin/2026-11-17-owner-diade.md
   origin_claim: |
     "Capture core: read ended sessions' transcripts and store failed-then-fixed commands (#59 Phase 2, S2)." The
     spool exposes every ended session with its transcript_path; a session leaves the spool only after its records
