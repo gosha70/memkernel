@@ -1,0 +1,1 @@
+{"type": "step", "timestamp": "2026-11-17T10:41:00.000Z", "sessionId": "sess-g", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "Exit code 1\nError: Cannot find module 'left-pad'", "is_error": true}]}}
