@@ -1,7 +1,7 @@
 ---
 feature_id: memkernel-0-12-capture-core
 spec_mode: full
-status: draft
+status: approved
 date: 2026-11-16
 collaboration_mode: single
 origin:

@@ -140,3 +140,15 @@ workflow agents the earlier path missed) and corrects the checked fact. No chang
 
 Verdict: aligned
 Confidence: high
+
+## Re-check at the build (2026-11-17)
+
+The spec was approved by the owner's merge of #135 (`ddb4b08`); plan.md and spec.md now say so, and tasks.md is
+ticked for the build in #137. The build implements FR-001–FR-012 and R1–R15; the review of #137 at `a152074` found
+five defects (pre-failure evidence, captured subagent repeats, the metadata-only lookup, the deferred count, a
+sidechain without an agent id). The first fix for the last (a shared fallback id) still merged unrelated agents, per
+the owner's second review; it now fails closed: a sidechain entry with no agent identity is skipped. All five are
+fixed against the spec as written. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high

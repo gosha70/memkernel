@@ -556,3 +556,32 @@ def test_commit_removes_only_the_named_sessions(tmp_path: Path) -> None:
     assert _spooled_sessions(t.settings) == {"b"}
     shutil.rmtree(tmp_path / "state")
     session_spool.commit(t.settings, ["b"])  # no spool: nothing to do
+
+
+def test_misses_and_a_budget_stop_both_count_as_left(tmp_path: Path) -> None:
+    """Review of #137, finding 4: the sessions a budget stop leaves add to the misses already counted."""
+    lifecycle, svc, t = _setup(tmp_path)
+    t.spool("s-gone", tmp_path / "missing.jsonl", ended=datetime.now(UTC) - timedelta(hours=4))
+    t.session("s1", FIXED, ended=datetime.now(UTC) - timedelta(hours=3))
+    t.session("s2", FIXED, ended=datetime.now(UTC) - timedelta(hours=2))
+    drained = session_spool.drain(lifecycle._settings, "now", lambda _w: True, keep_ended=True)
+    ticks = iter([0.0, 0.0, capture.CAPTURE_TIME_BUDGET + 1])
+    report = capture.run(svc, lifecycle._settings, drained, ClaudeCodeTranscriptReader(), clock=lambda: next(ticks))
+    assert report.left == 3 and report.stored == 0
+
+
+def test_the_key_lookup_is_store_filtered_and_metadata_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review of #137, finding 3 (FR-003)."""
+    lifecycle, svc, t = _setup(tmp_path)
+    svc.retain("an agent note in the same session", MemoryType.FACT, session_id="s1")
+    t.session("s1", FIXED)
+    seen: list[tuple[Any, bool]] = []
+    real = svc._vector_store.list_all
+
+    def spy(where: Any = None, include_content: bool = True) -> Any:
+        seen.append((where, include_content))
+        return real(where, include_content)
+
+    monkeypatch.setattr(svc._vector_store, "list_all", spy)
+    assert capture._captured_calls(svc, "s1") == set()
+    assert seen == [({"$and": [{"session_id": "s1"}, {"source": "capture"}]}, False)]

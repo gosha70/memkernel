@@ -344,9 +344,9 @@ def _excluded(record: LogRecord, error: StoredError) -> bool:
 def classify(
     error: StoredError, records: list[LogRecord], failure: datetime, possible: list[LogRecord] | None = None
 ) -> tuple[str, dict[str, Any]]:
-    if not records:
+    before = [r for r in records if r.time < failure]  # only what came before the failure is evidence
+    if not before:
         return UNKNOWN, {}
-    before = [r for r in records if r.time < failure]
     if any(r.store == error.store and error.ref_id in r.ref_ids for r in before):
         return SHOWN, {}
     if any(
@@ -356,7 +356,7 @@ def classify(
         return UNKNOWN, {"ambiguous_record_may_have_shown": True}
     if any(r.store == error.store and r.truncated for r in before):
         return UNKNOWN, {"truncated_record_before_failure": True}
-    if error.store in {r.store for r in records}:
+    if error.store in {r.store for r in before}:
         tool = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_TOOL]
         hook = [r for r in before if r.store == error.store and r.origin == recall_log.ORIGIN_HOOK]
         return MISSED, {
@@ -364,7 +364,7 @@ def classify(
             "hook_blocks_before_failure": len(hook),
             "all_tool_recalls_filtered_out": bool(tool) and all(_excluded(r, error) for r in tool),
         }
-    return OTHER_STORE, {"stores_used": sorted({r.store for r in records})}
+    return OTHER_STORE, {"stores_used": sorted({r.store for r in before})}
 
 
 def classify_subagent(
@@ -382,8 +382,8 @@ def classify_subagent(
         return UNKNOWN, {"ambiguous_record_may_have_shown": True}
     if any(r.store == error.store and r.truncated for r in before):
         return UNKNOWN, {"truncated_record_before_failure": True}
-    if records and error.store not in {r.store for r in records}:
-        return OTHER_STORE, {"stores_used": sorted({r.store for r in records})}
+    if before and error.store not in {r.store for r in before}:
+        return OTHER_STORE, {"stores_used": sorted({r.store for r in before})}
     return NOT_SHOWN, {"tool_recalls_before_failure": sum(r.store == error.store for r in before)}
 
 
@@ -443,6 +443,10 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
         "by_outcome": {o: sum(r.outcome == o for r in main) for o in OUTCOMES},
         "captured_repeats": sum(r.captured for r in main),
         "by_outcome_captured": {o: sum(r.outcome == o for r in main if r.captured) for o in OUTCOMES},
+        "captured_subagent_repeats": sum(r.captured for r in subagent),
+        "by_outcome_captured_subagent": {
+            o: sum(r.outcome == o for r in subagent if r.captured) for o in SUBAGENT_OUTCOMES
+        },
         "subagent_repeats": len(subagent),
         "by_outcome_subagent": {o: sum(r.outcome == o for r in subagent) for o in SUBAGENT_OUTCOMES},
         "shown_without_repeat": len(shown_without_repeat),
@@ -467,6 +471,13 @@ def render(report: dict[str, Any]) -> str:
             f"{report['captured_repeats']} of the repeats above came back after capture: "
             + ", ".join(f"{report['by_outcome_captured'][o]} {o}" for o in OUTCOMES)
             + "."
+            + (
+                f" {report['captured_subagent_repeats']} subagent repeat(s) of captured errors: "
+                + ", ".join(f"{report['by_outcome_captured_subagent'][o]} {o}" for o in SUBAGENT_OUTCOMES)
+                + "."
+                if report["captured_subagent_repeats"]
+                else ""
+            )
         )
     if report["subagent_repeats"]:
         lines.append(

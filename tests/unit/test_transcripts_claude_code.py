@@ -135,3 +135,18 @@ def test_unreadable_lines_and_parts_are_skipped(tmp_path: Path) -> None:
     )
     (session,) = READER.read(path)
     assert [(s.tool_use_id, s.result) for s in session.steps] == [("a", "ok")]
+
+
+def test_a_sidechain_entry_without_any_agent_id_is_skipped(tmp_path: Path) -> None:
+    """Review of #137, finding 5 (R12): fail closed, never the main thread nor a shared thread."""
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _entry("s", "2026-11-17T10:00:00Z", [_use("m", "ls")]),
+                _entry("s", "2026-11-17T10:00:01Z", [_use("x", "ls")], isSidechain=True),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert [s.tool_use_id for s in READER.read(path, include_sidechains=True)[0].steps] == ["m"]

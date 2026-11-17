@@ -1,6 +1,6 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
-Status: draft, 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
+Status: approved by the owner (merged as #135, 2026-11-17); drafted 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
 approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R15 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)

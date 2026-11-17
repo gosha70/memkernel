@@ -258,7 +258,7 @@ def run(
         started = clock()
         for index, window in enumerate(drained.ended):
             if clock() - started >= CAPTURE_TIME_BUDGET or report.stored >= CAPTURE_MAX_RECORDS:
-                report.left = len(drained.ended) - index
+                report.left += len(drained.ended) - index  # misses already counted stay counted
                 break
             _capture_session(service, settings, window, drained.misses.get(window.session_id, 0), reader, report)
     return report
@@ -338,8 +338,8 @@ def _captured_calls(service: MemoryService, session_id: str) -> set[str]:
     extractor = f"{CAPTURE_EXTRACTOR_TAG}{EXTRACTOR}"
     return {
         tag[len(CAPTURE_CALL_TAG) :]
-        for m in service.list_memories(session_id=session_id, include_superseded=True)
-        if m.source == CAPTURE_SOURCE and extractor in m.tags
+        for m in service.list_metadata(session_id, CAPTURE_SOURCE)
+        if extractor in m.tags
         for tag in m.tags
         if tag.startswith(CAPTURE_CALL_TAG)
     }

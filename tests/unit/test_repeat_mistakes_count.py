@@ -397,3 +397,88 @@ def test_captured_errors_are_reported_apart(tmp_path: Path) -> None:
     assert report["captured_errors"] == 1 and report["captured_repeats"] == 1
     assert report["by_outcome_captured"]["missed"] == 1 and report["details"][0]["captured"] is True
     assert "1 of the stored errors are from captured records" in count_module.render(report)
+
+
+def test_only_records_before_the_failure_decide_the_outcome() -> None:
+    """Review of #137, finding 1: a recall after the failure is not evidence, on either thread."""
+    when = datetime.now(UTC)
+    failure = when + timedelta(seconds=1)
+    later_same = count_module.LogRecord("a", failure + timedelta(minutes=1), "tool", "", "q", {}, ["r9"], "h")
+    assert count_module.classify(_error(), [later_same], failure) == ("unknown", {})
+    earlier_other = count_module.LogRecord("b", when, "tool", "", "q", {}, ["r9"], "h")
+    assert count_module.classify(_error(), [earlier_other, later_same], failure) == (
+        "other store",
+        {"stores_used": ["b"]},
+    )
+    later_other = count_module.LogRecord("b", failure + timedelta(minutes=1), "tool", "", "q", {}, ["r9"], "h")
+    assert count_module.classify_subagent(_error(), [later_other], failure)[0] == "not shown"
+
+
+def test_captured_errors_repeated_by_a_subagent_are_counted_apart(tmp_path: Path) -> None:
+    """Review of #137, finding 2: the captured aggregate covers subagent repeats too."""
+    from memkernel.core.models import CAPTURE_ORIGIN_TAG
+
+    a = _settings(tmp_path, "a")
+    svc = build_service(a, embedding=MockEmbedding(dimension=384))
+    svc.retain("Command `make` failed: `Error: disk full`.", MemoryType.OBSERVATION, tags=[CAPTURE_ORIGIN_TAG])
+    del svc
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    when = datetime.now(UTC) + timedelta(hours=1)
+    Transcript(folder, "s1").tool(when, "Bash", {"command": "ls"}, "src")
+    Transcript(folder, "s1", agent="sub").tool(when, "Bash", {"command": "make"}, "Error: disk full", True)
+    report = count_module.count(
+        [count_module.parse_store(_store_arg(tmp_path, "a"))], count_module.read_sessions(folder, "x")
+    )
+    assert report["captured_repeats"] == 0 and report["captured_subagent_repeats"] == 1
+    assert report["by_outcome_captured_subagent"]["not shown"] == 1
+    assert "1 subagent repeat(s) of captured errors" in count_module.render(report)
+
+
+def test_two_unidentified_sidechains_never_share_a_thread(tmp_path: Path) -> None:
+    """Review of #137: one sidechain without an agent id recalls the memory, another fails; neither counts."""
+    a = _settings(tmp_path, "a")
+    svc = build_service(a, embedding=MockEmbedding(dimension=384))
+    m = svc.retain("npm test fails with `Error: Cannot find module 'x'`", MemoryType.FACT)
+    del svc
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    when = datetime.now(UTC) + timedelta(hours=1)
+    stamp = when.isoformat().replace("+00:00", "Z")
+    later = (when + timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+    tool = count_module.DEFAULT_RECALL_TOOL
+    lines = [
+        {
+            "sessionId": "s1",
+            "timestamp": stamp,
+            "isSidechain": True,
+            "message": {"content": [{"type": "tool_use", "id": "r", "name": tool, "input": {"query": "module x"}}]},
+        },
+        {
+            "sessionId": "s1",
+            "timestamp": later,
+            "isSidechain": True,
+            "message": {"content": [{"type": "tool_use", "id": "f", "name": "Bash", "input": {"command": "npm test"}}]},
+        },
+        {
+            "sessionId": "s1",
+            "timestamp": later,
+            "isSidechain": True,
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "f",
+                        "is_error": True,
+                        "content": "Exit code 1\nError: Cannot find module 'x'",
+                    }
+                ]
+            },
+        },
+    ]
+    (folder / "s1.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    recall_log.append(a, "tool", [m], query="module x", now=when)
+    report = count_module.count(
+        [count_module.parse_store(_store_arg(tmp_path, "a"))], count_module.read_sessions(folder, tool)
+    )
+    assert report["details"] == [] and report["by_outcome_subagent"]["shown"] == 0

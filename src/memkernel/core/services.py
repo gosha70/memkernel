@@ -994,6 +994,12 @@ class MemoryService:
             memories = [m for m in memories if m.tier == tier]
         return memories
 
+    def list_metadata(self, session_id: str, source: str) -> list[Memory]:
+        """Records of ``session_id`` with ``source``, filtered in the store, metadata only (content empty); retired
+        records included (memkernel-0-12-capture-core FR-003: capture's key lookup)."""
+        where = {"$and": [{"session_id": session_id}, {"source": source}]}
+        return self._vector_store.list_all(where, include_content=False)
+
     def _newest_checkpoints(
         self,
         memory_type: MemoryType | None,

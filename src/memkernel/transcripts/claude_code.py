@@ -36,7 +36,8 @@ class ClaudeCodeTranscriptReader:
         """Every session in ``path``, oldest first (FR-004).
 
         In a subagent file a line without ``sessionId`` belongs to the session its folder names, and a line without
-        ``agentId`` to the agent the file name names (R15).
+        ``agentId`` to the agent the file name names (R15). A sidechain line with no agent identity at all is skipped,
+        so it never joins the main thread or another agent's thread (R12).
         """
         with path.open("rb") as handle:
             data = handle.read(max_bytes + 1) if max_bytes is not None else handle.read()
@@ -62,6 +63,8 @@ class ClaudeCodeTranscriptReader:
             if sidechain and not include_sidechains:
                 continue
             agent_id = str(entry.get("agentId") or file_agent) if sidechain else ""
+            if sidechain and not agent_id:
+                continue  # no agent identity: it can be neither the main thread nor a known subagent (R12)
             for part in _parts(entry):
                 if part.get("type") == "tool_use" and part.get("id"):
                     step = _call(part, when, sidechain, agent_id)
