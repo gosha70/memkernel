@@ -1,7 +1,7 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
 Status: draft, 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
-approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R13 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
+approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R15 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
 
@@ -53,11 +53,15 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
   included. It counts any later `Bash` output that contains the span as a repeat, whether or not the command
   failed, so a `cat NOTES.md` that quotes the stored error is a repeat. Its evidence does not name the command.
   (Reported by DIADE on #112, issuecomment-6940516688, and checked against `count.py` at `7f26012`.)
-- **Subagent transcripts** are written to `<project folder>/<sessionId>/subagents/agent-*.jsonl`, with
-  `isSidechain: true` and the parent's `sessionId` (checked 2026-11-17: 228 such files in the local transcripts;
-  each of the 112 whose first line has a `sessionId` names its parent folder's session, and each of the same 112
-  has an `agentId` equal to the `<id>` in its file name `agent-<id>.jsonl`). The #120 reader globs
-  `*.jsonl` in the folder only, so it never reads them (DIADE, the same comment).
+- **Subagent transcripts** sit under `<project folder>/<sessionId>/subagents/` (checked 2026-11-17 on the local
+  transcripts, 228 `.jsonl` files there):
+  - 112 at `subagents/agent-*.jsonl`, 2 of them named `agent-<label>-<id>.jsonl`;
+  - 114 workflow agents one level deeper, at `subagents/workflows/wf_<id>/agent-*.jsonl`;
+  - 2 workflow `journal.jsonl` files, which are not agent transcripts and carry no `sessionId`.
+
+  All 226 agent files have `isSidechain: true` lines carrying the parent folder's `sessionId` (in workflow files,
+  not always on the first line), and an `agentId` equal to the whole file name after `agent-`. The #120 reader
+  globs `*.jsonl` in the folder only, so it never reads them (DIADE, the same comment).
 - **Promotion candidates** come from `MemoryService.consolidate()`: live, non-long-term, non-checkpoint records that
   are not a promoted memory's source, ranked by importance × (1 + access count). The MCP `consolidate` tool and the
   startup block both use it.
@@ -102,12 +106,14 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
 - **FR-004 Port and adapter.** `TranscriptReaderPort.read(path, include_sidechains=False)` returns every session in
   one transcript file, each with its window and its tool steps in order (main-thread only by default): entry
   `uuid`, `tool_use_id`, time, tool name, the input's `command`, `file_path` or `query`, `is_error`, whether it was
-  denied, the result text, `sidechain` (bool, the entry's `isSidechain`) and `agent_id` (R12: the entry's `agentId`,
-  else the `<id>` of the file name `agent-<id>.jsonl`; empty on the main thread). The Claude Code adapter (`src/memkernel/transcripts/claude_code.py`) skips
+  denied, the result text, `sidechain` (bool, the entry's `isSidechain`) and `agent_id` (R12, R15: the entry's `agentId`,
+  else the whole file name after `agent-`, without parsing an id out of it; empty on the main thread). The Claude Code adapter (`src/memkernel/transcripts/claude_code.py`) skips
   unreadable lines, and sidechain entries unless `include_sidechains` is true. Capture reads main-thread steps only. Capture takes the session it is capturing from the result; a readable file without that session is a miss
   (FR-008, R5). The #120 count (R7) reads every
-  transcript under its folder, the subagent files `<sessionId>/subagents/*.jsonl` included, through the port with
-  `include_sidechains=True`, and merges sessions by id, so a subagent's steps belong to its parent session but keep
+  transcript under its folder, the subagent files included, through the port with
+  `include_sidechains=True`. Subagent files are `<sessionId>/subagents/**/agent-*.jsonl`, read recursively so
+  workflow agents are included and `journal.jsonl` and other non-agent files are skipped (R15); a line without a
+  `sessionId` belongs to the session named by the parent folder. It merges sessions by id, so a subagent's steps belong to its parent session but keep
   their `sidechain` flag and `agent_id`. **Recalls and repeats stay with their thread (R12):** a subagent's `recall`
   calls, and the recall-log records paired with them, belong to that subagent; a main-thread repeat is judged only
   against main-thread recalls and the parent's hook blocks, and a subagent repeat only against that subagent's
@@ -200,9 +206,10 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
     of `ERROR_WORDS` and more than one word, so a bare `ValueError` or `Exception` is not one. A word is a
     whitespace-separated token after `collapse()`, so `pkg.mod.FooError` is one word. `ERROR_WORDS`
     and this rule live in `src/` with the extractor (FR-005), and the count imports them.
-  - **Subagent repeats are reported apart (R10).** A subagent does not get its parent's startup context, so a repeat
-    found in a subagent's steps is marked `(subagent)` and counted on its own line of the report, never as a
-    memory that was shown and missed.
+  - **Subagent repeats are reported apart (R10, R14).** A subagent, workflow agents included, does not get its
+    parent's startup context. A repeat found in a subagent's steps goes on its own `(subagent)` line, and counts as
+    "shown" only when that subagent itself recalled the memory before the failure (R12). Otherwise it is reported
+    as not shown, because there was no startup context, and never as "missed".
   - The README's "What it cannot detect" list gains (#136): a prose lesson with no quoted error; a single-word
     signature; output that is not from a failed run (an error printed with exit status 0, a note read through
     `Bash`, and above all a command piped into a filter without `pipefail`, such as `… 2>&1 | tail -20`, whose
@@ -281,6 +288,10 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
     a repeat, attributed to the parent session, marked `(subagent)` and reported on its own line, whose evidence
     names the command (R7, R8, R10);
   - a subagent recalls the memory, then the parent's main thread repeats the error: the repeat is not "shown" (R12);
+  - a subagent recalls the memory, then repeats the error itself: the repeat is "shown" on the subagent line (R14);
+  - a workflow agent at `<sessionId>/subagents/workflows/wf_x/agent-1.jsonl` runs the failing command: the repeat
+    counts toward the parent session, on the subagent line; a `journal.jsonl` beside it is ignored (R15);
+  - a subagent file named `agent-review-abc.jsonl` whose lines have no `agentId` gets `agent_id` `review-abc` (R15);
   - a memory whose only backticked error text is `ValueError` has no stored error (R9).
   DIADE's fixture transcripts and expected outcomes, landed with the build (see the note below), pass.
 - **SC-9** Fast suite, ruff, mypy strict, coverage ≥ 80%; MCP tool set unchanged.
@@ -351,6 +362,12 @@ Module constants in `capture.py`, not settings, so the configuration table grows
   that subagent (FR-004, SC-8).
 - **R13** The README and SC-7 say identical captured text from two sessions is shown twice until it expires
   (FR-012, SC-7).
+- **R14** A subagent repeat is "shown" on its `(subagent)` line only when that subagent recalled the memory before
+  the failure; otherwise not shown, never "missed" (FR-011, SC-8). This replaces R10's "never shown and missed".
+- **R15** The count reads `<sessionId>/subagents/**/agent-*.jsonl` recursively (workflow agents included,
+  `journal.jsonl` skipped), falls back to the parent folder for a line without `sessionId`, and takes `agent_id`
+  from the entry's `agentId`, else the whole file name after `agent-` (FR-004, SC-8). Workflow agents count as
+  subagents under R10 and R14.
 
 These fixes are tracked in #136, which the S2 build fixes.
 

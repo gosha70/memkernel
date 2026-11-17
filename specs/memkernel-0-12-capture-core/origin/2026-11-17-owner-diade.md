@@ -45,3 +45,12 @@ cannot detect"). The issue is #136.
 
 Recorded as R12 (sidechain and agent id) and R13 (the R1 side effect: the README and SC-7 say so, the option that
 adds no code), with the wording fixes in FR-011 and the new order note.
+
+## The owner's go on the review of `d17b407` (2026-11-17)
+
+The owner's message, verbatim: "go". It answered the reply that proposed: the R10 fix (a subagent repeat is "shown"
+on its `(subagent)` line only when that subagent recalled the memory before the failure; otherwise not shown,
+never "missed"); the subagent-file fix (read `<sessionId>/subagents/**/agent-*.jsonl` recursively, skip
+`journal.jsonl`, fall back to the parent folder for a line without `sessionId`, correct the checked fact, two SC-8
+cases); and the two additions (`agent_id` from the entry's `agentId`, else the whole file name after `agent-`;
+workflow agents count as subagents under R10). Recorded as R14 and R15.

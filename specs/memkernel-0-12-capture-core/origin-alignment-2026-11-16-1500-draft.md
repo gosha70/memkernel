@@ -131,3 +131,12 @@ the build; "which the S2 build fixes"; R9 and R11 wording as the owner wrote. No
 
 Verdict: aligned
 Confidence: high
+
+## Re-check after R14–R15 (2026-11-17)
+
+Origin line checked: the owner's go on the review of `d17b407` (origin/2026-11-17-owner-diade.md, last section).
+R14 removes the R10/R12 contradiction; R15 makes the count read all 226 local agent transcripts (114 of them
+workflow agents the earlier path missed) and corrects the checked fact. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high
