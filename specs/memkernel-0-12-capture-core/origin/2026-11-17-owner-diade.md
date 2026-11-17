@@ -24,3 +24,24 @@ DIADE's report: https://github.com/gosha70/memkernel/issues/112#issuecomment-694
 
 The two review notes became R10 (subagent repeats reported apart) and R11 (multi-word code fragments in "What it
 cannot detect"). The issue is #136.
+
+## The owner's review of #135 at `0138a5f` (2026-11-17, verbatim, the decided parts)
+
+> The fix: each tool step carries `sidechain` (bool) and the subagent's id (taken from the file name
+> `agent-<id>.jsonl`, or from the entry if it has one). The count keeps a subagent's recalls and repeats with that
+> subagent. Add one SC-8 case: a subagent recalls the memory, then the main thread repeats the error, and the result
+> is not "shown".
+
+> Put "Refs #136" on #135 and "Fixes #136" on the build PR. The last lines of the spec need the same change: "tracked
+> in #136, which #135 fixes" should end "which the S2 build fixes".
+
+> The workable version: DIADE contributes the fixture transcripts and expected outcomes. They land in the S2 build
+> PR, credited to DIADE (co-author or attribution), or as a PR against the build branch. The note should say that.
+
+> R9 text: [...] Say "a bare `ValueError` or `Exception`". [...] R9 "word": define it as a whitespace-separated token
+> after `collapse()`, so `pkg.mod.FooError` counts as one word. R11's list should name piped commands. [...] R1 side
+> effect: identical captured text from two sessions is now stored twice. [...] SC-7 or the README should say so, or
+> the startup block should skip duplicate content when it renders.
+
+Recorded as R12 (sidechain and agent id) and R13 (the R1 side effect: the README and SC-7 say so, the option that
+adds no code), with the wording fixes in FR-011 and the new order note.

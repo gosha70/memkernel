@@ -122,3 +122,12 @@ item 5.
 
 Verdict: aligned
 Confidence: high
+
+## Re-check after the review of `0138a5f` (2026-11-17)
+
+Origin lines checked: the owner's review (origin/2026-11-17-owner-diade.md, last section). R12 makes R10 buildable
+and keeps recalls with their thread; R13 records the R1 side effect; the order note now lands DIADE's fixtures with
+the build; "which the S2 build fixes"; R9 and R11 wording as the owner wrote. No change to what #134 asks for.
+
+Verdict: aligned
+Confidence: high

@@ -8,7 +8,7 @@
 - [ ] Extractor (FR-005), redaction (FR-006), key and store (FR-003), commit after store (FR-002)
 - [ ] Startup: budget and caps (FR-007, D6), misses (FR-008), report line (FR-009)
 - [ ] `consolidate()` leaves captured records out (FR-010); count reports captured errors apart (FR-011)
-- [ ] Count: repeats only from FR-005 failures, the command in the evidence (R8); multi-word stored errors (R9); subagent repeats apart (R10); README limits (R11)
+- [ ] Count: repeats only from FR-005 failures, the command in the evidence (R8); multi-word stored errors (R9); subagent repeats apart (R10); README limits (R11); `sidechain`/`agent_id` on steps, recalls kept per thread (R12); README on duplicate captured text (R13)
 - [ ] Copy `specs/memkernel-0-12-capture-core/fixtures/*.jsonl` into the test tree; tests for SC-1–SC-8
 
 ## US3: docs and checks

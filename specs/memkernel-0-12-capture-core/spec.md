@@ -1,7 +1,7 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
 Status: draft, 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
-approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R11 by the owner on 2026-11-17, from DIADE's report on #112).
+approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R13 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
 
@@ -55,7 +55,8 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
   (Reported by DIADE on #112, issuecomment-6940516688, and checked against `count.py` at `7f26012`.)
 - **Subagent transcripts** are written to `<project folder>/<sessionId>/subagents/agent-*.jsonl`, with
   `isSidechain: true` and the parent's `sessionId` (checked 2026-11-17: 228 such files in the local transcripts;
-  each of the 112 whose first line has a `sessionId` names its parent folder's session). The #120 reader globs
+  each of the 112 whose first line has a `sessionId` names its parent folder's session, and each of the same 112
+  has an `agentId` equal to the `<id>` in its file name `agent-<id>.jsonl`). The #120 reader globs
   `*.jsonl` in the folder only, so it never reads them (DIADE, the same comment).
 - **Promotion candidates** come from `MemoryService.consolidate()`: live, non-long-term, non-checkpoint records that
   are not a promoted memory's source, ranked by importance × (1 + access count). The MCP `consolidate` tool and the
@@ -99,12 +100,18 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
     `timestamp` and tags are never rewritten by a later capture. `retain()` gains the keyword this needs; agent
     writes are unchanged.
 - **FR-004 Port and adapter.** `TranscriptReaderPort.read(path, include_sidechains=False)` returns every session in
-  one transcript file, each with its window and its tool steps in order (main-thread only by default): entry `uuid`, `tool_use_id`, time, tool name, the input's `command`, `file_path` or `query`, `is_error`, whether
-  it was denied, and the result text. The Claude Code adapter (`src/memkernel/transcripts/claude_code.py`) skips
+  one transcript file, each with its window and its tool steps in order (main-thread only by default): entry
+  `uuid`, `tool_use_id`, time, tool name, the input's `command`, `file_path` or `query`, `is_error`, whether it was
+  denied, the result text, `sidechain` (bool, the entry's `isSidechain`) and `agent_id` (R12: the entry's `agentId`,
+  else the `<id>` of the file name `agent-<id>.jsonl`; empty on the main thread). The Claude Code adapter (`src/memkernel/transcripts/claude_code.py`) skips
   unreadable lines, and sidechain entries unless `include_sidechains` is true. Capture reads main-thread steps only. Capture takes the session it is capturing from the result; a readable file without that session is a miss
   (FR-008, R5). The #120 count (R7) reads every
   transcript under its folder, the subagent files `<sessionId>/subagents/*.jsonl` included, through the port with
-  `include_sidechains=True`, and merges sessions by id, so a subagent's steps belong to its parent session. It drops
+  `include_sidechains=True`, and merges sessions by id, so a subagent's steps belong to its parent session but keep
+  their `sidechain` flag and `agent_id`. **Recalls and repeats stay with their thread (R12):** a subagent's `recall`
+  calls, and the recall-log records paired with them, belong to that subagent; a main-thread repeat is judged only
+  against main-thread recalls and the parent's hook blocks, and a subagent repeat only against that subagent's
+  recalls (a subagent gets no hook block). It drops
   its own reader and keeps its fixture test passing.
 - **FR-005 Extractor: failed-then-fixed commands.** A **failure** is a `Bash` step with `is_error` true whose
   result starts with `Exit code ` (so a denial or a harness block, which never ran, is not one), and whose non-zero
@@ -190,16 +197,19 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
   - **The evidence names the command (R8).** Each repeat's evidence includes the failing run's command (redacted
     per FR-006, cut to `CAPTURE_TEXT_MAX`).
   - **A stored error has more than one word (R9).** A backticked span is a stored error only when it contains one
-    of `ERROR_WORDS` and more than one word, so a bare `ValueError` or `except` fragment is not one. `ERROR_WORDS`
+    of `ERROR_WORDS` and more than one word, so a bare `ValueError` or `Exception` is not one. A word is a
+    whitespace-separated token after `collapse()`, so `pkg.mod.FooError` is one word. `ERROR_WORDS`
     and this rule live in `src/` with the extractor (FR-005), and the count imports them.
   - **Subagent repeats are reported apart (R10).** A subagent does not get its parent's startup context, so a repeat
     found in a subagent's steps is marked `(subagent)` and counted on its own line of the report, never as a
     memory that was shown and missed.
   - The README's "What it cannot detect" list gains (#136): a prose lesson with no quoted error; a single-word
     signature; output that is not from a failed run (an error printed with exit status 0, a note read through
-    `Bash`); and that a multi-word code fragment such as `except Exception:` still counts as a signature (R11).
+    `Bash`, and above all a command piped into a filter without `pipefail`, such as `… 2>&1 | tail -20`, whose
+    real failure exits 0 and is not counted under R8); and that a multi-word code fragment such as `except Exception:` still counts as a signature (R11).
 - **FR-012 Settings and docs.** `MEMKERNEL_CAPTURE` (bool, default `false`) in the README configuration table, with
-  what is read and stored, the redaction coverage and its limits, and that capture stays off where locking is
+  what is read and stored, the redaction coverage and its limits, that identical captured text from two sessions is
+  stored twice and can be shown twice until it expires (R13), and that capture stays off where locking is
   unavailable (Windows, R6). README hooks section: capture at startup.
   CHANGELOG under Added. Both the README and the CHANGELOG entry say, per D8, that the failed-then-fixed extractor
   captures rarely (1 pair in 289 failures across 65 transcripts) and that S3 adds the extractors with real yield.
@@ -261,15 +271,18 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
   the spool behaves as with capture off, and one warning is logged (R6).
 - **SC-6** Each FR-006 pattern is redacted in a command, an error line and a file path.
 - **SC-7** `consolidate()` never returns a captured record as a candidate; a captured record in the startup context
-  is inside a stored-memory element.
+  is inside a stored-memory element. Two captured records with identical text from two sessions are two records
+  (R1), so a hook block or `recall` can show the same lesson twice until the TTL expires them; the README says so
+  (R13).
 - **SC-8** The #120 count runs on the adapter, its fixture test passes, and a captured error is reported apart from
   agent-stored ones. On a fake transcript folder:
   - a session that only runs `cat NOTES.md`, whose output quotes the stored error, has no repeat (R8);
   - a session whose subagent (`<sessionId>/subagents/agent-1.jsonl`, sidechain lines) runs the failing command has
     a repeat, attributed to the parent session, marked `(subagent)` and reported on its own line, whose evidence
     names the command (R7, R8, R10);
+  - a subagent recalls the memory, then the parent's main thread repeats the error: the repeat is not "shown" (R12);
   - a memory whose only backticked error text is `ValueError` has no stored error (R9).
-  DIADE's tests, if they land first (see the note below), keep passing through the move.
+  DIADE's fixture transcripts and expected outcomes, landed with the build (see the note below), pass.
 - **SC-9** Fast suite, ruff, mypy strict, coverage ≥ 80%; MCP tool set unchanged.
 
 ## Decisions (the owner's, 2026-11-16)
@@ -321,7 +334,7 @@ Module constants in `capture.py`, not settings, so the configuration table grows
 - **R5** A readable transcript without the session is a miss (FR-004, FR-008, SC-4).
 - **R6** No capture where locking is unavailable (FR-007, SC-5b, README).
 
-## Amendments (the owner's, 2026-11-17, from DIADE's report on #112, tracked in #136)
+## Amendments (the owner's, 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`, tracked in #136)
 
 - **R7** The #120 count reads subagent transcripts: the subfolder files and their sidechain lines, through an
   `include_sidechains` option that only the count turns on (FR-004, SC-8).
@@ -334,8 +347,14 @@ Module constants in `capture.py`, not settings, so the configuration table grows
 - **R11** "What it cannot detect" says a multi-word code fragment (`except Exception:`) still counts as a signature
   (FR-011).
 
-These fixes are tracked in #136, which #135 fixes.
+- **R12** Each tool step carries `sidechain` and `agent_id`; the count keeps a subagent's recalls and repeats with
+  that subagent (FR-004, SC-8).
+- **R13** The README and SC-7 say identical captured text from two sessions is shown twice until it expires
+  (FR-012, SC-7).
 
-**Order.** DIADE's tests for the count should land before S2 or with it. FR-004 already requires the count's
-fixture test to keep passing through the reader's move into `src/`, so their fixtures would guard the new reader
-too. A PR against the current `eval/repeat-mistakes/transcripts.py` alone would conflict with S2 moving that file.
+These fixes are tracked in #136, which the S2 build fixes.
+
+**Order.** DIADE's tests show the bugs, so a tests-only PR against `main` would fail until the fixes land, and tests
+are never skipped or weakened to get green. So DIADE contributes the fixture transcripts and expected outcomes, and
+they land in the S2 build PR, credited to DIADE (co-author or attribution), or as a PR against the build branch.
+There they guard the reader's move into `src/` (FR-004) as well as the fixes.
