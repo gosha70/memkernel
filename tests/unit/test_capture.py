@@ -170,9 +170,7 @@ def test_the_real_fixture_yields_one_record_with_the_fr005_content() -> None:
     assert signal.call == fail.tool_use_id
     assert signal.content.startswith(f"Command `{capture.stored_text(fail.command)}` failed: `")
     edit = session.steps[1]
-    assert signal.content.endswith(
-        f"It passed later in the same session, after: {capture.stored_text(edit.file_path)}."
-    )
+    assert signal.content.endswith(f"after: {edit.file_path}.")  # R16: the path is kept whole
 
 
 def test_the_fixtures_still_hold_the_failure_and_the_passing_rerun() -> None:
@@ -599,3 +597,33 @@ def test_a_capture_failure_never_costs_the_startup_block(tmp_path: Path, caplog:
     assert text.startswith(HEADING_SESSION_START) and "Use Postgres for the user store." in text
     assert "Capture:" not in text and "s1" in _spooled_sessions(lifecycle._settings)  # retried at the next start
     assert any("capture failed" in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "FileNotFoundError: '/Users/george/projects/memkernel/specs/memkernel-0-12-capture-core/spec.md'",
+            "FileNotFoundError: '/Users/george/projects/memkernel/specs/memkernel-0-12-capture-core/spec.md'",
+        ),
+        (
+            "ERROR tests/unit/test_v2_storage/test_chroma_backend_migration.py::test_x - AssertionError: 3 != 4",
+            "ERROR tests/unit/test_v2_storage/test_chroma_backend_migration.py::test_x - AssertionError: 3 != 4",
+        ),
+        ("blob Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdo end", "blob [REDACTED] end"),
+        ("secret aGVsbG8gd29ybGQgdGhpcyBpcyBhIHRlc3Q/c2VjcmV0MTIzNDU2Nzg5MGFiY2Rl", "secret [REDACTED]"),
+        ("at 87bbd04014778a55751229b398f66e7d2be190fc", "at 87bbd04014778a55751229b398f66e7d2be190fc"),
+        ("src/tests/ChromaBackendV2Test.py", "[REDACTED].py"),  # the accepted cost: CamelCase with a digit
+    ],
+)
+def test_long_strings_are_judged_piece_by_piece(text: str, expected: str) -> None:
+    """R16 (the owner's, 2026-11-17): paths keep their components, so the count can match a captured error."""
+    assert capture.redact(text) == expected
+
+
+def test_a_captured_error_with_a_long_path_still_matches_later_output() -> None:
+    """R16: the stored error is the real text, so a later failure with the same output is a repeat."""
+    error = "ERROR tests/unit/test_v2_storage/test_chroma_backend_migration.py::test_x - AssertionError: 3 != 4"
+    (signal,) = capture.extract(_session(_fail("a", "pytest", error), _pass("b", "pytest")))
+    (stored,) = capture.signatures(signal.content)
+    assert stored == error and stored in capture.collapse(f"Exit code 1\n{error}")

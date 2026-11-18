@@ -152,3 +152,12 @@ fixed against the spec as written. No change to what #134 or #136 asks for.
 
 Verdict: aligned
 Confidence: high
+
+## Re-check after R16 (2026-11-17)
+
+Origin line checked: the owner's decisions on the review of #137 (origin/2026-11-17-owner-diade.md, last section).
+R16 replaces FR-006's long-string rule with the owner's per-piece rule; it keeps D4's best-effort statement and
+makes FR-011 hold for captured errors that name a long path. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high

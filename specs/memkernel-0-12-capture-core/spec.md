@@ -1,7 +1,7 @@
 # Spec: capture core, failed-then-fixed commands from ended sessions' transcripts (#134)
 
 Status: approved by the owner (merged as #135, 2026-11-17); drafted 2026-11-16. Decisions D1–D8 are the owner's (2026-11-16; D6's values proposed by this spec and
-approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R15 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
+approved; D1 amended by the owner on 2026-11-16 after the review of #135, with amendments R1–R6; R7–R16 by the owner on 2026-11-17, from DIADE's report on #112 and the review of #135 at `0138a5f`).
 
 ## Checked facts (`main` at `7f26012`, memkernel 0.9.0)
 
@@ -148,9 +148,12 @@ approved; D1 amended by the owner on 2026-11-16 after the review of #135, with a
   - token prefixes `AKIA`, `ghp_`, `gho_`, `github_pat_`, `sk-`, `xox`: the token;
   - private key blocks (`-----BEGIN ... PRIVATE KEY-----` to its `END` line);
   - credentials in URLs (`scheme://user:password@`): the user and password;
-  - long random-looking strings: 32 or more characters of `[A-Za-z0-9+/=_-]` with letters and digits both present,
-    not all hexadecimal, so git SHAs and dashless UUIDs are kept. Other long identifiers (base64 data, generated
-    names) can still be redacted: a false positive costs a word in the record, a miss would store a secret.
+  - long random-looking strings (as amended by R16): a token of `[A-Za-z0-9+/=_-]` is split on `/`, and the whole
+    token is redacted when any piece is 32 or more characters with letters and digits both present and not all
+    hexadecimal, or 16 or more characters mixing uppercase, lowercase and digits. Git SHAs and dashless UUIDs are
+    kept, and so are path components, which rarely do either; a CamelCase name with a digit (`ChromaBackendV2Test`)
+    is redacted. A false positive costs a word in the record, a miss would store a secret: a bare secret whose
+    pieces all fall under both thresholds is stored as written.
 
   Redaction is applied to the extracted fields before the record content is composed, so unredacted text is never
   passed to `retain()`. Each command and error line is then cut to `CAPTURE_TEXT_MAX` characters.
@@ -375,3 +378,10 @@ These fixes are tracked in #136, which the S2 build fixes.
 are never skipped or weakened to get green. So DIADE contributes the fixture transcripts and expected outcomes, and
 they land in the S2 build PR, credited to DIADE (co-author or attribution), or as a PR against the build branch.
 There they guard the reader's move into `src/` (FR-004) as well as the fixes.
+
+## Amendment R16 (the owner's, 2026-11-17, from the review of #137 at `6c0072e`)
+
+- **R16** The long-string redaction judges a token piece by piece, split on `/`: the whole token is redacted when a
+  piece is 32 or more characters mixing letters and digits and not all hexadecimal, or 16 or more mixing uppercase,
+  lowercase and digits (FR-006, README). The slash-inclusive rule redacted paths with a digit, in file-path fields
+  and inside error lines alike, so a captured error naming such a path could never match later output (FR-011).

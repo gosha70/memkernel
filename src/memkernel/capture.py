@@ -88,8 +88,11 @@ _TOKEN = re.compile(
     r"\b(?:AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
     r"|sk-[A-Za-z0-9_-]{16,}|xox[a-z]-[A-Za-z0-9-]{10,})"
 )
-_LONG_STRING = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])")
+# R16: a token of these characters is judged piece by piece, split on "/", so a path keeps its components.
+_TOKEN_CHARS = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{16,}(?![A-Za-z0-9+/=_-])")
 _HEX = re.compile(r"[0-9a-fA-F]+")
+LONG_PIECE = 32  # a piece this long that mixes letters and digits and is not all hexadecimal
+MIXED_PIECE = 16  # a piece this long that mixes uppercase, lowercase and digits
 
 
 @dataclass(frozen=True)
@@ -176,7 +179,7 @@ def redact(text: str) -> str:
     text = _AUTHORIZATION.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _ASSIGNMENT.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _TOKEN.sub(REDACTED, text)
-    return _LONG_STRING.sub(lambda m: m.group(0) if _keep(m.group(0)) else REDACTED, text)
+    return _TOKEN_CHARS.sub(lambda m: REDACTED if any(map(_secret_piece, m.group(0).split("/"))) else m.group(0), text)
 
 
 def stored_text(text: str) -> str:
@@ -184,11 +187,16 @@ def stored_text(text: str) -> str:
     return collapse(redact(text)).replace("`", "")[:CAPTURE_TEXT_MAX]
 
 
-def _keep(word: str) -> bool:
-    """A long string is kept unless it holds letters and digits and is not all hexadecimal (git SHAs stay)."""
-    has_letter = any(c.isalpha() for c in word)
-    has_digit = any(c.isdigit() for c in word)
-    return not (has_letter and has_digit) or bool(_HEX.fullmatch(word))
+def _secret_piece(piece: str) -> bool:
+    """Whether one ``/``-separated piece looks random (FR-006 as amended by R16): LONG_PIECE characters or more that
+    mix letters and digits and are not all hexadecimal (git SHAs stay), or MIXED_PIECE or more that mix uppercase,
+    lowercase and digits. Path components rarely do either; a CamelCase name with a digit can."""
+    upper = any(c.isupper() for c in piece)
+    lower = any(c.islower() for c in piece)
+    digit = any(c.isdigit() for c in piece)
+    if len(piece) >= LONG_PIECE and (upper or lower) and digit and not _HEX.fullmatch(piece):
+        return True
+    return len(piece) >= MIXED_PIECE and upper and lower and digit
 
 
 # ── the extractor ──────────────────────────────────────────────────────────
