@@ -91,3 +91,46 @@ def test_a_write_by_another_process_triggers_one_refresh(tmp_path: Path, monkeyp
     service.recall("from elsewhere one")
     service.recall("from elsewhere two")
     assert calls == [1]
+
+
+DOCUMENT_WRITER = """
+import sys
+sys.path[:0] = [{root!r}, {src!r}]
+from memkernel.config import MemKernelSettings
+from memkernel.core.models import MemoryType
+from memkernel.factory import build_service
+from tests.conftest import MockEmbedding
+settings = MemKernelSettings(project_id="xp", chroma_persist_path=sys.argv[1], state_dir=sys.argv[2])
+service = build_service(settings, embedding=MockEmbedding(dimension=8))
+print(service.retain(sys.argv[3], MemoryType.DOCUMENT, source="guide.md"))
+"""
+
+
+def test_ask_searches_the_chunks_of_a_document_another_process_added(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#139 follow-up: ask's chunk search catches up first, so it answers from the chunks, not the whole body."""
+    service = build_service(_settings(tmp_path), embedding=MockEmbedding(dimension=8))
+    service.retain("written here", MemoryType.FACT)
+    body = "\n\n".join(f"Section {i}: the retry budget for service {i} is {i} attempts." for i in range(40))
+    script = DOCUMENT_WRITER.format(root=str(ROOT), src=str(ROOT / "src"))
+    done = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "chroma"), str(tmp_path / "state"), body],
+        check=True,
+        timeout=120,
+        capture_output=True,
+        text=True,
+    )
+    ref = done.stdout.strip().splitlines()[-1]
+    whole_body: list[str] = []
+    store = service._document_store
+    assert store is not None
+    real_get = store.get
+
+    def spy_get(doc_id: str) -> str | None:
+        whole_body.append(doc_id)
+        return real_get(doc_id)
+
+    monkeypatch.setattr(store, "get", spy_get)
+    answer = service.ask(ref, "What is the retry budget for service 7?")
+    assert answer is not None and whole_body == []  # answered from the indexed chunks

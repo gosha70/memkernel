@@ -28,6 +28,10 @@ A bug fix (spec_mode none): no spec, this plan only.
   `refresh()` and `rebuild_sparse_index()`.
 - `recall(order="newest")` and the metadata reads are unchanged (they already see other processes' writes).
 
+## Follow-up (2026-11-18, the owner's go after the review of #140)
+- `ask` on a document catches up before searching its chunks, so a document another process just added is answered
+  from its indexed chunks, not from the whole body.
+
 ## Tests
 - A real second process writes after the service started; recall finds the record (fails on `main`).
 - Own writes and deletes never trigger a refresh; another process's writes trigger exactly one.

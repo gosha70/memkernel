@@ -1150,6 +1150,7 @@ class MemoryService:
         """The text a reasoner sees for a document: its best indexed chunks (``chunks``) or the whole body."""
         assert self._document_store is not None and memory.document_id  # guarded by the caller
         if chunks:
+            self._catch_up_with_other_writers()  # a document another process just added is in the chunk index (#139)
             best = self._document_store.search(memory.document_id, question, self._settings.ask_top_k)
             if best:
                 return _CHUNK_JOINER.join(best)
