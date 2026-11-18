@@ -5,7 +5,7 @@
 - [ ] Receipt fields in the recall log: hashes, states, latency, size, exclusion counts (FR-003); the count grouped by run and agent (FR-006)
 
 ## US2 (H2): scope and abstention
-- [ ] `scope` on records, `agent`/`task` on recall, every read path filtered (FR-001); the empty-result reason (FR-005)
+- [ ] `scope` on records, `agent`/`task` on every read path, promotion keeping scope (FR-001, SC-1); the empty-result reason in the receipt (FR-005, SC-6)
 
 ## US3 (H3): context diff
 - [ ] `eval/context-diff/diff.py` over a run's receipts (FR-004)

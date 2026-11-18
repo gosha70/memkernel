@@ -34,8 +34,15 @@ with a default from older stores (CLAUDE.md); `core/` depends only on ports.
 
 - **FR-001 Scope (Part 1, D1).** A record has a `scope`: `project` (the default, shared, as today), `agent:<id>` or
   `task:<id>`. `retain` takes `scope`; `recall` takes the caller's `agent` and `task` and returns `project`
-  records plus records of that agent or task, never another's. Records from older stores load as `project`. A
-  promoted record is `project` unless given a scope.
+  records plus records of that agent or task, never another's. Records from older stores load as `project`.
+  - **Every read path applies it,** not only `recall`: `get`, `list_memories`, `ask`, `consolidate`'s promotion
+    candidates, wiki export drafts, and the hook blocks (session start, compaction recovery, `on_post_compact`). A
+    caller without an agent or task sees `project` records only.
+  - **Promotion keeps the source's scope.** Promoting an `agent:` note gives an `agent:` long-term memory; making it
+    `project` is an explicit `scope` argument, never a default, so promoting cannot publish a private note.
+  - **Convention, not security.** The caller names its own agent and task ids (D6), so any client can claim any id.
+    Scope keeps agents from tripping over each other's notes; it does not keep a hostile client out. The README
+    says so.
 - **FR-002 Correlation (Part 3, D2).** A run, agent and task id reach memkernel per call (`recall` and `retain`
   arguments) or per process (`MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID`), a call's value winning.
   They are written into the recall log and onto retained records (`run_id`, as provenance).
@@ -47,8 +54,10 @@ with a default from older stores (CLAUDE.md); `core/` depends only on ports.
   run id and reports, for each memory in that run's receipts: unchanged, changed (another `content_hash`),
   superseded (and by what), missing (deleted or expired), flagged now, or source changed (`source_hash` no longer
   matches the file).
-- **FR-005 Abstention (Part 1).** An empty `recall` result says why: nothing stored for the filters, everything
-  matching was superseded or flagged, or nothing in the caller's scope.
+- **FR-005 Abstention (Part 1).** When a `recall` returns nothing, the reason (nothing stored for the filters,
+  everything matching was superseded or flagged, or nothing in the caller's scope) goes into the recall log's
+  receipt, not into the response. MCP `recall` returns a JSON list today, and existing clients parse a list, so the
+  response stays unchanged.
 - **FR-006 Effectiveness (Part 3).** The repeated-mistake count groups its report by run and agent when the log
   has them. The comparison against simpler approaches reuses the lifecycle suite (#90, #17); this spec adds no new
   evaluation runner.
@@ -69,7 +78,11 @@ with a default from older stores (CLAUDE.md); `core/` depends only on ports.
 
 ## Success Criteria
 
-- **SC-1** Two agents' private records are invisible to each other; both get the project's records (FR-001).
+- **SC-1** Two agents' private records are invisible to each other through every read path (`recall`, `get`,
+  `list_memories`, `ask`, the promotion candidates, wiki export, the hook blocks); both get the project's records;
+  promoting an `agent:` note keeps its scope (FR-001).
+- **SC-6** An empty recall's reason is in its receipt, and the MCP `recall` response is still a JSON list
+  (FR-005).
 - **SC-2** A run's receipts, after a decision is superseded and a source file changes, diff as superseded and source
   changed (FR-003, FR-004).
 - **SC-3** The recall log carries run, agent and task ids, latency, size and exclusion counts (FR-002, FR-003).

@@ -29,6 +29,7 @@ or dependency. Three slices (D5): H1 receipts and correlation, H2 scope and abst
 
 ## Risks
 
-- Scope filtering at recall must hold on every read path (recall, get, list, the hook blocks, wiki export): a
-  private record reachable through one of them is a leak. H2's tests cover each path.
+- Scope must hold on every read path (recall, get, list, ask, the promotion candidates, the hook blocks, wiki
+  export) and through promotion: a private record reachable through any of them is a leak. H2's tests cover each.
+- Scope is a convention between cooperating callers, not access control: the caller names its own ids.
 - Receipts grow the recall log; its rotation limits apply, and a receipt keeps hashes, not content.
