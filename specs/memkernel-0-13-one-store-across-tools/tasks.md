@@ -1,8 +1,8 @@
 # Tasks: memkernel-0-13-one-store-across-tools
 
 ## US1: several servers and one shared server
-- [ ] Two stdio server subprocesses on one store (FR-001, SC-1); needs #140
-- [ ] Two clients on one HTTP server subprocess (FR-002, SC-2)
+- [ ] Two stdio server subprocesses on one store (FR-001, SC-1); the #139 fix is on `main`
+- [ ] Two clients on one HTTP server subprocess; host and origin checks on the HTTP transport (FR-002, SC-2)
 
 ## US2: session-start command and templates
 - [ ] `memkernel session-start --format plain|cursor|antigravity [--max-chars N]` (FR-003, SC-3)

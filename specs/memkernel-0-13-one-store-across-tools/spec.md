@@ -14,8 +14,13 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   measured 2026-11-18).
 - **A running server missed other processes' writes in relevance recall** (#139): chromadb caches its dense index
   per process and the BM25 index was built once. Metadata reads (`list_memories`, `get`,
-  `recall(order="newest")`) were not affected. #140 fixes it with a count check before relevance recall. This
-  affected the single-tool Claude Code setup too (hook-written checkpoints, startup capture).
+  `recall(order="newest")`) were not affected. Fixed on `main` (#140, reverted by mistake in #145, re-landed with
+  an `ask` follow-up in #146): a count check before relevance recall. It affected the single-tool Claude Code setup
+  too (hook-written checkpoints, startup capture).
+- **The HTTP transport has no host or origin checks today.** The MCP SDK builds its transport security with
+  `enable_dns_rebinding_protection=False` when none is passed (`mcp.server.transport_security`), and memkernel's
+  `run_server` passes none. A web page can reach a server on `127.0.0.1` through DNS rebinding, and anything on the
+  machine can read and write the store: there is no authentication.
 - **Store locks are cross-process** (`fcntl` on POSIX, memkernel-0-7-store-locks): the wiki import and tag writes
   are serialised across processes; on Windows they run unlocked with a warning.
 - **Session-start context is automatic only in Claude Code** (`templates/hooks/session-start.py`) **and Kiro**
@@ -42,25 +47,40 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
 ## Requirements
 
 - **FR-001 Several stdio servers (D1).** Supported: each tool starts its own `memkernel` on the shared store. Builds
-  on #140. A test starts two server subprocesses over stdio on one store: a `retain` through one is returned by a
+  on the #139 fix (#146). A test starts two server subprocesses over stdio on one store: a `retain` through one is returned by a
   relevance `recall` through the other.
 - **FR-002 One shared HTTP server.** A README section, "One store across tools", shows starting memkernel once with
   `MEMKERNEL_TRANSPORT=streamable-http` and registering `http://127.0.0.1:8765/mcp` in Claude Code (`.mcp.json`),
   Codex (`.codex/config.toml`), Cursor (`.cursor/mcp.json`) and Antigravity (`.agents/mcp_config.json`,
   `serverUrl`). A test runs two MCP clients against one server subprocess: a `retain` through one is recalled
   through the other.
+  - **Local only.** The server runs with the SDK's transport security on: `enable_dns_rebinding_protection=True`,
+    hosts `127.0.0.1:*` and `localhost:*`, origins `http://127.0.0.1:*` and `http://localhost:*`. A request with
+    another `Host` or `Origin` is refused. The README says "local only, no authentication".
+  - **This applies to the HTTP transport as it is today,** so it can ship before the rest of this spec, as its own
+    fix.
 - **FR-003 `memkernel session-start` (D2).** A subcommand that reads the hook's JSON from stdin when there is one
   (for `source` and `session_id`), runs `MemoryLifecycle.on_session_start`, and prints the block in the shape
   `--format` names: `plain` (stdout text: Claude Code, Codex), `cursor` (`{"additional_context": …}`),
   `antigravity` (`{"injectSteps": [{"systemMessage": …}]}`). `--max-chars` cuts the block, keeping its headings, for
   tools with a smaller cap (D5). `memkernel` with no arguments still starts the server.
+  - **No spool line.** `session-start` writes no `started` line to the session spool, for any format: the spool
+    pairs a start with an end, and only Claude Code's hooks write both. A tool that never writes `ended` would leave
+    every Claude Code startup reporting sessions that "recorded no end". Capture (#134) therefore stays a Claude Code
+    feature.
+  - **`source` mapping.** Codex's `SessionStart` passes the same `source` values as Claude Code (`startup`,
+    `resume`, `clear`, `compact`, `fork`), mapped one to one: `resume` and `fork` print nothing, `compact` prints the
+    recovery block. Cursor's `sessionStart` and Antigravity's `SessionStart` pass no `source`, so they get the
+    `startup` block.
 - **FR-004 Templates (D3).** Under `templates/codex/`, `templates/cursor/`, `templates/antigravity/`: the MCP
   registration (stdio and HTTP), an instruction file telling the agent to call
   `recall(checkpoint_only=true, order="newest")` and recall the project's decisions at the start of a session, and,
   where D3 says so, a session-start hook calling `memkernel session-start`. The wiki workflow stays in one place
   (#86): the instruction files link to it.
 - **FR-005 Docs.** README "One store across tools": the two setups (FR-001, FR-002), the per-tool templates, which
-  tool versions they follow, and the limits (Windows: store locks run unlocked; #139's limit). CHANGELOG under Added.
+  tool versions they follow, and the limits: local only, no authentication; Windows store locks run unlocked; #139's
+  limit; capture only from Claude Code sessions. CHANGELOG under Added (and under Security for the host and origin
+  checks).
 
 ## Constraints / What NOT to Build
 
@@ -77,18 +97,20 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
 
 - **SC-1** Two stdio server subprocesses on one store: a record retained through one is recalled through the other
   (FR-001).
-- **SC-2** Two clients on one HTTP server subprocess: likewise (FR-002).
+- **SC-2** Two clients on one HTTP server subprocess: likewise (FR-002). A request with a foreign `Host` or
+  `Origin` header is refused.
 - **SC-3** `memkernel session-start --format plain|cursor|antigravity` prints the same block as the Claude Code hook,
-  in each shape; `--max-chars` keeps the headings; no arguments still starts the server (FR-003).
+  in each shape; `--max-chars` keeps the headings; no arguments still starts the server; no spool line is written
+  (FR-003).
 - **SC-4** Each template parses as its tool's documented format (TOML, JSON, `.mdc` frontmatter, rule frontmatter).
 - **SC-5** Fast suite, ruff, mypy strict, coverage ≥ 80%; the MCP tool set unchanged.
 
 ## Decisions (proposed, for the owner)
 
-- **D1 Several stdio servers: support them** (after #140), and document the shared HTTP server as the alternative
+- **D1 Several stdio servers: support them** (the #139 fix is on `main`), and document the shared HTTP server as the alternative
   for a long-running setup. Alternative: support only the shared server and document stdio-per-tool as
   unsupported. Recommended: support both, since stdio-per-tool is what every tool's MCP config does by default and
-  #140 makes it correct.
+  the #139 fix makes it correct.
 - **D2 A `session-start` subcommand on `memkernel`**, not a separate command. Recommended.
 - **D3 Where a hook replaces the instruction:**
   - **Codex: hook and `AGENTS.md`.** Its `SessionStart` is documented, takes plain stdout, and matches Claude
@@ -100,6 +122,11 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
     docs' examples disagree).
   Recommended as listed.
 - **D4 The tools:** Codex, Cursor and Antigravity, as #107 names (Claude Code and Kiro exist). Recommended.
-- **D5 Codex's cap:** about 2,500 tokens by default, below the 9,000-character block. The Codex template passes
-  `--max-chars 8000`. Alternative: raise Codex's per-hook `additionalContextLimit` in the template. Recommended:
-  `--max-chars 8000`, which changes nothing in Codex's own settings.
+- **D5 Codex's cap: `--max-chars 6000`.**
+  - **The cap:** about 2,500 tokens by default per model-visible hook message.
+  - **The arithmetic:** at about 4 characters per token that is about 10,000 characters, but code-heavy text runs
+    nearer 3, about 7,500. The block holds code and paths, so 8,000 could pass the cap.
+  - **Over the cap,** Codex saves the output to a file and shows a head-and-tail preview (its hooks docs), so it
+    cuts the output, not drops it. Even so, a cut that removes the middle of the block loses the context section.
+  - **Recommended: 6,000,** a 20% margin under the code-heavy estimate. It changes nothing in Codex's own settings.
+    Alternative: raise Codex's per-hook `additionalContextLimit` in the template.

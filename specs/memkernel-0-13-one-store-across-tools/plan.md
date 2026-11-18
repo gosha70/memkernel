@@ -24,7 +24,7 @@ origin:
 
 ## Approach
 
-1. **Several stdio servers on one store: supported**, on top of #140 (the fix for #139), with a two-server test.
+1. **Several stdio servers on one store: supported**, on top of the #139 fix (on `main` since #146), with a two-server test.
 2. **One shared HTTP server:** a README section with each tool's registration snippet, and a two-client test.
 3. **`memkernel session-start`:** a subcommand that prints the startup block in a tool's hook output shape.
 4. **Templates** for Codex, Cursor and Antigravity: an MCP registration snippet, an instruction file, and a
