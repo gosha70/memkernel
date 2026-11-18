@@ -87,6 +87,7 @@ STORE_LOCK_FILE_PREFIX = ".memkernel-"
 LOCK_WAIT_LOG_SECONDS = 10.0  # a take waiting longer than this logs one info line, then keeps waiting
 _LOCK_POLL_SECONDS = 0.05
 _STORE_KEY_HASH_CHARS = 16
+_REFRESH_SENTINEL_ID = "__memkernel_refresh__"  # never a ref_id (those are UUIDs): see refresh()
 TAGS_KEY = "tags"
 PERSIST_PATH_FIELD = "chroma_persist_path"  # set explicitly (env or argument), it binds an injected client
 
@@ -460,6 +461,11 @@ class ChromaVectorStore:
         if not result.get("ids") or not metadatas:
             return None
         return _split_csv(metadatas[0].get(TAGS_KEY))
+
+    def refresh(self) -> None:
+        """chromadb (1.5) caches the dense index per process and reloads it on this process's next write, so a
+        deletion of an id that cannot exist makes its search see other processes' records (#139): a few ms."""
+        self._collection.delete(ids=[_REFRESH_SENTINEL_ID])
 
     def count(self, where: dict[str, Any] | None = None) -> int:
         """Return the number of records in the collection, or of those matching ``where``.
