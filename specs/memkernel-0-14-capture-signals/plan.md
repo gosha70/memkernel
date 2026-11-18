@@ -5,8 +5,9 @@ status: draft
 date: 2026-11-18
 collaboration_mode: single
 origin:
-  issue: gosha70/memkernel#59
+  issue: gosha70/memkernel#147
   urls:
+    - https://github.com/gosha70/memkernel/issues/147
     - https://github.com/gosha70/memkernel/issues/59
     - https://github.com/gosha70/memkernel/pull/137
   transcripts:
