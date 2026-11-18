@@ -26,14 +26,3 @@ origin session. The narrowing of the S3 row noted above still stands for the own
 
 Verdict: aligned
 Confidence: medium
-
-## Re-check after the review of #142 (2026-11-18)
-
-Origin lines checked: #147 (the S3 issue) and the review the owner passed on (origin file, last two sections). D3
-(`episode`) and D6 (2 answers among the candidates) keep answers available past a week; outcomes read GitHub's MCP
-tools as well as `gh`; constants and multi-select are specified. The S3 issue now exists, so the spec and #147
-agree on scope: commits and free-form turns out, supersede suggestions and canonical hashing as S4. The review
-recommends accepting that narrowing; it is no longer a mismatch with the issue the build closes.
-
-Verdict: aligned
-Confidence: high
