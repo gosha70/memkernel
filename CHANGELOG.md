@@ -16,13 +16,6 @@ All notable changes to this project are documented here. The format follows
   twice, and run within 3 seconds and 20 records per startup. Off on Windows (no file locking). The session spool
   keeps ended sessions until they are captured, and a `TranscriptReaderPort` reads Claude Code's transcripts.
 
-### Fixed
-
-- **A running server's `recall` finds records other processes wrote to its store** (#139): compaction checkpoints
-  from `post-compact.py`, records captured at startup, or a second server on the same store. chromadb caches its
-  search index per process and the BM25 index was built once; before a relevance recall, memkernel now compares the
-  store's record count with the one it last saw and, on a difference, refreshes both.
-
 ### Changed
 
 - **The repeated-mistake count** (#136, reported by DIADE on #112) reads subagent transcripts and reports their
