@@ -17,3 +17,12 @@ Mismatches:
 
 Verdict: aligned
 Confidence: medium
+
+## Re-check after D5 and D7 (2026-11-18)
+
+Origin line checked: the owner's decisions on D5 and D7 (origin file, last section). D5 now keeps a session's last
+30 owner answers, from the per-session table; D7 (proposed) limits one recall result to 3 captured records per
+origin session. The narrowing of the S3 row noted above still stands for the owner.
+
+Verdict: aligned
+Confidence: medium

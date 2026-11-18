@@ -1,6 +1,6 @@
 # Spec: capture signals with real yield, owner answers and session outcomes (#59 Phase 2, S3)
 
-Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D6 are
+Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D7 are
 **proposed, for the owner's decision**, and nothing here is built yet. S3 has no issue of its own (#59 D5: one
 issue per slice); filing it is the owner's call.
 
@@ -25,6 +25,20 @@ issue per slice); filing it is the owner's call.
   | Files edited (`Edit`/`Write` with a result and no error) | 3,171 steps | 58 |
   | Commits (`git commit` passed) | 1,045 | — |
 
+- **Owner answers per session** (the same 17 sessions): 65, 37, 23, 20, 10, 10, 8, 7, 7, 7, 6, 6, 5, 4, 4, 2, 1.
+  What a per-session cap would keep:
+
+  | Cap | Answers kept | Sessions over the cap |
+  |---|---|---|
+  | 5 | 76 of 222 (34%) | 12 |
+  | 15 | 137 (62%) | 4 |
+  | 20 | 157 (71%) | 3 |
+  | 30 | 180 (81%) | 2 |
+
+- **How captured records rank today:** never in the startup context (it lists long-term memories only), never
+  promotion candidates (S2 D5). In `recall`, relevance weighs 1.0, importance 0.3 (an observation's default
+  importance is 0.3, a decision's 0.9) and recency 0.3 (half-life 7 days), so a decision outranks a captured answer
+  when relevance ties. Nothing limits how many records from one session fill a recall result.
 - **#59's prompt-injection rules** (its Phase 2 text): "free text only from owner turns and structured fields; tool
   and web text quoted, never re-injected verbatim; nothing of tool or web origin promoted automatically."
 
@@ -48,12 +62,19 @@ issue per slice); filing it is the owner's call.
   count). Type `episode`, short-term. Key: (session, extractor). Commits are left out: git already holds them, at a
   yield (1,045) that would crowd the store.
 - **FR-004 Caps (D5).** The per-session cap applies per extractor, so a session's answers cannot push out its
-  outcome record; the per-run cap and the time budget stay as in S2.
+  outcome record. Owner answers keep a session's **last** 30 answers in transcript order, since later answers often
+  revise earlier ones; failed-then-fixed and session outcome keep the first N (S2's R4). An ended session's
+  transcript does not change, so "the last 30" is the same set on every retry. The per-run cap and the time budget
+  stay as in S2: the run cap stops capture from starting another session, and a session already started is finished
+  under its own caps (one startup can embed about 50 records, well inside the 3-second soft budget).
 - **FR-005 Promotion (D6).** As S2: captured records are never promotion candidates, unless D6 says otherwise for
   owner answers.
 - **FR-006 The #120 count and the report.** The startup report's capture line counts records per extractor. The
   count is unchanged (neither extractor stores an error).
 - **FR-007 Docs.** README "Capture": the two extractors, their yields, and what each stores; CHANGELOG.
+- **FR-008 A recall limit per origin session (D7).** One `recall` result holds at most 3 captured records from any
+  one origin session (`origin-session:` tag); further ones are skipped and the window widens, as recall already does
+  for filtered results. Records the agent stored itself are not limited.
 
 ## Constraints / What NOT to Build
 
@@ -76,8 +97,11 @@ issue per slice); filing it is the owner's call.
   owner's own text) yields two owner-answer records with the FR-002 content; a cut from a real transcript.
 - **SC-2** A fixture session that opens a PR, files an issue and edits three files yields one outcome record; a
   session with none of these yields none.
-- **SC-3** Re-capturing a session stores nothing twice (the S2 key rules), and the caps hold per extractor.
+- **SC-3** Re-capturing a session stores nothing twice (the S2 key rules), and the caps hold per extractor; a session
+  with 35 answers stores its last 30, the same 30 on a retry.
 - **SC-4** Fast suite, ruff, mypy strict, coverage ≥ 80%.
+- **SC-5** A recall whose top matches are 6 captured answers from one session returns 3 of them and the next-best
+  records from elsewhere (FR-008).
 
 ## Decisions (proposed, for the owner)
 
@@ -90,7 +114,11 @@ issue per slice); filing it is the owner's call.
   type), so a captured answer as `decision` would enter long-term memory without the agent choosing. Recommended:
   `observation` (short-term), with the owner's answer quoted, so the agent promotes it as a decision when it holds.
 - **D4 Session outcome contents:** PR and issue URLs plus edited files, no commits. Recommended.
-- **D5 Caps:** 5 per extractor per session, the run cap of 20 shared. Recommended.
+- **D5 Caps:** owner answers 30 per session, keeping the **last** 30; failed-then-fixed and session outcome as in S2
+  (5 per session, the first N); the run cap of 20 shared. The owner's choice of 30 and "keep the last", from the
+  per-session table (2026-11-18); a cap of 5 would keep 34% of the answers.
 - **D6 Promotion:** owner answers stay out of the promotion candidates like every captured record (S2 D5).
   Alternative: allow owner answers as candidates, since they are the owner's decisions. Recommended: keep them out
   for now; the agent's own promote path is unchanged.
+- **D7 A recall limit per origin session:** at most 3 captured records per origin session in one recall result, so
+  one heavy session cannot fill it (FR-008). Proposed by the owner, 2026-11-18.
