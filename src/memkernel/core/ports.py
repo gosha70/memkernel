@@ -81,6 +81,14 @@ class VectorStorePort(Protocol):
         """Number of records, optionally only those matching a metadata filter (ids-only fetch)."""
         ...
 
+    def refresh(self) -> None:
+        """Make this process's dense search see records other processes wrote to the store since it last read (#139).
+
+        Metadata reads (``list_all``, ``get_by_id``, ``count``) always see them; a backend that caches its search
+        index per process may not until this is called.
+        """
+        ...
+
     def list_collections(self) -> list[dict[str, Any]]:
         """List all collections visible to this adapter with their record counts."""
         ...
