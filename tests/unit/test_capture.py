@@ -614,6 +614,9 @@ def test_a_capture_failure_never_costs_the_startup_block(tmp_path: Path, caplog:
         ("secret aGVsbG8gd29ybGQgdGhpcyBpcyBhIHRlc3Q/c2VjcmV0MTIzNDU2Nzg5MGFiY2Rl", "secret [REDACTED]"),
         ("at 87bbd04014778a55751229b398f66e7d2be190fc", "at 87bbd04014778a55751229b398f66e7d2be190fc"),
         ("src/tests/ChromaBackendV2Test.py", "[REDACTED].py"),  # the accepted cost: CamelCase with a digit
+        ("~/work/repo2/memkernel-0-12-capture-core/file", "~/work/repo2/memkernel-0-12-capture-core/file"),
+        ("k aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z/xyz", "k [REDACTED]"),  # not path-shaped: judged whole
+        ("cd specs/memkernel-0-12-capture-core", "cd [REDACTED]"),  # the stated cost, as before R16
     ],
 )
 def test_long_strings_are_judged_piece_by_piece(text: str, expected: str) -> None:
@@ -627,3 +630,15 @@ def test_a_captured_error_with_a_long_path_still_matches_later_output() -> None:
     (signal,) = capture.extract(_session(_fail("a", "pytest", error), _pass("b", "pytest")))
     (stored,) = capture.signatures(signal.content)
     assert stored == error and stored in capture.collapse(f"Exit code 1\n{error}")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "aws configure set aws_secret_access wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY --profile x",
+    ],
+)
+def test_the_aws_sample_secret_key_is_redacted(text: str) -> None:
+    """AWS's documented sample secret key, bare and inside a command: split on "/", its pieces would all pass."""
+    assert "wJalrXUtnFEMI" not in capture.redact(text) and capture.REDACTED in capture.redact(text)

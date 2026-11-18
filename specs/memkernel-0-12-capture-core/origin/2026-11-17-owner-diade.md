@@ -65,3 +65,12 @@ workflow agents count as subagents under R10). Recorded as R14 and R15.
 > The guard: commit and push it to #137 now. [...] R16: in the same PR, as with #126.
 
 The rerun kept both example paths and redacted the 28-character piece; recorded as R16.
+
+## The owner's review of #137 at `cb362cf` (2026-11-17, verbatim, the decided parts)
+
+> The fix: split on `/` only when the token looks like a path. Otherwise judge the whole token with the old
+> 32-character rule, as before R16. [...] the token starts with `/`, which covers `/…`, `~/…`, `./…` and `../…`; or
+> it's followed directly by `.` and a letter, a file extension, as in `….py`. [...] Add the AWS sample as a unit
+> test. [...] Dashed UUIDs: leave them redacted.
+
+Recorded in R16 and FR-006.

@@ -88,8 +88,11 @@ _TOKEN = re.compile(
     r"\b(?:AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
     r"|sk-[A-Za-z0-9_-]{16,}|xox[a-z]-[A-Za-z0-9-]{10,})"
 )
-# R16: a token of these characters is judged piece by piece, split on "/", so a path keeps its components.
+# R16: a path-shaped token of these characters is judged piece by piece, split on "/", so a path keeps its
+# components; any other token is judged whole. Path-shaped: it starts with "/" (also after "~", "." or "..") or a
+# file extension follows it.
 _TOKEN_CHARS = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{16,}(?![A-Za-z0-9+/=_-])")
+_EXTENSION = re.compile(r"\.[A-Za-z]")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 LONG_PIECE = 32  # a piece this long that mixes letters and digits and is not all hexadecimal
 MIXED_PIECE = 16  # a piece this long that mixes uppercase, lowercase and digits
@@ -179,7 +182,7 @@ def redact(text: str) -> str:
     text = _AUTHORIZATION.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _ASSIGNMENT.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _TOKEN.sub(REDACTED, text)
-    return _TOKEN_CHARS.sub(lambda m: REDACTED if any(map(_secret_piece, m.group(0).split("/"))) else m.group(0), text)
+    return _TOKEN_CHARS.sub(lambda m: REDACTED if _secret_token(m, text) else m.group(0), text)
 
 
 def stored_text(text: str) -> str:
@@ -187,16 +190,31 @@ def stored_text(text: str) -> str:
     return collapse(redact(text)).replace("`", "")[:CAPTURE_TEXT_MAX]
 
 
-def _secret_piece(piece: str) -> bool:
-    """Whether one ``/``-separated piece looks random (FR-006 as amended by R16): LONG_PIECE characters or more that
-    mix letters and digits and are not all hexadecimal (git SHAs stay), or MIXED_PIECE or more that mix uppercase,
-    lowercase and digits. Path components rarely do either; a CamelCase name with a digit can."""
-    upper = any(c.isupper() for c in piece)
-    lower = any(c.islower() for c in piece)
+def _secret_token(match: re.Match[str], text: str) -> bool:
+    """Whether a token looks random (FR-006 as amended by R16). A path-shaped one is judged piece by piece, split on
+    ``/``: any piece that is long and random, or MIXED_PIECE or more mixing uppercase, lowercase and digits. Any
+    other token is judged whole as long and random, so a base64 secret containing ``/`` is not cut into pieces short
+    enough to pass."""
+    token = match.group(0)
+    if token.startswith("/") or _EXTENSION.match(text, match.end()):
+        return any(_long_random(p) or _mixed_case(p) for p in token.split("/"))
+    return _long_random(token)
+
+
+def _long_random(piece: str) -> bool:
+    """LONG_PIECE characters or more mixing letters and digits, not all hexadecimal (git SHAs stay)."""
     digit = any(c.isdigit() for c in piece)
-    if len(piece) >= LONG_PIECE and (upper or lower) and digit and not _HEX.fullmatch(piece):
-        return True
-    return len(piece) >= MIXED_PIECE and upper and lower and digit
+    return len(piece) >= LONG_PIECE and digit and any(c.isalpha() for c in piece) and not _HEX.fullmatch(piece)
+
+
+def _mixed_case(piece: str) -> bool:
+    """MIXED_PIECE characters or more mixing uppercase, lowercase and digits; a CamelCase name with a digit can."""
+    return (
+        len(piece) >= MIXED_PIECE
+        and any(c.isupper() for c in piece)
+        and any(c.islower() for c in piece)
+        and any(c.isdigit() for c in piece)
+    )
 
 
 # ── the extractor ──────────────────────────────────────────────────────────

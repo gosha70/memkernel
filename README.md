@@ -146,11 +146,12 @@ since its spool line names the transcript.
 - **Redaction is best-effort.** Before storing, each command, error line and edited file path has these replaced
   with `[REDACTED]`: values of `…KEY=`, `…TOKEN=`, `…SECRET=`, `…PASSWORD=` assignments (and `.env` lines of that
   shape); `Authorization:` header values; tokens starting `AKIA`, `ghp_`, `gho_`, `github_pat_`, `sk-`, `xox`;
-  private key blocks; credentials in URLs; and random-looking strings. A string of letters, digits and `+/=_-` is
-  split on `/`, and redacted whole when any piece is 32 or more characters mixing letters and digits (not all
-  hexadecimal, so git SHAs stay), or 16 or more mixing uppercase, lowercase and digits. Path components are kept,
-  so a captured error naming a path still matches later output; a CamelCase name with a digit, such as
-  `ChromaBackendV2Test`, is redacted. A secret in any other shape, or one whose pieces are all shorter, is stored as
+  private key blocks; credentials in URLs; and random-looking strings: 32 or more letters, digits and `+/=_-`
+  that mix letters and digits and are not all hexadecimal (git SHAs stay; dashed UUIDs are redacted). A
+  path-shaped string (starting with `/`, `~/`, `./` or `../`, or followed by a file extension) is judged component
+  by component instead, so a captured error naming a path still matches later output; a component of 16 or more
+  characters mixing uppercase, lowercase and digits (`ChromaBackendV2Test`) is redacted. A relative folder path
+  with no extension, 32 or more characters with a digit, is redacted. A secret in any other shape is stored as
   written.
 - **Limits per startup:** 3 seconds of capture (a session already started is finished), 20 records, 5 per session
   (the rest of a session's signals are dropped and counted). Sessions not reached wait for the next start. A

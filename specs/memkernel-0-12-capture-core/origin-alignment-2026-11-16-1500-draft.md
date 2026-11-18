@@ -161,3 +161,12 @@ makes FR-011 hold for captured errors that name a long path. No change to what #
 
 Verdict: aligned
 Confidence: high
+
+## Re-check after R16's path-shaped rule (2026-11-17)
+
+Origin line checked: the owner's review of #137 at `cb362cf` (origin/2026-11-17-owner-diade.md, last section).
+R16 now splits only path-shaped tokens; the AWS sample key is redacted again and both of the owner's example paths
+stay whole. Dashed UUIDs stay redacted, as the owner decided. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high
