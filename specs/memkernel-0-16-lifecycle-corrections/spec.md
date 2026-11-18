@@ -1,6 +1,6 @@
 # Spec: a lifecycle task set that can tell the arms apart, and a governed-composition arm (#90, #17)
 
-Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D6 are
+Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D7 are
 **proposed, for the owner's decision**, and nothing here is built yet. The design is wiki-studio's
 (`eval/composition/design.md` at `b99484a`, filed as #90); this spec turns it into memkernel's requirements. No
 measured run happens without a preregistration and a budget the owner approves (D5).
@@ -34,7 +34,9 @@ measured run happens without a preregistration and a budget the owner approves (
   invalidation, retry policy, backup retention, access review cadence, feature-flag cleanup, invoice rounding).
   Session 0 records X; a correction between sessions changes the rule to Y; session 1 asks for the current rule
   without naming the correction, its value or its page. The checker has three outcomes: X fails as obsolete, Y
-  passes, anything else fails. Each fixture wiki has at least one competing page carrying X.
+  passes, anything else fails. **An answer that names both values passes when Y is there** ("it was X; now it's
+  Y" is correct), and one with X alone is obsolete. A fixture pins each case. The stated limit is that an answer
+  naming both without saying which holds also passes. Each fixture wiki has at least one competing page carrying X.
 - **FR-002 Corrections through the arm's own workflow.** A task's correction is an event the runner delivers per
   arm: for `memkernel`, through its correction path (a superseding retain, or `withdraw`, per the chain); for the
   composition arm, through export, curator, promote, approve and governed import; for `fs_grep`, a curator's
@@ -50,6 +52,21 @@ measured run happens without a preregistration and a budget the owner approves (
 - **FR-005 A per-group token table** in the report, so costs compare within a group (#90 dependency 3).
 - **FR-006 The preregistration and budget** (D5): hypotheses, arms, the calibrated set, checkers, model and
   versions, exclusions, the analysis, and the cost, frozen and approved before the measured run.
+  - **It also states the trials per chain and the smallest difference the design can detect,** before anything
+    is paid for.
+  - **The arithmetic** for the 0.5 suite's primary test, an exact sign test over chains (two-sided):
+
+    | Chains | Chains favouring one arm, and the p-value |
+    |---|---|
+    | 8 | 8 → 0.008; 7 → 0.07 |
+    | 12 | 11 → 0.006; 10 → 0.04 |
+    | 16 | 14 → 0.004; 13 → 0.02 |
+
+  - **With eight chains, only a difference that nearly every chain shows can reach 0.05,** and less than that after
+    a correction for several comparisons. More trials per chain sharpen each chain's verdict, but not the count of
+    chains.
+  - **If calibration leaves too few chains for the difference the preregistration names,** the run is not paid for.
+    The chain set is extended first (D7).
 
 ## Constraints / What NOT to Build
 
@@ -66,7 +83,7 @@ measured run happens without a preregistration and a budget the owner approves (
 ## Success Criteria
 
 - **SC-1** Each chain's naive reference (X) fails and informed reference (Y) passes in CI, as the suite requires of
-  every task today.
+  every task today; fixtures pin an answer naming both values (passes) and one naming X alone (obsolete).
 - **SC-2** In a stub-agent run, the runner delivers each arm's correction through its own path, and the
   `shared_artifact` copy never contains Y.
 - **SC-3** The gate-record check flags a page landed without a receipt or an approval, on a fixture.
@@ -77,8 +94,9 @@ measured run happens without a preregistration and a budget the owner approves (
 
 - **D1 Adopt #90's requirements and its eight chains** as the `lc-correct` group. Recommended.
 - **D2 Arms for this comparison:** `memkernel`, `memkernel_governed` (with the oracle curator as an upper bound),
-  `fs_grep` and `bare`. `claude_md`, `protocol` and `placebo` are left out of this group. Recommended: the
-  roadmap's comparison is memory alone against the governed composition, with the files and negative controls.
+  `fs_grep`, **`claude_md`** and `bare`. `claude_md` stays: writing a corrected rule into CLAUDE.md is the most
+  common real-world way to handle a correction, so it is the comparison readers will ask about. `protocol` and
+  `placebo` are left out. Recommended, unless cost rules `claude_md` out (the budget, D5, says).
 - **D3 The scripted curator** with a preregistered policy is the primary composition arm; `auto_approve_on_promote`
   is at most a named sensitivity check, not run by default. Recommended, as #90 argues.
 - **D4 Both correction kinds:** replacement and withdrawal, now that 0.7 shipped withdrawal; the obsolete-answer rate
@@ -88,3 +106,6 @@ measured run happens without a preregistration and a budget the owner approves (
   preregistration and a budget you approve. Recommended.
 - **D6 #17:** the measured run's report answers #17's remaining question (scenarios that can separate the arms).
   Close #17 when that report is published. Recommended.
+- **D7 The chain count:** keep #90's eight chains if the preregistration's detectable difference is acceptable at
+  that size; otherwise write more chains to the same requirements (#90 §2.1) before the calibration, toward 12 or
+  16. Recommended: decide with the preregistration, from FR-006's arithmetic.
