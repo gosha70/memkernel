@@ -28,7 +28,7 @@ from memkernel.core.models import (
     TranscriptSession,
 )
 from memkernel.factory import build_service
-from memkernel.lifecycle import HEADING_PREVIOUS_SESSIONS, STORED_OPEN, MemoryLifecycle
+from memkernel.lifecycle import HEADING_PREVIOUS_SESSIONS, HEADING_SESSION_START, STORED_OPEN, MemoryLifecycle
 from memkernel.transcripts.claude_code import ClaudeCodeTranscriptReader
 from tests.conftest import MockEmbedding
 
@@ -333,8 +333,7 @@ def test_interrupted_captures_neither_lose_nor_duplicate(tmp_path: Path, monkeyp
         raise RuntimeError("killed after the store, before the commit")
 
     monkeypatch.setattr(session_spool, "commit", crash)
-    with pytest.raises(RuntimeError):
-        lifecycle.on_session_start("startup", session_id="now")
+    assert lifecycle.on_session_start("startup", session_id="now").startswith(HEADING_SESSION_START)
     assert len(_captured(svc)) == 1 and "s1" in _spooled_sessions(lifecycle._settings)
     monkeypatch.setattr(session_spool, "commit", real_commit)
     monkeypatch.setattr(capture, "EXTRACTOR_VERSION", capture.EXTRACTOR_VERSION + 1)  # retried after an upgrade
@@ -351,8 +350,7 @@ def test_a_capture_killed_before_storing_stores_on_the_next_start(
     t.session("s1", FIXED)
     real = svc.retain
     monkeypatch.setattr(svc, "retain", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("killed")))
-    with pytest.raises(RuntimeError):
-        lifecycle.on_session_start("startup", session_id="now")
+    assert lifecycle.on_session_start("startup", session_id="now").startswith(HEADING_SESSION_START)
     monkeypatch.setattr(svc, "retain", real)
     lifecycle.on_session_start("startup", session_id="now")
     assert len(_captured(svc)) == 1
@@ -406,8 +404,7 @@ def test_two_failures_batched_in_one_entry_give_two_records_and_a_retry_stores_o
         return str(real(*a, **k))
 
     monkeypatch.setattr(svc, "retain", second_crashes)
-    with pytest.raises(RuntimeError):
-        lifecycle.on_session_start("startup", session_id="now")
+    assert lifecycle.on_session_start("startup", session_id="now").startswith(HEADING_SESSION_START)
     monkeypatch.setattr(svc, "retain", real)
     lifecycle.on_session_start("startup", session_id="now")
     tags = sorted(t2 for m in _captured(svc) for t2 in m.tags if t2.startswith(CAPTURE_CALL_TAG))
@@ -585,3 +582,20 @@ def test_the_key_lookup_is_store_filtered_and_metadata_only(tmp_path: Path, monk
     monkeypatch.setattr(svc._vector_store, "list_all", spy)
     assert capture._captured_calls(svc, "s1") == set()
     assert seen == [({"$and": [{"session_id": "s1"}, {"source": "capture"}]}, False)]
+
+
+class BrokenReader:
+    def read(self, path: Path, include_sidechains: bool = False, max_bytes: int | None = None) -> list[Any]:
+        raise RuntimeError("an unexpected reader failure")
+
+
+def test_a_capture_failure_never_costs_the_startup_block(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Review of #137 at 6c0072e: capture is opt-in, so its failure is logged and the block renders without it."""
+    lifecycle, svc, t = _setup(tmp_path)
+    svc.retain("Use Postgres for the user store.", MemoryType.DECISION)
+    lifecycle._transcripts = BrokenReader()
+    t.session("s1", FIXED)
+    text = lifecycle.on_session_start("startup", session_id="now")
+    assert text.startswith(HEADING_SESSION_START) and "Use Postgres for the user store." in text
+    assert "Capture:" not in text and "s1" in _spooled_sessions(lifecycle._settings)  # retried at the next start
+    assert any("capture failed" in r.message for r in caplog.records)

@@ -157,7 +157,7 @@ class MemoryLifecycle:
             if source == SOURCE_STARTUP
             else session_spool.DrainResult([], 0)
         )
-        captured = capture.run(self._service, self._settings, drained, self._transcripts) if capturing else None
+        captured = self._capture(drained) if capturing else None
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
         context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
@@ -313,6 +313,15 @@ class MemoryLifecycle:
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         shown = [m.ref_id for m in (checkpoint, *context) if m is not None]
         return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id)
+
+    def _capture(self, drained: DrainResult) -> CaptureReport | None:
+        """Run capture; a failure is logged and the block renders without it. Nothing is lost: a session leaves the
+        spool only after its records are stored, so the next start retries it (FR-002)."""
+        try:
+            return capture.run(self._service, self._settings, drained, self._transcripts)
+        except Exception:
+            logger.warning("capture failed; ended sessions stay in the spool for the next start", exc_info=True)
+            return None
 
     def _capture_on(self) -> bool:
         """Capture runs with MEMKERNEL_CAPTURE on, a persistent store, and locking (R6: off without it, one warning)."""
