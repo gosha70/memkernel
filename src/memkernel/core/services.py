@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from memkernel.core.models import (
     ASK_MODES,
+    CAPTURE_ORIGIN_TAG,
     CODE_CHUNK_KEY,
     CODE_CHUNK_TAG,
     DEFAULT_ASK_MODE,
@@ -288,6 +289,7 @@ class MemoryService:
         dedup_source: bool = False,
         dedup_owner: Callable[[Memory], bool] | None = None,
         wiki_identity: tuple[str, str | None] | None = None,
+        content_dedup: bool = True,
     ) -> str:
         """Store content and return its ref_id.
 
@@ -316,6 +318,9 @@ class MemoryService:
         written only on a new record, and ``dedup_owner``, the predicate a dedup hit must satisfy; two hits raise
         ``AmbiguousDedupError``. Without ``dedup_owner``, a record with identity tags is never a dedup hit: the
         content gets its own record (S2).
+
+        ``content_dedup=False`` skips the identical-content check for a single record, so a later write never rewrites
+        its session, timestamp or tags (memkernel-0-12-capture-core R1: a captured record is keyed by capture alone).
         """
         reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
         if reserved:
@@ -333,6 +338,7 @@ class MemoryService:
             checkpoint,
             source,
             extra,
+            dedup=content_dedup,
             dedup_source=dedup_source,
             dedup_owner=dedup_owner,
             wiki_identity=wiki_identity,
@@ -988,6 +994,12 @@ class MemoryService:
             memories = [m for m in memories if m.tier == tier]
         return memories
 
+    def list_metadata(self, session_id: str, source: str) -> list[Memory]:
+        """Records of ``session_id`` with ``source``, filtered in the store, metadata only (content empty); retired
+        records included (memkernel-0-12-capture-core FR-003: capture's key lookup)."""
+        where = {"$and": [{"session_id": session_id}, {"source": source}]}
+        return self._vector_store.list_all(where, include_content=False)
+
     def _newest_checkpoints(
         self,
         memory_type: MemoryType | None,
@@ -1198,7 +1210,8 @@ class MemoryService:
         2. Rank the surviving short-term and working memories that have not
            been promoted yet by ``importance * (1 + access_count)`` — the
            memories the agent kept coming back to — and return the top
-           ``limit`` as candidates for :meth:`promote`.
+           ``limit`` as candidates for :meth:`promote`. Captured records
+           (tagged ``origin:capture``) are never candidates.
         3. With ``synthesize=True`` and an external reasoner configured, ask
            it once to distil the candidates into long-term statements,
            returned under ``"suggested"`` as ``{"content", "type"}`` items
@@ -1220,6 +1233,7 @@ class MemoryService:
             and m.ref_id not in promoted_sources
             and not m.checkpoint
             and not m.retired()
+            and CAPTURE_ORIGIN_TAG not in m.tags  # memkernel-0-12-capture-core D5: the agent chooses what to promote
         ]
         candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
         top = candidates[:limit]

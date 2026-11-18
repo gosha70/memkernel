@@ -54,3 +54,23 @@ never "missed"); the subagent-file fix (read `<sessionId>/subagents/**/agent-*.j
 `journal.jsonl`, fall back to the parent folder for a line without `sessionId`, correct the checked fact, two SC-8
 cases); and the two additions (`agent_id` from the entry's `agentId`, else the whole file name after `agent-`;
 workflow agents count as subagents under R10). Recorded as R14 and R15.
+
+## The owner's decisions on the review of #137 at `6c0072e` (2026-11-17, verbatim, the decided parts)
+
+> A small tightening that keeps both paths: split on `/`, as the builder proposes, but redact the whole token when
+> any piece is either: 32 characters or longer (today's rule), or 16 characters or longer and mixes uppercase,
+> lowercase and digits. [...] Have the builder rerun their sample with this rule. If it keeps both of my example
+> paths and redacts the 28-character piece, use it. Either way, the README's redaction limits should state the rule.
+
+> The guard: commit and push it to #137 now. [...] R16: in the same PR, as with #126.
+
+The rerun kept both example paths and redacted the 28-character piece; recorded as R16.
+
+## The owner's review of #137 at `cb362cf` (2026-11-17, verbatim, the decided parts)
+
+> The fix: split on `/` only when the token looks like a path. Otherwise judge the whole token with the old
+> 32-character rule, as before R16. [...] the token starts with `/`, which covers `/…`, `~/…`, `./…` and `../…`; or
+> it's followed directly by `.` and a letter, a file extension, as in `….py`. [...] Add the AWS sample as a unit
+> test. [...] Dashed UUIDs: leave them redacted.
+
+Recorded in R16 and FR-006.

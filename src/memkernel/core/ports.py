@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from contextlib import AbstractContextManager
+    from pathlib import Path
 
-    from memkernel.core.models import Answer, Memory, SearchResult
+    from memkernel.core.models import Answer, Memory, SearchResult, TranscriptSession
 
 
 @runtime_checkable
@@ -156,3 +157,19 @@ class ReasonerPort(Protocol):
     """Answers a question about a body of text in a given mode (direct | rag | rlm | auto)."""
 
     def ask(self, content: str, question: str, mode: str) -> Answer: ...
+
+
+@runtime_checkable
+class TranscriptReaderPort(Protocol):
+    """Reads a coding tool's session transcripts (memkernel-0-12-capture-core FR-004)."""
+
+    def read(
+        self, path: Path, include_sidechains: bool = False, max_bytes: int | None = None
+    ) -> list[TranscriptSession]:
+        """Every session in one transcript file, each with its tool steps in order.
+
+        Main-thread steps only unless ``include_sidechains``. Unreadable lines are skipped. Raises ``OSError`` when
+        the file cannot be read, and ``TranscriptTooLargeError`` (an ``OSError``) when ``max_bytes`` is given and the
+        file is larger.
+        """
+        ...

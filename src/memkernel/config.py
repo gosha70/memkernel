@@ -47,6 +47,9 @@ class MemKernelSettings(BaseSettings):
     recall_log: bool = False
     recall_log_max_bytes: int = Field(default=5_000_000, ge=RECALL_LOG_MIN_BYTES)  # one log file before rotation
     recall_log_max_files: int = Field(default=10, ge=1)  # files kept, the current one included
+    # Capture (memkernel-0-12-capture-core): off by default, because it reads session transcripts and stores text
+    # from them. When on, normal startup reads ended sessions' transcripts and stores failed-then-fixed commands.
+    capture: bool = False
 
     # Embedding
     embedding_model: str = "all-MiniLM-L6-v2"

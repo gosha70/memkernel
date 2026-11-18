@@ -140,3 +140,33 @@ workflow agents the earlier path missed) and corrects the checked fact. No chang
 
 Verdict: aligned
 Confidence: high
+
+## Re-check at the build (2026-11-17)
+
+The spec was approved by the owner's merge of #135 (`ddb4b08`); plan.md and spec.md now say so, and tasks.md is
+ticked for the build in #137. The build implements FR-001–FR-012 and R1–R15; the review of #137 at `a152074` found
+five defects (pre-failure evidence, captured subagent repeats, the metadata-only lookup, the deferred count, a
+sidechain without an agent id). The first fix for the last (a shared fallback id) still merged unrelated agents, per
+the owner's second review; it now fails closed: a sidechain entry with no agent identity is skipped. All five are
+fixed against the spec as written. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high
+
+## Re-check after R16 (2026-11-17)
+
+Origin line checked: the owner's decisions on the review of #137 (origin/2026-11-17-owner-diade.md, last section).
+R16 replaces FR-006's long-string rule with the owner's per-piece rule; it keeps D4's best-effort statement and
+makes FR-011 hold for captured errors that name a long path. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high
+
+## Re-check after R16's path-shaped rule (2026-11-17)
+
+Origin line checked: the owner's review of #137 at `cb362cf` (origin/2026-11-17-owner-diade.md, last section).
+R16 now splits only path-shaped tokens; the AWS sample key is redacted again and both of the owner's example paths
+stay whole. Dashed UUIDs stay redacted, as the owner decided. No change to what #134 or #136 asks for.
+
+Verdict: aligned
+Confidence: high
