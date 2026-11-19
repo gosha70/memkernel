@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **The HTTP transport checks `Host` and `Origin` on every bind** (#148). The MCP SDK already did this for a
+  loopback bind (`127.0.0.1`, the default), so a default setup was not open to DNS rebinding. A non-loopback bind
+  (`MEMKERNEL_HOST=0.0.0.0` or an address) had no check: a specific address now allows only itself, and a wildcard
+  bind allows the loopback names plus those in the new `MEMKERNEL_ALLOWED_HOSTS` (without that setting it runs
+  unchecked, as before, with a warning). A non-loopback bind logs that there is no authentication. The README says "local only, no
+  authentication".
+
 ### Added
 
 - **Capture, opt-in** (#134; specs/memkernel-0-12-capture-core). With `MEMKERNEL_CAPTURE=1`, normal startup reads
@@ -15,6 +24,14 @@ All notable changes to this project are documented here. The format follows
   real yield. Captured records are never promotion candidates, are keyed so an interrupted capture stores nothing
   twice, and run within 3 seconds and 20 records per startup. Off on Windows (no file locking). The session spool
   keeps ended sessions until they are captured, and a `TranscriptReaderPort` reads Claude Code's transcripts.
+
+### Fixed
+
+- **A running server's `recall` finds records other processes wrote to its store** (#139): compaction checkpoints
+  from `post-compact.py`, records captured at startup, or a second server on the same store. chromadb caches its
+  search index per process and the BM25 index was built once; before a relevance recall, memkernel now compares the
+  store's record count with the one it last saw and, on a difference, refreshes both. `ask` does the same before
+  searching a document's chunks.
 
 ### Changed
 

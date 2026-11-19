@@ -269,6 +269,9 @@ class MemoryService:
         # gets the body.
         self._local_reasoner = local_reasoner
         self._last_recall_ms: float | None = None
+        # The store's record count as this process last saw it (#139): set by rebuild_sparse_index(), kept in step
+        # with this process's own writes; None until the first rebuild, which turns the check off.
+        self._seen_count: int | None = None
 
     # ------------------------------------------------------------------
     # Core operations
@@ -786,6 +789,8 @@ class MemoryService:
     def _write_record(self, ref_id: str, content: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         """Authoritative store first; BM25 is a derived index whose failure is non-fatal."""
         self._vector_store.upsert(ref_id=ref_id, content=content, embedding=embedding, metadata=metadata)
+        if self._seen_count is not None:
+            self._seen_count += 1  # a new ref_id: one more record, written by this process
         try:
             self._sparse_index.add(ref_id, content)
         except Exception:
@@ -842,6 +847,7 @@ class MemoryService:
             return self._newest_checkpoints(type, session_id, top_k, tier, touch)
         _start = time.perf_counter()
 
+        self._catch_up_with_other_writers()
         if self._sparse_index.needs_rebuild:
             self.rebuild_sparse_index()
 
@@ -1144,6 +1150,7 @@ class MemoryService:
         """The text a reasoner sees for a document: its best indexed chunks (``chunks``) or the whole body."""
         assert self._document_store is not None and memory.document_id  # guarded by the caller
         if chunks:
+            self._catch_up_with_other_writers()  # a document another process just added is in the chunk index (#139)
             best = self._document_store.search(memory.document_id, question, self._settings.ask_top_k)
             if best:
                 return _CHUNK_JOINER.join(best)
@@ -1510,6 +1517,8 @@ class MemoryService:
     def _delete_record(self, ref_id: str) -> bool:
         """Delete one record from the vector store and the BM25 index."""
         deleted = self._vector_store.delete(ref_id)
+        if deleted and self._seen_count is not None:
+            self._seen_count -= 1
         try:
             self._sparse_index.remove(ref_id)
         except Exception:
@@ -1529,3 +1538,14 @@ class MemoryService:
         all_memories = self._vector_store.list_all()
         documents = [(m.ref_id, m.content) for m in all_memories if DOCUMENT_BODY_TAG not in m.tags]
         self._sparse_index.rebuild(documents)
+        self._seen_count = len(all_memories)
+
+    def _catch_up_with_other_writers(self) -> None:
+        """When the store's record count differs from the one this process last saw, another process wrote to it
+        (a hook, capture, another server): refresh the dense index and rebuild BM25 so recall sees those records
+        (#139). One count per recall otherwise. An addition and a deletion by others between two recalls leave the
+        count equal and go unseen until the next difference."""
+        if self._seen_count is None or self._vector_store.count() == self._seen_count:
+            return
+        self._vector_store.refresh()
+        self.rebuild_sparse_index()
