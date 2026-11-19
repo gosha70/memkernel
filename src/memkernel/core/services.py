@@ -15,7 +15,12 @@ from uuid import uuid4
 
 from memkernel.core.models import (
     ASK_MODES,
+    CAPTURE_ANSWER_CANDIDATES,
+    CAPTURE_EXTRACTOR_OWNER_ANSWER,
+    CAPTURE_EXTRACTOR_TAG,
     CAPTURE_ORIGIN_TAG,
+    CAPTURE_RECALL_PER_SESSION,
+    CAPTURE_SESSION_TAG,
     CODE_CHUNK_KEY,
     CODE_CHUNK_TAG,
     DEFAULT_ASK_MODE,
@@ -115,6 +120,20 @@ class _ExtraMeta:
     supersedes: str | None = None
     promoted_from: str | None = None
     document_id: str | None = None
+
+
+def _is_owner_answer(memory: Memory) -> bool:
+    """A captured owner answer (memkernel-0-14-capture-signals FR-002)."""
+    return (
+        CAPTURE_ORIGIN_TAG in memory.tags and f"{CAPTURE_EXTRACTOR_TAG}{CAPTURE_EXTRACTOR_OWNER_ANSWER}" in memory.tags
+    )
+
+
+def _capture_session(memory: Memory) -> str | None:
+    """The origin session of a captured record, or None for a record the agent stored itself."""
+    if CAPTURE_ORIGIN_TAG not in memory.tags:
+        return None
+    return next((t[len(CAPTURE_SESSION_TAG) :] for t in memory.tags if t.startswith(CAPTURE_SESSION_TAG)), "")
 
 
 def _is_document_part(memory: Memory) -> bool:
@@ -269,6 +288,9 @@ class MemoryService:
         # gets the body.
         self._local_reasoner = local_reasoner
         self._last_recall_ms: float | None = None
+        # The store's record count as this process last saw it (#139): set by rebuild_sparse_index(), kept in step
+        # with this process's own writes; None until the first rebuild, which turns the check off.
+        self._seen_count: int | None = None
 
     # ------------------------------------------------------------------
     # Core operations
@@ -786,6 +808,8 @@ class MemoryService:
     def _write_record(self, ref_id: str, content: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         """Authoritative store first; BM25 is a derived index whose failure is non-fatal."""
         self._vector_store.upsert(ref_id=ref_id, content=content, embedding=embedding, metadata=metadata)
+        if self._seen_count is not None:
+            self._seen_count += 1  # a new ref_id: one more record, written by this process
         try:
             self._sparse_index.add(ref_id, content)
         except Exception:
@@ -842,6 +866,7 @@ class MemoryService:
             return self._newest_checkpoints(type, session_id, top_k, tier, touch)
         _start = time.perf_counter()
 
+        self._catch_up_with_other_writers()
         if self._sparse_index.needs_rebuild:
             self.rebuild_sparse_index()
 
@@ -907,6 +932,7 @@ class MemoryService:
         owners: dict[str, Memory | None] = {}
         live: list[ArtifactRef] = []
         seen: set[str] = set()
+        captured_per_session: dict[str, int] = {}
         for ref in results:
             memory = memories.get(ref.ref_id)
             if memory is None or memory.retired():
@@ -935,6 +961,11 @@ class MemoryService:
                 continue
             if memory_is_expired(memory, self._settings):
                 continue
+            origin = _capture_session(memory)
+            if origin is not None:  # memkernel-0-14-capture-signals D7: one heavy session cannot fill a result
+                if captured_per_session.get(origin, 0) >= CAPTURE_RECALL_PER_SESSION:
+                    continue
+                captured_per_session[origin] = captured_per_session.get(origin, 0) + 1
             seen.add(ref.ref_id)
             live.append(ref)
         return live
@@ -1144,6 +1175,7 @@ class MemoryService:
         """The text a reasoner sees for a document: its best indexed chunks (``chunks``) or the whole body."""
         assert self._document_store is not None and memory.document_id  # guarded by the caller
         if chunks:
+            self._catch_up_with_other_writers()  # a document another process just added is in the chunk index (#139)
             best = self._document_store.search(memory.document_id, question, self._settings.ask_top_k)
             if best:
                 return _CHUNK_JOINER.join(best)
@@ -1211,7 +1243,8 @@ class MemoryService:
            been promoted yet by ``importance * (1 + access_count)`` — the
            memories the agent kept coming back to — and return the top
            ``limit`` as candidates for :meth:`promote`. Captured records
-           (tagged ``origin:capture``) are never candidates.
+           (tagged ``origin:capture``) are never candidates, except up to
+           ``CAPTURE_ANSWER_CANDIDATES`` of the owner's captured answers.
         3. With ``synthesize=True`` and an external reasoner configured, ask
            it once to distil the candidates into long-term statements,
            returned under ``"suggested"`` as ``{"content", "type"}`` items
@@ -1226,16 +1259,27 @@ class MemoryService:
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
         all_memories = self._vector_store.list_all(where)
         promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from}
-        candidates = [
+        eligible = [
             m
             for m in all_memories
             if m.tier != MemoryTier.LONG_TERM
             and m.ref_id not in promoted_sources
             and not m.checkpoint
             and not m.retired()
-            and CAPTURE_ORIGIN_TAG not in m.tags  # memkernel-0-12-capture-core D5: the agent chooses what to promote
         ]
-        candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
+
+        def rank(m: Memory) -> float:
+            return m.importance * (1 + m.access_count)
+
+        def newest_first(m: Memory) -> tuple[float, float]:
+            return rank(m), m.timestamp.timestamp()  # captured answers tie on rank: the newest win (A3)
+
+        # memkernel-0-12-capture-core D5: captured records are never candidates, except the owner's answers, at most
+        # CAPTURE_ANSWER_CANDIDATES of them (memkernel-0-14-capture-signals D6), ranked like any candidate.
+        answers = sorted((m for m in eligible if _is_owner_answer(m)), key=newest_first, reverse=True)
+        candidates = [m for m in eligible if CAPTURE_ORIGIN_TAG not in m.tags]
+        candidates.extend(answers[:CAPTURE_ANSWER_CANDIDATES])
+        candidates.sort(key=rank, reverse=True)
         top = candidates[:limit]
         preview_len = self._settings.preview_length
         suggested: list[dict[str, str]] = []
@@ -1510,6 +1554,8 @@ class MemoryService:
     def _delete_record(self, ref_id: str) -> bool:
         """Delete one record from the vector store and the BM25 index."""
         deleted = self._vector_store.delete(ref_id)
+        if deleted and self._seen_count is not None:
+            self._seen_count -= 1
         try:
             self._sparse_index.remove(ref_id)
         except Exception:
@@ -1529,3 +1575,14 @@ class MemoryService:
         all_memories = self._vector_store.list_all()
         documents = [(m.ref_id, m.content) for m in all_memories if DOCUMENT_BODY_TAG not in m.tags]
         self._sparse_index.rebuild(documents)
+        self._seen_count = len(all_memories)
+
+    def _catch_up_with_other_writers(self) -> None:
+        """When the store's record count differs from the one this process last saw, another process wrote to it
+        (a hook, capture, another server): refresh the dense index and rebuild BM25 so recall sees those records
+        (#139). One count per recall otherwise. An addition and a deletion by others between two recalls leave the
+        count equal and go unseen until the next difference."""
+        if self._seen_count is None or self._vector_store.count() == self._seen_count:
+            return
+        self._vector_store.refresh()
+        self.rebuild_sparse_index()
