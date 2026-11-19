@@ -105,6 +105,9 @@ class MemKernelSettings(BaseSettings):
     transport: Literal["stdio", "streamable-http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8765
+    # Streamable HTTP's Host/Origin check (#148): extra host names a client may use, comma-separated, beside the ones
+    # MEMKERNEL_HOST implies. Needed for a wildcard bind (0.0.0.0, ::), where clients send the machine's real name.
+    allowed_hosts: str = ""
 
     @classmethod
     def settings_customise_sources(
