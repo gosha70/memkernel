@@ -1271,9 +1271,12 @@ class MemoryService:
         def rank(m: Memory) -> float:
             return m.importance * (1 + m.access_count)
 
+        def newest_first(m: Memory) -> tuple[float, float]:
+            return rank(m), m.timestamp.timestamp()  # captured answers tie on rank: the newest win (A3)
+
         # memkernel-0-12-capture-core D5: captured records are never candidates, except the owner's answers, at most
         # CAPTURE_ANSWER_CANDIDATES of them (memkernel-0-14-capture-signals D6), ranked like any candidate.
-        answers = sorted((m for m in eligible if _is_owner_answer(m)), key=rank, reverse=True)
+        answers = sorted((m for m in eligible if _is_owner_answer(m)), key=newest_first, reverse=True)
         candidates = [m for m in eligible if CAPTURE_ORIGIN_TAG not in m.tags]
         candidates.extend(answers[:CAPTURE_ANSWER_CANDIDATES])
         candidates.sort(key=rank, reverse=True)

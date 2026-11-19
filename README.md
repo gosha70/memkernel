@@ -137,9 +137,10 @@ three kinds of record:
   later answers often revise earlier ones. At most 2 of them appear among the promotion candidates at session
   start, so a decision you made reaches the next session without a search.
 - **One session outcome** per session: the PRs it opened and merged, the issues it filed, and the files it edited
-  (the first 10, then a count). A PR or issue counts only from a call that creates or merges it (`gh pr create`,
-  `gh issue create`, `gh pr merge`, or a GitHub MCP tool that creates or merges); reading or listing PRs records
-  nothing. A short-term `episode`.
+  (the first 10 of each, then a count). A PR or issue counts only from a call that creates or merges it
+  (`gh pr create`, `gh issue create`, `gh pr merge`, or GitHub's MCP `create_pull_request`, `create_issue`,
+  `issue_write` with `method: create`, `merge_pull_request`); reading, listing, reviewing or commenting on PRs
+  records nothing. A short-term `episode`.
 - **Failed-then-fixed commands:** a `Bash` command that failed with its own non-zero exit code and later passed when
   run again in the same session. Each one becomes a short-term `observation`, such as
   ``Command `pytest -q` failed: `FAILED tests/test_a.py::test_x - AssertionError`. It passed later in the same session, after: src/a.py.``,

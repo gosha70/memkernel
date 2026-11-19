@@ -74,11 +74,18 @@ CAPTURE_LOCK_FILE = "capture.lock"  # beside the spool file: one capture at a ti
 ANSWER_SESSION_MAX = 30  # owner answers kept per session: the last 30 in transcript order
 ANSWER_TEXT_MAX = 600  # characters of the owner's own words in one answer (an option's text is far shorter)
 OUTCOME_FILES = 10  # edited files named in a session outcome; the rest is a count
+OUTCOME_LINKS = 10  # PR or issue links of each kind named in a session outcome; the rest is a count (A1)
 ANSWER_CANDIDATES = CAPTURE_ANSWER_CANDIDATES  # owner answers among the promotion candidates (applied in core)
 OUTCOME_KEY = "session"  # a session outcome's call key: one record per session
 ASK_TOOL = "AskUserQuestion"
 OUTCOME_EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 MCP_PREFIX = "mcp__"
+# A2: the MCP calls that create or merge a PR or an issue itself. A review or comment carries the PR's URL in its
+# result but creates neither, so a tool whose name says so never counts, whatever its method.
+MCP_CREATES = ("create_pull_request", "create_issue")
+MCP_MERGES = ("merge_pull_request",)
+MCP_ISSUE_WRITE = "issue_write"
+MCP_NOT_OUTCOMES = ("review", "comment")
 
 # The count's stored-error words (memkernel-0-10-recall-log D5), shared with it (FR-005, FR-011).
 ERROR_WORDS = ("Error", "Exception", "Traceback", "FAILED", "fatal")
@@ -291,7 +298,9 @@ def extract_owner_answers(session: TranscriptSession) -> list[Signal]:
     """The owner's answers to ``AskUserQuestion``, one signal per answered question, in transcript order (S3 FR-002).
 
     An answer that is one or several offered labels names them with their descriptions, in the order offered; any
-    other answer is the owner's own words (D2). Keyed by the call and the question's index.
+    other answer is the owner's own words (D2). Keyed by the call and the question's index. A known limit: a
+    multi-select label that itself contains a comma does not split cleanly, so that answer is stored in the
+    own-words form, still whole, only less structured.
     """
     signals: list[Signal] = []
     for step in session.steps:
@@ -334,10 +343,12 @@ def _option(option: dict[str, Any]) -> str:
 def extract_outcome(session: TranscriptSession) -> list[Signal]:
     """At most one record of what the session produced: PRs opened and merged, issues filed, files edited (FR-003).
 
-    A URL counts only in the result of a call that creates (``gh pr create``, ``gh issue create``, an MCP tool
-    named with ``create`` or called with ``method: create``) or merges (``gh pr merge``, an MCP tool named with
-    ``merge`` or called with ``method: merge``); reads and lists are ignored. A merge without a URL in its result
-    gets one built from its input.
+    A URL counts only in the result of a call that creates the PR or issue itself (``gh pr create``,
+    ``gh issue create``, the MCP ``create_pull_request``, ``create_issue``, or ``issue_write`` with
+    ``method: create``) or merges a PR (``gh pr merge``, the MCP ``merge_pull_request``); reads, lists, reviews and
+    comments are ignored (A2). A merge without a URL in its result gets one built from its input. A command that both
+    creates and merges (``gh pr create ... && gh pr merge --auto``) counts as both. Each kind of link names at most
+    OUTCOME_LINKS, then a count (A1).
     """
     steps = [s for s in session.steps if not s.sidechain and s.has_result and not s.is_error]
     session_repo = _session_repo(steps)
@@ -346,11 +357,11 @@ def extract_outcome(session: TranscriptSession) -> list[Signal]:
     merged: list[str] = []
     edited: list[str] = []
     for step in steps:
-        kind = _github_call_kind(step)
-        if kind == "create":
+        kinds = _github_call_kinds(step)
+        if "create" in kinds:
             for owner, repo, what, number in _GITHUB_URL.findall(step.result):
                 (opened if what == "pull" else filed).append(_url(owner, repo, what, number))
-        elif kind == "merge":
+        if "merge" in kinds:
             url = _merged_url(step, session_repo)
             if url:
                 merged.append(url)
@@ -359,33 +370,42 @@ def extract_outcome(session: TranscriptSession) -> list[Signal]:
             if path:
                 edited.append(path)
     parts = [
-        f"{label} {', '.join(dict.fromkeys(urls))}"
+        f"{label} {_capped(list(dict.fromkeys(urls)), OUTCOME_LINKS)}"
         for label, urls in (("opened PR", opened), ("merged PR", merged), ("filed issue", filed))
         if urls
     ]
     files = list(dict.fromkeys(edited))
     if files:
-        named = ", ".join(stored_text(f) for f in files[:OUTCOME_FILES])
-        more = f" (and {len(files) - OUTCOME_FILES} more)" if len(files) > OUTCOME_FILES else ""
-        parts.append(f"edited {len(files)} file(s): {named}{more}")
+        parts.append(f"edited {len(files)} file(s): {_capped([stored_text(f) for f in files], OUTCOME_FILES)}")
     if not parts:
         return []
     return [Signal(OUTCOME_KEY, f"Session outcome: {'; '.join(parts)}.", SESSION_OUTCOME, MemoryType.EPISODE)]
 
 
-def _github_call_kind(step: ToolStep) -> str | None:
-    """``create``, ``merge`` or None (FR-003): which GitHub calls count; reads and lists never do."""
+def _capped(items: list[str], limit: int) -> str:
+    """The first ``limit`` items, then how many more."""
+    more = f" (and {len(items) - limit} more)" if len(items) > limit else ""
+    return f"{', '.join(items[:limit])}{more}"
+
+
+def _github_call_kinds(step: ToolStep) -> set[str]:
+    """Which of ``create`` and ``merge`` a call is (FR-003, A2); reads, lists, reviews and comments are neither."""
+    kinds: set[str] = set()
     if step.tool == BASH_TOOL:  # the URL in the result is the evidence, so a piped `gh ... | tail -1` counts too
+        if _GH_CREATE.search(step.command):
+            kinds.add("create")
         if _GH_MERGE.search(step.command):
-            return "merge"
-        return "create" if _GH_CREATE.search(step.command) else None
-    if not step.tool.startswith(MCP_PREFIX):
-        return None
+            kinds.add("merge")
+        return kinds
     name = step.tool.lower()
+    if not name.startswith(MCP_PREFIX) or any(word in name for word in MCP_NOT_OUTCOMES):
+        return kinds
     method = str(step.tool_input.get("method", "")).lower()
-    if "merge" in name or method == "merge":
-        return "merge"
-    return "create" if "create" in name or method == "create" else None
+    if name.endswith(MCP_CREATES) or (name.endswith(MCP_ISSUE_WRITE) and method == "create"):
+        kinds.add("create")
+    if name.endswith(MCP_MERGES):
+        kinds.add("merge")
+    return kinds
 
 
 def _merged_url(step: ToolStep, session_repo: str | None) -> str | None:

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -317,3 +317,50 @@ def test_one_recall_result_holds_at_most_three_captured_records_per_origin_sessi
     found = [r.ref_id for r in svc.recall(text, top_k=5)]
     assert sum(ref in found for ref in heavy) == 3
     assert other in found and own in found
+
+
+# ── after the review of #150 (A1–A3) ───────────────────────────────────────
+
+
+def test_links_of_each_kind_are_capped_then_counted() -> None:
+    urls = "\n".join(f"https://github.com/o/r/pull/{n}" for n in range(1, 14))
+    (signal,) = capture.extract_outcome(_session(_step("Bash", urls, command="for i in 1..13; gh pr create")))
+    assert "opened PR https://github.com/o/r/pull/1, " in signal.content
+    assert "https://github.com/o/r/pull/10 (and 3 more)" in signal.content
+    assert "pull/11" not in signal.content
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("mcp__github__pull_request_review_write", {"method": "create", "owner": "o", "repo": "r", "pullNumber": 5}),
+        ("mcp__github__create_pending_pull_request_review", {"owner": "o", "repo": "r", "pullNumber": 5}),
+        ("mcp__github__add_issue_comment", {"owner": "o", "repo": "r", "issue_number": 5}),
+        ("mcp__github__create_branch", {"owner": "o", "repo": "r", "branch": "b"}),
+        ("mcp__github__issue_write", {"method": "update", "owner": "o", "repo": "r", "issue_number": 5}),
+    ],
+)
+def test_reviews_comments_and_other_creates_are_not_outcomes(tool: str, tool_input: dict[str, Any]) -> None:
+    """A2: a review carries the PR's URL in its result, but opens nothing."""
+    result = json.dumps({"html_url": "https://github.com/o/r/pull/5#pullrequestreview-1"})
+    assert capture.extract_outcome(_session(_step(tool, result, tool_input=tool_input))) == []
+
+
+def test_a_command_that_creates_and_merges_records_both() -> None:
+    step = _step("Bash", "https://github.com/o/r/pull/21", command="gh pr create --fill && gh pr merge --auto --squash")
+    (signal,) = capture.extract_outcome(_session(step))
+    assert "opened PR https://github.com/o/r/pull/21" in signal.content
+    assert "merged PR https://github.com/o/r/pull/21" in signal.content
+
+
+def test_the_two_newest_answers_are_the_candidates_when_they_tie(tmp_path: Path) -> None:
+    """A3: captured answers tie on rank; the newest win, not whichever the store lists first."""
+    _, svc, _ = _setup(tmp_path)
+    refs = [
+        _captured_record(svc, f"answer {i}", capture.OWNER_ANSWER, "s1", f"c#{i}", MemoryType.EPISODE) for i in range(4)
+    ]
+    base = datetime.now(UTC)
+    for age, ref in zip((3, 2, 1, 0), refs, strict=True):  # refs[3] is the newest
+        svc._vector_store.update_metadata(ref, {"timestamp": (base - timedelta(days=age)).isoformat()})
+    candidates = [c["ref_id"] for c in svc.consolidate(limit=10)["candidates"]]
+    assert [ref for ref in refs if ref in candidates] == refs[2:]
