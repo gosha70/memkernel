@@ -1,0 +1,33 @@
+{
+  "about": "SC-8 on transcripts in Claude Code's on-disk shape (2.1.x): batched results, attachment, system, api-request and api-request-blob lines, a hook block, a piped run. Fixture times start at `base`; the test moves them after the store is written.",
+  "base": "2026-11-17T10:00:00Z",
+  "memories": {
+    "left_pad": "npm test fails with `Error: Cannot find module 'left-pad'`",
+    "bare": "a bare `ValueError` is not a stored error",
+    "plain": "Use Postgres for the user store."
+  },
+  "recalls": [
+    {"origin": "hook", "session": "sess-d", "memories": ["left_pad"], "at": "2026-11-17T10:10:00Z"},
+    {"origin": "hook", "session": "sess-e", "memories": ["plain"], "at": "2026-11-17T10:20:00Z"},
+    {"origin": "tool", "query": "left-pad module", "memories": ["left_pad"], "at": "2026-11-17T10:21:00.300Z"},
+    {"origin": "tool", "query": "npm test failure", "memories": ["left_pad"], "at": "2026-11-17T10:31:00.300Z"}
+  ],
+  "repeats": [
+    {"session": "sess-d", "agent": "a3f9c2e81b7d4056e", "outcome": "not shown", "command": "npm test 2>&1",
+     "why": "the parent was shown the memory, the subagent was not (R10, R14)"},
+    {"session": "sess-e", "agent": "", "outcome": "missed", "command": "npm test",
+     "why": "the subagent's recall is not the main thread's; the failing result is the second of a batched entry (R12)"},
+    {"session": "sess-f", "agent": "a0c58e3f1d9b27c44", "outcome": "shown", "command": "npm test",
+     "why": "the subagent recalled the memory before its own failure (R14)"},
+    {"session": "sess-g", "agent": "a5d2e9b04c61f73a8", "outcome": "not shown", "command": "npm ci && npm test",
+     "why": "a workflow agent counts as a subagent; journal.jsonl beside it is not read (R15)"},
+    {"session": "sess-h", "agent": "review-abc", "outcome": "not shown", "command": "npm test",
+     "why": "no agentId in the lines: the id is the whole file name after `agent-` (R15)"}
+  ],
+  "no_repeat": {
+    "sess-b": "`cat NOTES.md` quotes the error but did not fail (R8); the hook-blocked `npm test` never ran (FR-005); `npm test 2>&1 | tail -5` exits with tail's status, so it is not a failed run (D7, a limit the README names)"
+  },
+  "stored_errors": 1,
+  "repeats_main": 1,
+  "subagent_repeats": 4
+}
