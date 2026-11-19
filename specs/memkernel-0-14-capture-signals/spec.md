@@ -61,10 +61,17 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   index). Redacted (FR-006).
 - **FR-003 Extractor: session outcome (D4).** One record per session that opened or merged a PR, filed an issue or
   edited files: the PR and issue URLs, and the edited files (at most `OUTCOME_FILES`, then a count). The URLs are
-  found by shape, not by tool name: a GitHub `https://github.com/<owner>/<repo>/pull/<n>` or `/issues/<n>` URL in
-  the result of a `gh pr create` or `gh issue create` run, or of a GitHub MCP tool call that creates a PR or an
-  issue. Tool names differ between servers (GitHub's MCP server files an issue with `issue_write`, method
-  `create`), so matching names would miss calls. A merge's result may carry no URL, so a merged PR's URL is built
+  found by shape: a GitHub `https://github.com/<owner>/<repo>/pull/<n>` or `/issues/<n>` URL in the result of a call
+  that **creates** a PR or an issue, or of one that **merges** a PR. Which calls count:
+  - **creates:** a `gh pr create` or `gh issue create` run, or an MCP tool whose name contains `create`, or whose
+    input has `method: create` (GitHub's MCP server files an issue with `issue_write`, method `create`);
+  - **merges:** a `gh pr merge` run, or an MCP tool whose name contains `merge`, or whose input has
+    `method: merge`;
+  - **anything else is ignored,** however many URLs its result holds: read and list calls (`pull_request_read`,
+    `list_pull_requests`, `issue_read`, `gh pr view`) return `html_url`s too, and a session that only looked at PRs
+    must record no outcome.
+
+  Matching by URL shape covers servers whose tool names differ; the create or merge test keeps reads out. A merge's result may carry no URL, so a merged PR's URL is built
   from the call's input (owner, repo and PR number; for `gh pr merge`, the number or URL argument and the session's
   repository). Sessions that work through the MCP tools, as cloud sessions do, would otherwise record no outcome.
   The local transcripts hold no GitHub MCP calls, so that path's yield is unmeasured; the build cuts a fixture from
@@ -115,7 +122,8 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   owner's own text) yields two owner-answer records with the FR-002 content; a cut from a real transcript.
 - **SC-2** A fixture session that opens a PR, files an issue and edits three files yields one outcome record, from
   `gh` output and, in a second fixture, from GitHub MCP tool results (an issue filed with `issue_write`, a merge
-  whose result carries no URL); a session with none of these yields none. A
+  whose result carries no URL); a session with none of these yields none, and so does a session whose only GitHub
+  calls are reads (`pull_request_read`, `list_pull_requests`, `issue_read`) returning PR and issue URLs. A
   multi-select answer yields one record listing every chosen label.
 - **SC-3** Re-capturing a session stores nothing twice (the S2 key rules), and the caps hold per extractor; a session
   with 35 answers stores its last 30, the same 30 on a retry.
