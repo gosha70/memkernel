@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -137,6 +138,12 @@ CAPTURE_SESSION_TAG = "origin-session:"
 CAPTURE_CALL_TAG = "origin-call:"
 CAPTURE_EXTRACTOR_TAG = "origin-extractor:"
 CAPTURE_VERSION_TAG = "origin-version:"
+# memkernel-0-14-capture-signals: the owner-answer extractor's name, how many of its records may be promotion
+# candidates (D6), and how many captured records from one origin session one recall result may hold (D7). Kept here,
+# not in capture.py, because MemoryService (core) applies them and core imports no adapter module.
+CAPTURE_EXTRACTOR_OWNER_ANSWER = "owner-answer"
+CAPTURE_ANSWER_CANDIDATES = 2
+CAPTURE_RECALL_PER_SESSION = 3
 # Store locks (memkernel-0-7-store-locks L2): the names a caller may take with ``VectorStorePort.exclusive``.
 STORE_LOCK_WIKI_IMPORT = "wiki-import"
 STORE_LOCK_TAGS = "tags"  # held by ``merge_tags``, the only writer of a record's tags
@@ -339,6 +346,11 @@ class ToolStep(BaseModel):
     result: str = ""
     sidechain: bool = False
     agent_id: str = ""
+    # memkernel-0-14-capture-signals FR-001, FR-003: the call's whole input (an MCP tool's method, owner, repo,
+    # PR number), and an AskUserQuestion call's structured questions and answers (question text → answer).
+    tool_input: dict[str, Any] = {}
+    questions: list[dict[str, Any]] = []
+    answers: dict[str, str] = {}
 
 
 class TranscriptSession(BaseModel):

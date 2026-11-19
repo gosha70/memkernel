@@ -130,20 +130,35 @@ See the Prerequisites section inside each script for the Python environment requ
 #### Capture (opt-in)
 
 With `MEMKERNEL_CAPTURE=1`, each normal startup reads the transcripts of sessions that have ended since, and stores
-**failed-then-fixed commands**: a `Bash` command that failed with its own non-zero exit code and later passed when
-run again in the same session. Each one becomes a short-term `observation`, such as
-``Command `pytest -q` failed: `FAILED tests/test_a.py::test_x - AssertionError`. It passed later in the same session, after: src/a.py.``,
-which expires after `MEMKERNEL_OBSERVATION_TTL_DAYS` like any observation. `session-end.py` must be registered,
-since its spool line names the transcript.
+three kinds of record:
+- **Your answers to the agent's questions** (`AskUserQuestion`), one per answered question: the question, the option
+  you chose with its description, or your own words when you typed an answer, and the other options offered. Each is a
+  short-term `episode`, kept for `MEMKERNEL_EPISODE_TTL_DAYS` (30 days). A session keeps its last 30 answers, since
+  later answers often revise earlier ones. At most 2 of them appear among the promotion candidates at session
+  start, so a decision you made reaches the next session without a search.
+- **One session outcome** per session: the PRs it opened and merged, the issues it filed, and the files it edited
+  (the first 10 of each, then a count). A PR or issue counts only from a call that creates or merges it
+  (`gh pr create`, `gh issue create`, `gh pr merge`, or GitHub's MCP `create_pull_request`, `create_issue`,
+  `issue_write` with `method: create`, `merge_pull_request`); reading, listing, reviewing or commenting on PRs
+  records nothing. A short-term `episode`.
+- **Failed-then-fixed commands:** a `Bash` command that failed with its own non-zero exit code and later passed when
+  run again in the same session. Each one becomes a short-term `observation`, such as
+  ``Command `pytest -q` failed: `FAILED tests/test_a.py::test_x - AssertionError`. It passed later in the same session, after: src/a.py.``,
+  which expires after `MEMKERNEL_OBSERVATION_TTL_DAYS` like any observation.
 
-- **It captures rarely.** On 65 real transcripts, 1 of 289 failed commands was followed by a passing rerun of the
-  same command: agents usually change a command before running it again. This is the pipeline's first extractor;
-  later work (#59, S3) adds extractors that capture more.
+`session-end.py` must be registered, since its spool line names the transcript. The redaction below applies to every
+field of every record, your answers included.
+
+- **Yields differ.** On the maintainer's local transcripts (78 sessions), 222 answers came from 17 sessions and 58
+  sessions had an outcome, while failed-then-fixed matched 1 of 289 failed commands: agents usually change a command
+  before running it again.
+- **One recall result holds at most 3 captured records from any one session,** so a session with many answers
+  cannot fill it; records you or the agent stored are not limited.
 - **What counts as the same command:** the same text after removing a trailing `| tail`, `| head`, `| grep` or
   `2>&1`. A run counts as failed or passed only when its exit code is the command's own: a command piped into a
   filter without `set -o pipefail` reports the filter's exit code, so it is not judged. An error printed by a
   command that exits 0 is not captured.
-- **Redaction is best-effort.** Before storing, each command, error line and edited file path has these replaced
+- **Redaction is best-effort.** Before storing, each command, error line, answer and file path has these replaced
   with `[REDACTED]`: values of `…KEY=`, `…TOKEN=`, `…SECRET=`, `…PASSWORD=` assignments (and `.env` lines of that
   shape); `Authorization:` header values; tokens starting `AKIA`, `ghp_`, `gho_`, `github_pat_`, `sk-`, `xox`;
   private key blocks; credentials in URLs; and random-looking strings: 32 or more letters, digits and `+/=_-`

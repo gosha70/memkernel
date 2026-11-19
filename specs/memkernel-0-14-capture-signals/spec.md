@@ -99,6 +99,7 @@ overnight on the owner's instruction to open a PR per issue; nothing here is bui
 |---|---|---|
 | `ANSWER_SESSION_MAX` | 30, the last in transcript order | D5, from the per-session table |
 | `OUTCOME_FILES` | 10 | Names the files a session mostly worked on; the rest is a count ("and 23 more"). |
+| `OUTCOME_LINKS` | 10 | A1: PR or issue links of each kind; the rest is a count. |
 | `ANSWER_CANDIDATES` | 2 | D6: owner answers among the promotion candidates, so they cannot crowd out the agent's own. |
 
 ## Constraints / What NOT to Build
@@ -151,3 +152,18 @@ overnight on the owner's instruction to open a PR per issue; nothing here is bui
   memories keep the other places.
 - **D7 A recall limit per origin session:** at most 3 captured records per origin session in one recall result, so
   one heavy session cannot fill it (FR-008).
+
+## Amendments (the owner's, 2026-11-19, from the review of #150 at `3a16d5b`)
+
+- **A1 Links capped:** a session outcome names at most `OUTCOME_LINKS` (10) links of each kind, then a count ("and
+  14 more"), as it does edited files. An outcome is a pointer to the work, not a full list (the longest uncapped one
+  was 7,421 characters).
+- **A2 Which MCP calls count (narrows FR-003):** only calls that create or merge the PR or issue itself:
+  `create_pull_request`, `create_issue`, `issue_write` with `method: create`, and `merge_pull_request`. A tool whose
+  name contains `review` or `comment` never counts: `pull_request_review_write` with `method: create` posts a
+  review, and its result carries the PR's URL. A command that both creates and merges (`gh pr create ... && gh pr
+  merge --auto`) counts as both.
+- **A3 Newest answers first:** captured answers tie on the candidates' rank, so ties go to the newest, not to
+  whichever the store lists first (D5: later answers revise earlier ones).
+- **Known limit:** a multi-select label that itself contains a comma does not split cleanly; that answer is stored
+  whole, in the own-words form.
