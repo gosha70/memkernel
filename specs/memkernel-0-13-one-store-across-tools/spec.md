@@ -17,10 +17,10 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   `recall(order="newest")`) were not affected. Fixed on `main` (#140, reverted by mistake in #145, re-landed with
   an `ask` follow-up in #146): a count check before relevance recall. It affected the single-tool Claude Code setup
   too (hook-written checkpoints, startup capture).
-- **The HTTP transport has no host or origin checks today.** The MCP SDK builds its transport security with
-  `enable_dns_rebinding_protection=False` when none is passed (`mcp.server.transport_security`), and memkernel's
-  `run_server` passes none. A web page can reach a server on `127.0.0.1` through DNS rebinding, and anything on the
-  machine can read and write the store: there is no authentication.
+- **A non-loopback HTTP bind had no host or origin check** (#148). `MCPServer` turns the SDK's DNS-rebinding
+  protection on by itself for a loopback bind (`127.0.0.1`, `localhost`, `::1`), so the default setup was protected;
+  `MEMKERNEL_HOST=0.0.0.0` or a LAN address got no check, and a `0.0.0.0` bind also answers on `127.0.0.1`. There
+  is no authentication in any setup. #149 fixes the non-loopback case, with `MEMKERNEL_ALLOWED_HOSTS`.
 - **Store locks are cross-process** (`fcntl` on POSIX, memkernel-0-7-store-locks): the wiki import and tag writes
   are serialised across processes; on Windows they run unlocked with a warning.
 - **Session-start context is automatic only in Claude Code** (`templates/hooks/session-start.py`) **and Kiro**
@@ -54,11 +54,8 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   Codex (`.codex/config.toml`), Cursor (`.cursor/mcp.json`) and Antigravity (`.agents/mcp_config.json`,
   `serverUrl`). A test runs two MCP clients against one server subprocess: a `retain` through one is recalled
   through the other.
-  - **Local only.** The server runs with the SDK's transport security on: `enable_dns_rebinding_protection=True`,
-    hosts `127.0.0.1:*` and `localhost:*`, origins `http://127.0.0.1:*` and `http://localhost:*`. A request with
-    another `Host` or `Origin` is refused. The README says "local only, no authentication".
-  - **This applies to the HTTP transport as it is today,** so it can ship before the rest of this spec, as its own
-    fix.
+  - **Local only.** The host and origin checks follow `MEMKERNEL_HOST`, with `MEMKERNEL_ALLOWED_HOSTS` for a
+    wildcard bind; that ships on its own as #149 (#148). The README section says "local only, no authentication".
 - **FR-003 `memkernel session-start` (D2).** A subcommand that reads the hook's JSON from stdin when there is one
   (for `source` and `session_id`), runs `MemoryLifecycle.on_session_start`, and prints the block in the shape
   `--format` names: `plain` (stdout text: Claude Code, Codex), `cursor` (`{"additional_context": …}`),
