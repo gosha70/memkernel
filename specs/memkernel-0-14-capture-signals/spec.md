@@ -1,7 +1,7 @@
 # Spec: capture signals with real yield, owner answers and session outcomes (#59 Phase 2, S3)
 
-Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D7 are
-**proposed, for the owner's decision**, and nothing here is built yet. S3's issue is #147 (filed 2026-11-18,
+Status: approved by the owner, 2026-11-18 ("#142: go with the recommendations"): D1–D7 as listed below. Drafted
+overnight on the owner's instruction to open a PR per issue; nothing here is built yet. S3's issue is #147 (filed 2026-11-18,
 #59 D5: one issue per slice); S4 is noted on #59.
 
 ## Checked facts (`main` at `4ef72c2`)
@@ -131,24 +131,23 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
 - **SC-5** A recall whose top matches are 6 captured answers from one session returns 3 of them and the next-best
   records from elsewhere (FR-008).
 
-## Decisions (proposed, for the owner)
+## Decisions (the owner's, 2026-11-18)
 
 - **D1 First S3 extractors: owner answers and session outcomes.** They have the yield (222 answers in 17 sessions;
-  outcomes in 58 of 78 sessions) and keep to structured fields. Recommended.
+  outcomes in 58 of 78 sessions) and keep to structured fields.
 - **D2 The owner's own text in an answer ("Other").** Include it: #59's rules allow free text from owner turns, and
-  73 of 222 answers are the owner's own words, often the actual decision. Alternative: offered options only.
-  Recommended: include, redacted.
+  73 of 222 answers are the owner's own words, often the actual decision. Included, redacted.
 - **D3 Record type for an owner answer: `episode`** (short-term, kept 30 days, `episode_ttl_days`). Not `decision`,
   which is long-term by type and would enter long-term memory without the agent choosing; not `observation`, which
   expires after 7 days (`observation_ttl_days`), so an answer nobody promoted within a week would be lost and the
-  first user scenario would fail. Recommended (from the review of this spec, 2026-11-18).
+  first user scenario would fail.
 - **D4 Session outcome contents:** PR and issue URLs, matched by URL shape in `gh` output and GitHub MCP results
-  (a merge's URL built from its input), plus edited files; no commits. Recommended.
+  (a merge's URL built from its input), counted only for create and merge calls, plus edited files; no commits.
 - **D5 Caps:** owner answers 30 per session, keeping the **last** 30; failed-then-fixed and session outcome as in S2
   (5 per session, the first N); the run cap of 20 shared. The owner's choice of 30 and "keep the last", from the
   per-session table (2026-11-18); a cap of 5 would keep 34% of the answers.
 - **D6 Promotion: at most 2 owner answers among the promotion candidates;** every other captured record stays out
   (S2 D5). With D3's 30 days, an answer reaches the agent at startup without a search, while the agent's own
-  memories keep the other places. Recommended (from the review of this spec, 2026-11-18).
+  memories keep the other places.
 - **D7 A recall limit per origin session:** at most 3 captured records per origin session in one recall result, so
-  one heavy session cannot fill it (FR-008). Proposed by the owner, 2026-11-18.
+  one heavy session cannot fill it (FR-008).

@@ -1,7 +1,7 @@
 ---
 feature_id: memkernel-0-14-capture-signals
 spec_mode: full
-status: draft
+status: approved
 date: 2026-11-18
 collaboration_mode: single
 origin:
