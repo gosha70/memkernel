@@ -17,6 +17,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Capture stores your answers and each session's outcome** (#147; specs/memkernel-0-14-capture-signals). With
+  `MEMKERNEL_CAPTURE=1`, each answer to the agent's `AskUserQuestion` becomes a short-term episode (the option you
+  chose, or your own words), and each session gets one outcome record: PRs opened and merged, issues filed (from
+  `gh` or GitHub's MCP tools, creates and merges only, never reviews or comments) and files edited, at most 10 of
+  each, then a count. A session keeps its last 30 answers; at most 2 answers, the newest, are promotion candidates;
+  one recall result holds at most 3 captured records from any one session.
+
 - **Capture, opt-in** (#134; specs/memkernel-0-12-capture-core). With `MEMKERNEL_CAPTURE=1`, normal startup reads
   the transcripts of sessions that ended since and stores each failed-then-fixed command (a `Bash` command that
   failed with its own exit code, then passed when run again) as a short-term observation, redacted best-effort.
