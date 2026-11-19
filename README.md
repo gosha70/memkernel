@@ -401,8 +401,8 @@ request whose `Host` header names another host is refused, so a web page can't r
 rebinding; so is a browser request from another origin.
 - **Loopback** (`127.0.0.1`, the default): the loopback names are allowed.
 - **A specific address:** that address is allowed, with a logged warning that there's no authentication.
-- **`0.0.0.0` or `::`:** list the names clients use in `MEMKERNEL_ALLOWED_HOSTS`. Without it, the server runs with
-  no check, with a warning; don't expose it to a network you don't trust.
+- **`0.0.0.0` or `::`:** the loopback names plus the names clients use, listed in `MEMKERNEL_ALLOWED_HOSTS`.
+  Without that setting, the server runs with no check, with a warning; don't expose it to a network you don't trust.
 
 ---
 

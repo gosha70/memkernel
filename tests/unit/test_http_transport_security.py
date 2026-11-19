@@ -52,4 +52,10 @@ def test_a_wildcard_bind_needs_allowed_hosts(caplog: pytest.LogCaptureFixture) -
     assert any("MEMKERNEL_ALLOWED_HOSTS" in r.message for r in caplog.records)
     settings = _checked("0.0.0.0", "my-box, my-box.local")
     assert {"my-box:*", "my-box.local:*"} <= set(settings.allowed_hosts)
+    assert {"127.0.0.1:*", "localhost:*"} <= set(settings.allowed_hosts)  # local tools still reach a wildcard bind
     assert "0.0.0.0:*" not in settings.allowed_hosts
+
+
+def test_origins_cover_the_default_port() -> None:
+    settings = _checked("192.168.1.20", "my-box")
+    assert {"http://my-box", "http://my-box:*", "https://my-box", "https://my-box:*"} <= set(settings.allowed_origins)

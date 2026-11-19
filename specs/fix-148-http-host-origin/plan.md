@@ -24,10 +24,15 @@ non-loopback binds and adds `MEMKERNEL_ALLOWED_HOSTS`.
 
 ## Change
 - `memkernel.mcp.server.transport_security(settings)`: loopback keeps the SDK's names (`127.0.0.1`, `localhost`,
-  `[::1]`); a specific address allows itself, with a warning; a wildcard bind allows `MEMKERNEL_ALLOWED_HOSTS`, or
+  `[::1]`); a specific address allows itself, with a warning; a wildcard bind allows the loopback names and
+  `MEMKERNEL_ALLOWED_HOSTS`, or
   runs unchecked with a warning when it is empty; the allowed origins follow the same names (http and https).
 - `run_server` passes it to the Streamable HTTP transport. `MEMKERNEL_ALLOWED_HOSTS` (comma-separated) in settings.
 - README (the setting; "local only, no authentication"); CHANGELOG under Security.
+
+## Re-review (2026-11-18, passed on by the owner)
+- A wildcard bind also allows the loopback names (it answers on loopback, and local tools register
+  `http://127.0.0.1:8765/mcp`); the allowed origins include each name without a port.
 
 ## Tests
 - Unit: the names and warnings per bind (loopback, IPv6 loopback, a specific address, wildcard with and without

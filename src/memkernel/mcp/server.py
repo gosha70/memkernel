@@ -93,9 +93,10 @@ def transport_security(settings: MemKernelSettings) -> TransportSecuritySettings
 
     The SDK already turns the check on for a loopback bind, with these loopback names; this keeps that and adds
     ``MEMKERNEL_ALLOWED_HOSTS``. A non-loopback bind had no check: a specific address now allows itself, with a
-    warning; a wildcard bind allows only ``MEMKERNEL_ALLOWED_HOSTS``, and without them runs unchecked, as before,
-    with a warning. ``MEMKERNEL_ALLOWED_HOSTS`` adds names in every case. A request with another ``Host`` gets 421,
-    one with another ``Origin`` 403; a request without an ``Origin`` (any non-browser client) is not refused for it.
+    warning; a wildcard bind allows the loopback names and ``MEMKERNEL_ALLOWED_HOSTS`` (it answers on loopback too),
+    and without them runs unchecked, as before, with a warning. ``MEMKERNEL_ALLOWED_HOSTS`` adds names in every
+    case. A request with another ``Host`` gets 421, one with another ``Origin`` 403; a request without an ``Origin``
+    (any non-browser client) is not refused for it.
     """
     host = settings.host.strip()
     extra = [name.strip() for name in settings.allowed_hosts.split(",") if name.strip()]
@@ -109,13 +110,18 @@ def transport_security(settings: MemKernelSettings) -> TransportSecuritySettings
                 host or "(empty)",
             )
             return None
-        names = extra
+        names = [*_LOOPBACK_NAMES, *extra]  # a wildcard bind answers on loopback too, and local tools use it
     else:
         names = [host, *extra]
     if host not in LOOPBACK_HOSTS:
         logger.warning("memkernel: MEMKERNEL_HOST=%s is not a loopback address and there is no authentication", host)
     hosts = [form for name in names for form in (_host_form(name), f"{_host_form(name)}:*")]
-    origins = [f"{scheme}://{_host_form(name)}:*" for name in names for scheme in ("http", "https")]
+    origins = [
+        form
+        for name in names
+        for scheme in ("http", "https")
+        for form in (f"{scheme}://{_host_form(name)}", f"{scheme}://{_host_form(name)}:*")  # default port too
+    ]
     return TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
 
 
