@@ -316,6 +316,7 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
 | `MEMKERNEL_HOST` | `127.0.0.1` | Host for `streamable-http` transport |
 | `MEMKERNEL_PORT` | `8765` | Port for `streamable-http` transport |
+| `MEMKERNEL_ALLOWED_HOSTS` | `` | Extra host names an HTTP client may use, comma-separated, beside those `MEMKERNEL_HOST` implies. Requests with any other `Host` header are refused (421), and browser requests from any other `Origin` (403). Needed when `MEMKERNEL_HOST` is `0.0.0.0` or `::`: without it, such a bind runs with no check, with a logged warning (see [Streamable HTTP](#streamable-http)) |
 
 ---
 
@@ -394,6 +395,14 @@ MEMKERNEL_TRANSPORT=streamable-http memkernel
 ```
 
 The server listens at `http://127.0.0.1:8765/mcp` by default.
+
+**Local only, no authentication.** Any process on the machine can read and write the store through this port. A
+request whose `Host` header names another host is refused, so a web page can't reach the server through DNS
+rebinding; so is a browser request from another origin.
+- **Loopback** (`127.0.0.1`, the default): the loopback names are allowed.
+- **A specific address:** that address is allowed, with a logged warning that there's no authentication.
+- **`0.0.0.0` or `::`:** list the names clients use in `MEMKERNEL_ALLOWED_HOSTS`. Without it, the server runs with
+  no check, with a warning; don't expose it to a network you don't trust.
 
 ---
 

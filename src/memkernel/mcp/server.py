@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from memkernel.config import MemKernelSettings
 from memkernel.factory import build_service
@@ -26,6 +27,11 @@ if TYPE_CHECKING:
     from memkernel.core.services import MemoryService
 
 logger = logging.getLogger(__name__)
+
+# The HTTP transport's Host/Origin check (#148): which binds are loopback, and which listen on every interface.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})  # noqa: S104 (names, not a bind)
+_LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")  # what the SDK itself allows on a loopback bind
 
 
 @dataclass
@@ -76,9 +82,46 @@ def create_server(
 def run_server(server: MCPServer[MemKernelContext], settings: MemKernelSettings) -> None:
     """Serve on the configured transport; host and port apply to Streamable HTTP only."""
     if settings.transport == "streamable-http":
-        server.run("streamable-http", host=settings.host, port=settings.port)
+        security = transport_security(settings)
+        server.run("streamable-http", host=settings.host, port=settings.port, transport_security=security)
     else:
         server.run("stdio")
+
+
+def transport_security(settings: MemKernelSettings) -> TransportSecuritySettings | None:
+    """The HTTP transport's Host/Origin check (#148), following ``MEMKERNEL_HOST``; there is no authentication.
+
+    The SDK already turns the check on for a loopback bind, with these loopback names; this keeps that and adds
+    ``MEMKERNEL_ALLOWED_HOSTS``. A non-loopback bind had no check: a specific address now allows itself, with a
+    warning; a wildcard bind allows only ``MEMKERNEL_ALLOWED_HOSTS``, and without them runs unchecked, as before,
+    with a warning. ``MEMKERNEL_ALLOWED_HOSTS`` adds names in every case. A request with another ``Host`` gets 421,
+    one with another ``Origin`` 403; a request without an ``Origin`` (any non-browser client) is not refused for it.
+    """
+    host = settings.host.strip()
+    extra = [name.strip() for name in settings.allowed_hosts.split(",") if name.strip()]
+    if host in LOOPBACK_HOSTS:
+        names = [*_LOOPBACK_NAMES, *extra]
+    elif host in WILDCARD_HOSTS:
+        if not extra:
+            logger.warning(
+                "memkernel: MEMKERNEL_HOST=%s listens on every interface with no Host/Origin check and no "
+                "authentication; set MEMKERNEL_ALLOWED_HOSTS to the names clients use, or bind 127.0.0.1",
+                host or "(empty)",
+            )
+            return None
+        names = extra
+    else:
+        names = [host, *extra]
+    if host not in LOOPBACK_HOSTS:
+        logger.warning("memkernel: MEMKERNEL_HOST=%s is not a loopback address and there is no authentication", host)
+    hosts = [form for name in names for form in (_host_form(name), f"{_host_form(name)}:*")]
+    origins = [f"{scheme}://{_host_form(name)}:*" for name in names for scheme in ("http", "https")]
+    return TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+
+
+def _host_form(name: str) -> str:
+    """A host as it appears in a ``Host`` header: an IPv6 address (two or more colons) in brackets."""
+    return f"[{name}]" if name.count(":") >= 2 and not name.startswith("[") else name
 
 
 def _register_health_resource(server: MCPServer[MemKernelContext], running: _Running) -> None:

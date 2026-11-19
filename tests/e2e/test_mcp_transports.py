@@ -110,3 +110,44 @@ async def test_stdio_roundtrip_against_the_memkernel_command(tmp_path: Path) -> 
     with anyio.fail_after(ROUNDTRIP_TIMEOUT_SECONDS * 5):
         async with Client(params) as client:
             await _roundtrip(client)
+
+
+async def test_the_http_transport_refuses_a_foreign_host_or_origin() -> None:
+    """#148: a foreign Host (DNS rebinding) or Origin (a web page) is refused on a loopback bind.
+
+    The SDK already did this for loopback binds; this keeps it from regressing now that memkernel passes its own
+    settings. The non-loopback cases are unit tests (test_http_transport_security.py)."""
+    import urllib.error
+    import urllib.request
+
+    port = _free_port()
+    env = _env(MEMKERNEL_TRANSPORT="streamable-http", MEMKERNEL_HOST=LOCALHOST, MEMKERNEL_PORT=str(port))
+    process = subprocess.Popen(LAUNCHER, cwd=REPO_ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+
+    def status(headers: dict[str, str]) -> int:
+        request = urllib.request.Request(  # noqa: S310 (a loopback URL built here)
+            f"http://{LOCALHOST}:{port}/mcp",
+            data=body,
+            headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream", **headers},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+                return int(response.status)
+        except urllib.error.HTTPError as error:
+            return int(error.code)
+
+    try:
+        _wait_for_port(port, process)
+        assert status({"Host": "evil.example"}) == 421
+        assert status({"Origin": "http://evil.example"}) == 403
+        with anyio.fail_after(ROUNDTRIP_TIMEOUT_SECONDS):
+            async with Client(f"http://{LOCALHOST}:{port}/mcp") as client:
+                await _roundtrip(client)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=HTTP_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()

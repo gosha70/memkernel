@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **The HTTP transport checks `Host` and `Origin` on every bind** (#148). The MCP SDK already did this for a
+  loopback bind (`127.0.0.1`, the default), so a default setup was not open to DNS rebinding. A non-loopback bind
+  (`MEMKERNEL_HOST=0.0.0.0` or an address) had no check: a specific address now allows only itself, and a wildcard
+  bind allows the names in the new `MEMKERNEL_ALLOWED_HOSTS` (without them it runs unchecked, as before, with a
+  warning). A non-loopback bind logs that there is no authentication. The README says "local only, no
+  authentication".
+
 ### Added
 
 - **Capture, opt-in** (#134; specs/memkernel-0-12-capture-core). With `MEMKERNEL_CAPTURE=1`, normal startup reads
