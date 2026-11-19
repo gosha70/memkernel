@@ -1,8 +1,8 @@
 # Spec: harness foundations, scoped knowledge, context receipts and retrieval observability (#119)
 
 Status: draft, 2026-11-18. The design and plan #119 asks for before any code ("AI Harness produces a design and
-implementation plan before coding"). Written overnight on the owner's instruction to open a PR per issue; D1–D6 are
-**proposed, for the owner's decision**, and nothing here is built yet.
+implementation plan before coding"). Approved by the owner, 2026-11-19: D1–D6 as written below, with H1 built first.
+Drafted overnight on 2026-11-18; nothing here is built yet.
 
 ## What memkernel already has (`main` at `4ef72c2`)
 
@@ -89,21 +89,22 @@ with a default from older stores (CLAUDE.md); `core/` depends only on ports.
 - **SC-4** Older stores load with every record in the `project` scope; existing callers see no change.
 - **SC-5** Fast suite, ruff, mypy strict, coverage ≥ 80%; the MCP tool set unchanged.
 
-## Decisions (proposed, for the owner)
+## Decisions (the owner's, 2026-11-19)
 
 - **D1 Scope as a metadata field** (`scope`), filtered at recall, rather than a collection per agent or task.
-  One store keeps project knowledge shared without copying it, and old records need only a default. Recommended.
+  One store keeps project knowledge shared without copying it, and old records need only a default.
 - **D2 Correlation per call and per process:** arguments on `recall` and `retain`, and environment variables for a
-  harness that starts one server per agent. Recommended.
-- **D3 Receipts in the recall log** (opt-in, as now), not a second store. Recommended.
+  harness that starts one server per agent.
+- **D3 Receipts in the recall log** (opt-in, as now), not a second store.
 - **D4 No OpenTelemetry now:** the ids in the log are what a harness's own tracing joins on; a direct dependency
-  would need an ADR. Recommended.
+  would need an ADR.
 - **D5 Three slices**, each its own spec amendment and build PR:
   - **H1, receipts and correlation** (FR-002, FR-003, FR-006): it extends the recall log, changes no retrieval, and
     gives the measurements the other two need.
   - **H2, scope and abstention** (FR-001, FR-005): the data-model change.
   - **H3, the context diff** (FR-004).
 
-  Recommended order: H1, H2, H3. #119 asks that the three areas be evaluated together, which this spec does; it
-  leaves the number of PRs to the plan.
-- **D6 Who decides an agent or task id:** the caller (the harness), never memkernel. Recommended.
+  Order: **H1 first** (the owner: it changes no retrieval and gives the measurements the other two slices need), then
+  H2, then H3. #119 asks that the three areas be evaluated together, which this spec does; it leaves the number of
+  PRs to the plan.
+- **D6 Who decides an agent or task id:** the caller (the harness), never memkernel.
