@@ -1,7 +1,8 @@
 # Spec: one memkernel store across several coding tools (#107)
 
-Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D5 are
-**proposed, for the owner's decision**, and nothing here is built yet.
+Status: approved by the owner, 2026-11-19: D1–D5 as written below. Drafted overnight on 2026-11-18 on the owner's
+instruction to open a PR per issue; nothing here is built yet. The host and origin checks shipped on their own
+(#149, for #148).
 
 ## Checked facts (`main` at `4ef72c2`)
 
@@ -102,13 +103,12 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
 - **SC-4** Each template parses as its tool's documented format (TOML, JSON, `.mdc` frontmatter, rule frontmatter).
 - **SC-5** Fast suite, ruff, mypy strict, coverage ≥ 80%; the MCP tool set unchanged.
 
-## Decisions (proposed, for the owner)
+## Decisions (the owner's, 2026-11-19)
 
 - **D1 Several stdio servers: support them** (the #139 fix is on `main`), and document the shared HTTP server as the alternative
-  for a long-running setup. Alternative: support only the shared server and document stdio-per-tool as
-  unsupported. Recommended: support both, since stdio-per-tool is what every tool's MCP config does by default and
-  the #139 fix makes it correct.
-- **D2 A `session-start` subcommand on `memkernel`**, not a separate command. Recommended.
+  for a long-running setup: both setups are supported. Stdio-per-tool is what every tool's MCP config does by default,
+  and the #139 fix makes it correct.
+- **D2 A `session-start` subcommand on `memkernel`**, not a separate command.
 - **D3 Where a hook replaces the instruction:**
   - **Codex: hook and `AGENTS.md`.** Its `SessionStart` is documented, takes plain stdout, and matches Claude
     Code's JSON shape.
@@ -117,13 +117,11 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
     README says so, without relying on it.
   - **Antigravity: the `always_on` rule only**, until its `injectSteps` shape is verified in a live session (the
     docs' examples disagree).
-  Recommended as listed.
-- **D4 The tools:** Codex, Cursor and Antigravity, as #107 names (Claude Code and Kiro exist). Recommended.
+- **D4 The tools:** Codex, Cursor and Antigravity, as #107 names (Claude Code and Kiro exist).
 - **D5 Codex's cap: `--max-chars 6000`.**
   - **The cap:** about 2,500 tokens by default per model-visible hook message.
   - **The arithmetic:** at about 4 characters per token that is about 10,000 characters, but code-heavy text runs
     nearer 3, about 7,500. The block holds code and paths, so 8,000 could pass the cap.
   - **Over the cap,** Codex saves the output to a file and shows a head-and-tail preview (its hooks docs), so it
     cuts the output, not drops it. Even so, a cut that removes the middle of the block loses the context section.
-  - **Recommended: 6,000,** a 20% margin under the code-heavy estimate. It changes nothing in Codex's own settings.
-    Alternative: raise Codex's per-hook `additionalContextLimit` in the template.
+  - **6,000,** a 20% margin under the code-heavy estimate. It changes nothing in Codex's own settings.
