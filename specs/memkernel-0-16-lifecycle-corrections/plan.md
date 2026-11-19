@@ -1,7 +1,7 @@
 ---
 feature_id: memkernel-0-16-lifecycle-corrections
 spec_mode: full
-status: draft
+status: approved
 date: 2026-11-18
 collaboration_mode: single
 origin:
@@ -24,7 +24,7 @@ origin:
 
 ## Approach
 
-1. **Tasks:** the `lc-correct` group, eight chains with X and Y references, competing pages and three-outcome
+1. **Tasks:** the `lc-correct` group, 12 chains (#90's eight and four more) with X and Y references, competing pages and three-outcome
    checkers.
 2. **Runner:** per-arm correction events; `shared_artifact` limited to the exposure state.
 3. **Arm:** `memkernel_governed` with the scripted and oracle curators and the gate-record check.

@@ -1,7 +1,7 @@
 # Tasks: memkernel-0-16-lifecycle-corrections
 
 ## US1: tasks and runner
-- [ ] The eight `lc-correct` chains with references, competing pages and checkers, including the both-values rule (FR-001, SC-1)
+- [ ] The 12 `lc-correct` chains (#90's eight and four more, D7) with references, competing pages and checkers, including the both-values rule (FR-001, SC-1)
 - [ ] Per-arm correction events; `shared_artifact` limited to exposure state (FR-002, SC-2)
 
 ## US2: the composition arm

@@ -1,7 +1,9 @@
 # Spec: a lifecycle task set that can tell the arms apart, and a governed-composition arm (#90, #17)
 
-Status: draft, 2026-11-18. Written overnight on the owner's instruction to open a PR per issue; D1–D7 are
-**proposed, for the owner's decision**, and nothing here is built yet. The design is wiki-studio's
+Status: approved by the owner, 2026-11-19: D1–D7 as written below, with 12 chains planned (D7) and `claude_md` an
+arm unless the budget rules it out (D2). **Approving this spec authorizes no paid run:** the calibration and the
+measured run each need a preregistration and a budget the owner approves. Drafted overnight on 2026-11-18; nothing
+here is built yet. The design is wiki-studio's
 (`eval/composition/design.md` at `b99484a`, filed as #90); this spec turns it into memkernel's requirements. No
 measured run happens without a preregistration and a budget the owner approves (D5).
 
@@ -30,9 +32,9 @@ measured run happens without a preregistration and a budget the owner approves (
 
 ## Requirements
 
-- **FR-001 The `lc-correct` group (D1).** Eight task chains from #90 §2.2 (deploy window, token lifetime, cache
-  invalidation, retry policy, backup retention, access review cadence, feature-flag cleanup, invoice rounding).
-  Session 0 records X; a correction between sessions changes the rule to Y; session 1 asks for the current rule
+- **FR-001 The `lc-correct` group (D1, D7).** Twelve task chains: the eight from #90 §2.2 (deploy window, token lifetime, cache
+  invalidation, retry policy, backup retention, access review cadence, feature-flag cleanup, invoice rounding), and
+  four more written to the same requirements (#90 §2.1) before the calibration (D7). Session 0 records X; a correction between sessions changes the rule to Y; session 1 asks for the current rule
   without naming the correction, its value or its page. The checker has three outcomes: X fails as obsolete, Y
   passes, anything else fails. **An answer that names both values passes when Y is there** ("it was X; now it's
   Y" is correct), and one with X alone is obsolete. A fixture pins each case. The stated limit is that an answer
@@ -90,22 +92,22 @@ measured run happens without a preregistration and a budget the owner approves (
 - **SC-4** The report has a per-group token table.
 - **SC-5** The suite's own tests, ruff and mypy pass.
 
-## Decisions (proposed, for the owner)
+## Decisions (the owner's, 2026-11-19)
 
-- **D1 Adopt #90's requirements and its eight chains** as the `lc-correct` group. Recommended.
+- **D1 Adopt #90's requirements and its eight chains** as the `lc-correct` group, extended to 12 by D7.
 - **D2 Arms for this comparison:** `memkernel`, `memkernel_governed` (with the oracle curator as an upper bound),
   `fs_grep`, **`claude_md`** and `bare`. `claude_md` stays: writing a corrected rule into CLAUDE.md is the most
   common real-world way to handle a correction, so it is the comparison readers will ask about. `protocol` and
-  `placebo` are left out. Recommended, unless cost rules `claude_md` out (the budget, D5, says).
+  `placebo` are left out. `claude_md` stays unless the budget (D5) rules it out.
 - **D3 The scripted curator** with a preregistered policy is the primary composition arm; `auto_approve_on_promote`
-  is at most a named sensitivity check, not run by default. Recommended, as #90 argues.
+  is at most a named sensitivity check, not run by default, as #90 argues.
 - **D4 Both correction kinds:** replacement and withdrawal, now that 0.7 shipped withdrawal; the obsolete-answer rate
-  covers both. Recommended.
+  covers both.
 - **D5 Two steps:** this spec's build ships the tasks, the runner change, the arm, the curator and the gate check,
   all exercised with the stub agent in CI. The calibration and the measured run come after, each with a
-  preregistration and a budget you approve. Recommended.
+  preregistration and a budget the owner approves; approving this spec authorizes no paid run.
 - **D6 #17:** the measured run's report answers #17's remaining question (scenarios that can separate the arms).
-  Close #17 when that report is published. Recommended.
-- **D7 The chain count:** keep #90's eight chains if the preregistration's detectable difference is acceptable at
-  that size; otherwise write more chains to the same requirements (#90 §2.1) before the calibration, toward 12 or
-  16. Recommended: decide with the preregistration, from FR-006's arithmetic.
+  Close #17 when that report is published.
+- **D7 The chain count: plan on 12 chains.** Eight reach significance only when every chain favours one arm (FR-006's
+  arithmetic: 8 of 8 gives p ≈ 0.008, 7 of 8 p ≈ 0.07; with 12, 10 of 12 gives p ≈ 0.04). The four added chains
+  follow #90 §2.1 and are written before the calibration; the preregistration states the final count.
