@@ -60,12 +60,15 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   description, in the order offered. Type per D3. Key: (session, the call's `tool_use_id`, extractor, the question's
   index). Redacted (FR-006).
 - **FR-003 Extractor: session outcome (D4).** One record per session that opened or merged a PR, filed an issue or
-  edited files: the PR and issue URLs, and the edited files (at most `OUTCOME_FILES`, then a count). The URLs come
-  from two sources: `gh pr create`, `gh pr merge` and `gh issue create` output, and the results of GitHub's MCP
-  tools (a tool whose name ends in `create_pull_request`, `merge_pull_request` or `create_issue`, its result's URL).
-  Sessions that work through the MCP tools, as cloud sessions do, would otherwise record no outcome. The local
-  transcripts hold no GitHub MCP calls, so that path's yield is unmeasured; the build cuts a fixture from a real
-  session that uses them. Type `episode`, short-term. Key: (session, extractor). Commits are left out: git already holds them, at a
+  edited files: the PR and issue URLs, and the edited files (at most `OUTCOME_FILES`, then a count). The URLs are
+  found by shape, not by tool name: a GitHub `https://github.com/<owner>/<repo>/pull/<n>` or `/issues/<n>` URL in
+  the result of a `gh pr create` or `gh issue create` run, or of a GitHub MCP tool call that creates a PR or an
+  issue. Tool names differ between servers (GitHub's MCP server files an issue with `issue_write`, method
+  `create`), so matching names would miss calls. A merge's result may carry no URL, so a merged PR's URL is built
+  from the call's input (owner, repo and PR number; for `gh pr merge`, the number or URL argument and the session's
+  repository). Sessions that work through the MCP tools, as cloud sessions do, would otherwise record no outcome.
+  The local transcripts hold no GitHub MCP calls, so that path's yield is unmeasured; the build cuts a fixture from
+  a real session that uses them, which shows the result shapes that occur. Type `episode`, short-term. Key: (session, extractor). Commits are left out: git already holds them, at a
   yield (1,045) that would crowd the store.
 - **FR-004 Caps (D5).** The per-session cap applies per extractor, so a session's answers cannot push out its
   outcome record. Owner answers keep a session's **last** 30 answers in transcript order, since later answers often
@@ -111,7 +114,8 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
 - **SC-1** A fixture transcript with an `AskUserQuestion` call (two questions, one an offered option, one the
   owner's own text) yields two owner-answer records with the FR-002 content; a cut from a real transcript.
 - **SC-2** A fixture session that opens a PR, files an issue and edits three files yields one outcome record, from
-  `gh` output and, in a second fixture, from GitHub MCP tool results; a session with none of these yields none. A
+  `gh` output and, in a second fixture, from GitHub MCP tool results (an issue filed with `issue_write`, a merge
+  whose result carries no URL); a session with none of these yields none. A
   multi-select answer yields one record listing every chosen label.
 - **SC-3** Re-capturing a session stores nothing twice (the S2 key rules), and the caps hold per extractor; a session
   with 35 answers stores its last 30, the same 30 on a retry.
@@ -130,8 +134,8 @@ Status: draft, 2026-11-18. Written overnight on the owner's instruction to open 
   which is long-term by type and would enter long-term memory without the agent choosing; not `observation`, which
   expires after 7 days (`observation_ttl_days`), so an answer nobody promoted within a week would be lost and the
   first user scenario would fail. Recommended (from the review of this spec, 2026-11-18).
-- **D4 Session outcome contents:** PR and issue URLs, from `gh` output and GitHub's MCP tools, plus edited files;
-  no commits. Recommended.
+- **D4 Session outcome contents:** PR and issue URLs, matched by URL shape in `gh` output and GitHub MCP results
+  (a merge's URL built from its input), plus edited files; no commits. Recommended.
 - **D5 Caps:** owner answers 30 per session, keeping the **last** 30; failed-then-fixed and session outcome as in S2
   (5 per session, the first N); the run cap of 20 shared. The owner's choice of 30 and "keep the last", from the
   per-session table (2026-11-18); a cap of 5 would keep 34% of the answers.
