@@ -1,6 +1,9 @@
 # Copyright (c) 2026 EGOGE
 # SPDX-License-Identifier: Apache-2.0
-"""Capture (memkernel-0-12-capture-core): failed-then-fixed commands from ended sessions' transcripts.
+"""Capture (memkernel-0-12-capture-core, memkernel-0-14-capture-signals): signals from ended sessions' transcripts.
+
+Three extractors: failed-then-fixed commands (S2), the owner's answers to ``AskUserQuestion`` and one session-outcome
+record per session (S3), each with its own per-session cap.
 
 At normal startup, with ``MEMKERNEL_CAPTURE`` on, each ended session still in the spool is read through a
 ``TranscriptReaderPort``. A ``Bash`` command that failed with its own exit status and later passed when run again
@@ -18,14 +21,16 @@ import logging
 import re
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from memkernel import session_spool
 from memkernel.core.models import (
+    CAPTURE_ANSWER_CANDIDATES,
     CAPTURE_CALL_TAG,
+    CAPTURE_EXTRACTOR_OWNER_ANSWER,
     CAPTURE_EXTRACTOR_TAG,
     CAPTURE_ORIGIN_TAG,
     CAPTURE_SESSION_TAG,
@@ -52,6 +57,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EXTRACTOR = "failed-then-fixed"
+OWNER_ANSWER = CAPTURE_EXTRACTOR_OWNER_ANSWER  # memkernel-0-14-capture-signals FR-002
+SESSION_OUTCOME = "session-outcome"  # FR-003
+EXTRACTORS = (EXTRACTOR, OWNER_ANSWER, SESSION_OUTCOME)
 EXTRACTOR_VERSION = 1
 # D6 (the owner's, 2026-11-16).
 CAPTURE_TIME_BUDGET = 3.0  # seconds of capture per startup; a soft stop between sessions
@@ -62,6 +70,15 @@ CAPTURE_TRANSCRIPT_MAX_BYTES = 50 * 1024 * 1024  # a larger transcript is never 
 CAPTURE_TEXT_MAX = 300  # characters of one command, error line or fix step
 CAPTURE_FIX_STEPS = 5  # fix steps named per record
 CAPTURE_LOCK_FILE = "capture.lock"  # beside the spool file: one capture at a time per project (R3)
+# memkernel-0-14-capture-signals (the owner's D5, D6).
+ANSWER_SESSION_MAX = 30  # owner answers kept per session: the last 30 in transcript order
+ANSWER_TEXT_MAX = 600  # characters of the owner's own words in one answer (an option's text is far shorter)
+OUTCOME_FILES = 10  # edited files named in a session outcome; the rest is a count
+ANSWER_CANDIDATES = CAPTURE_ANSWER_CANDIDATES  # owner answers among the promotion candidates (applied in core)
+OUTCOME_KEY = "session"  # a session outcome's call key: one record per session
+ASK_TOOL = "AskUserQuestion"
+OUTCOME_EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+MCP_PREFIX = "mcp__"
 
 # The count's stored-error words (memkernel-0-10-recall-log D5), shared with it (FR-005, FR-011).
 ERROR_WORDS = ("Error", "Exception", "Traceback", "FAILED", "fatal")
@@ -76,6 +93,13 @@ _TRAILING_FILTER = re.compile(r"\s*\|\s*(?:tail|head|grep)\b[^|;&<>]*$")
 _TRAILING_STDERR = re.compile(r"\s*2>&1$")
 _PIPEFAIL = re.compile(r"\bset\s+-[A-Za-z]*o\s+pipefail\b")
 _BACKTICK_SPAN = re.compile(r"`([^`\n]+)`")
+# FR-003: a GitHub PR or issue URL, and the gh commands that create or merge.
+_GITHUB_URL = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)")
+_GH_CREATE = re.compile(r"\bgh\s+(?:pr|issue)\s+create\b")
+_GH_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
+_GH_MERGE_TARGET = re.compile(r"\bgh\s+pr\s+merge\s+#?(\d+)\b")
+_GH_REPO_FLAG = re.compile(r"(?:-R|--repo)[=\s]+([\w.-]+/[\w.-]+)")
+_REPO_REF = re.compile(r"\b([\w.-]+/[\w.-]+)#(\d+)\b")
 
 # FR-006, best-effort: each match is replaced with REDACTED (for an assignment or header, only its value).
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL)
@@ -100,10 +124,12 @@ MIXED_PIECE = 16  # a piece this long that mixes uppercase, lowercase and digits
 
 @dataclass(frozen=True)
 class Signal:
-    """One failed-then-fixed command: the failing call's id and the record's content."""
+    """One captured record to store: its key within the session (``call``), content, extractor and type."""
 
     call: str
     content: str
+    extractor: str = EXTRACTOR
+    memory_type: MemoryType = MemoryType.OBSERVATION
 
 
 @dataclass
@@ -116,13 +142,16 @@ class CaptureReport:
     given_up: int = 0
     dropped: int = 0
     skipped: bool = False
+    by_extractor: dict[str, int] = field(default_factory=dict)  # records stored per extractor (S3 FR-006)
 
     def line(self) -> str | None:
         """The startup report's line, or None when capture neither stored nor dropped anything."""
         if self.skipped or not (self.stored or self.sessions or self.left or self.given_up or self.dropped):
             return None
+        counts = ", ".join(f"{name} {self.by_extractor[name]}" for name in EXTRACTORS if self.by_extractor.get(name))
         return (
-            f"Capture: {self.stored} record(s) stored from {self.sessions} session(s); {self.left} session(s) left "
+            f"Capture: {self.stored} record(s) stored{f' ({counts})' if counts else ''} from {self.sessions} "
+            f"session(s); {self.left} session(s) left "
             f"for the next start; {self.given_up} transcript(s) given up on; {self.dropped} signal(s) over the "
             "per-session cap dropped."
         )
@@ -185,9 +214,9 @@ def redact(text: str) -> str:
     return _TOKEN_CHARS.sub(lambda m: REDACTED if _secret_token(m, text) else m.group(0), text)
 
 
-def stored_text(text: str) -> str:
-    """One field as a record stores it: redacted, on one line, without backticks, cut to CAPTURE_TEXT_MAX."""
-    return collapse(redact(text)).replace("`", "")[:CAPTURE_TEXT_MAX]
+def stored_text(text: str, limit: int = CAPTURE_TEXT_MAX) -> str:
+    """One field as a record stores it: redacted, on one line, without backticks, cut to ``limit`` characters."""
+    return collapse(redact(text)).replace("`", "")[:limit]
 
 
 def _secret_token(match: re.Match[str], text: str) -> bool:
@@ -258,6 +287,152 @@ def error_line(result: str) -> str:
     return with_word[-1] if with_word else (lines[0] if lines else "")
 
 
+def extract_owner_answers(session: TranscriptSession) -> list[Signal]:
+    """The owner's answers to ``AskUserQuestion``, one signal per answered question, in transcript order (S3 FR-002).
+
+    An answer that is one or several offered labels names them with their descriptions, in the order offered; any
+    other answer is the owner's own words (D2). Keyed by the call and the question's index.
+    """
+    signals: list[Signal] = []
+    for step in session.steps:
+        if step.sidechain or step.tool != ASK_TOOL or not step.answers:
+            continue
+        for index, question in enumerate(step.questions):
+            text = str(question.get("question", ""))
+            answer = step.answers.get(text)
+            if answer is None:
+                continue
+            content = _answer_content(question, text, answer)
+            signals.append(Signal(f"{step.tool_use_id}#{index}", content, OWNER_ANSWER, MemoryType.EPISODE))
+    return signals
+
+
+def _answer_content(question: dict[str, Any], text: str, answer: str) -> str:
+    options = [o for o in question.get("options", []) if isinstance(o, dict)]
+    labels = [str(o.get("label", "")) for o in options]
+    parts = [p.strip() for p in answer.split(",")] if question.get("multiSelect") else [answer.strip()]
+    if answer.strip() in labels:
+        parts = [answer.strip()]
+    header = stored_text(str(question.get("header", ""))) or "question"
+    lead = f"The owner's answer ({header}): {stored_text(text)} ->"
+    if parts and all(p in labels for p in parts):
+        chosen = [o for o in options if str(o.get("label", "")) in parts]
+        named = "; ".join(_option(o) for o in chosen)
+        others = [stored_text(label) for label in labels if label not in parts]
+        tail = f" Other options offered: {'; '.join(others)}." if others else ""
+        return f"{lead} {named}.{tail}"
+    offered = f" Options offered: {'; '.join(stored_text(label) for label in labels)}." if labels else ""
+    return f"{lead} in their own words: {stored_text(answer, ANSWER_TEXT_MAX)}.{offered}"
+
+
+def _option(option: dict[str, Any]) -> str:
+    label = stored_text(str(option.get("label", "")))
+    description = stored_text(str(option.get("description", "")))
+    return f"{label} ({description})" if description else label
+
+
+def extract_outcome(session: TranscriptSession) -> list[Signal]:
+    """At most one record of what the session produced: PRs opened and merged, issues filed, files edited (FR-003).
+
+    A URL counts only in the result of a call that creates (``gh pr create``, ``gh issue create``, an MCP tool
+    named with ``create`` or called with ``method: create``) or merges (``gh pr merge``, an MCP tool named with
+    ``merge`` or called with ``method: merge``); reads and lists are ignored. A merge without a URL in its result
+    gets one built from its input.
+    """
+    steps = [s for s in session.steps if not s.sidechain and s.has_result and not s.is_error]
+    session_repo = _session_repo(steps)
+    opened: list[str] = []
+    filed: list[str] = []
+    merged: list[str] = []
+    edited: list[str] = []
+    for step in steps:
+        kind = _github_call_kind(step)
+        if kind == "create":
+            for owner, repo, what, number in _GITHUB_URL.findall(step.result):
+                (opened if what == "pull" else filed).append(_url(owner, repo, what, number))
+        elif kind == "merge":
+            url = _merged_url(step, session_repo)
+            if url:
+                merged.append(url)
+        if step.tool in OUTCOME_EDIT_TOOLS:
+            path = str(step.tool_input.get("file_path") or step.tool_input.get("notebook_path") or step.file_path)
+            if path:
+                edited.append(path)
+    parts = [
+        f"{label} {', '.join(dict.fromkeys(urls))}"
+        for label, urls in (("opened PR", opened), ("merged PR", merged), ("filed issue", filed))
+        if urls
+    ]
+    files = list(dict.fromkeys(edited))
+    if files:
+        named = ", ".join(stored_text(f) for f in files[:OUTCOME_FILES])
+        more = f" (and {len(files) - OUTCOME_FILES} more)" if len(files) > OUTCOME_FILES else ""
+        parts.append(f"edited {len(files)} file(s): {named}{more}")
+    if not parts:
+        return []
+    return [Signal(OUTCOME_KEY, f"Session outcome: {'; '.join(parts)}.", SESSION_OUTCOME, MemoryType.EPISODE)]
+
+
+def _github_call_kind(step: ToolStep) -> str | None:
+    """``create``, ``merge`` or None (FR-003): which GitHub calls count; reads and lists never do."""
+    if step.tool == BASH_TOOL:  # the URL in the result is the evidence, so a piped `gh ... | tail -1` counts too
+        if _GH_MERGE.search(step.command):
+            return "merge"
+        return "create" if _GH_CREATE.search(step.command) else None
+    if not step.tool.startswith(MCP_PREFIX):
+        return None
+    name = step.tool.lower()
+    method = str(step.tool_input.get("method", "")).lower()
+    if "merge" in name or method == "merge":
+        return "merge"
+    return "create" if "create" in name or method == "create" else None
+
+
+def _merged_url(step: ToolStep, session_repo: str | None) -> str | None:
+    """A merged PR's URL: from its result or command, else built from its input (owner, repo, number)."""
+    found = _GITHUB_URL.search(f"{step.command}\n{step.result}")
+    if found and found.group(3) == "pull":
+        return _url(*found.groups())
+    if step.tool.startswith(MCP_PREFIX):
+        data = step.tool_input
+        number = data.get("pullNumber") or data.get("pull_number") or data.get("number")
+        if data.get("owner") and data.get("repo") and number:
+            return _url(str(data["owner"]), str(data["repo"]), "pull", str(number))
+        return None
+    target = _GH_MERGE_TARGET.search(step.command)
+    ref = _REPO_REF.search(step.result)
+    flag = _GH_REPO_FLAG.search(step.command)
+    repo = flag.group(1) if flag else (ref.group(1) if ref else session_repo)
+    number = target.group(1) if target else (ref.group(2) if ref else None)
+    if repo and number:
+        owner, name = repo.split("/", 1)
+        return _url(owner, name, "pull", number)
+    return None
+
+
+def _session_repo(steps: list[ToolStep]) -> str | None:
+    """The repository the session's GitHub URLs name most often, for a merge that names only a number."""
+    repos = [f"{owner}/{repo}" for s in steps for owner, repo, _, _ in _GITHUB_URL.findall(s.result)]
+    return max(set(repos), key=repos.count) if repos else None
+
+
+def _url(owner: str, repo: str, what: str, number: str) -> str:
+    return f"https://github.com/{owner}/{repo}/{what}/{number}"
+
+
+def session_signals(session: TranscriptSession) -> tuple[list[Signal], int]:
+    """Every extractor's signals for one session, each under its own cap, and how many the caps dropped (D5).
+
+    Failed-then-fixed keeps its first CAPTURE_SESSION_MAX_RECORDS (S2 R4); owner answers keep their last
+    ANSWER_SESSION_MAX, since later answers often revise earlier ones; the session outcome is at most one.
+    """
+    fixed = extract(session)
+    answers = extract_owner_answers(session)
+    kept = [*fixed[:CAPTURE_SESSION_MAX_RECORDS], *answers[-ANSWER_SESSION_MAX:], *extract_outcome(session)]
+    dropped = max(0, len(fixed) - CAPTURE_SESSION_MAX_RECORDS) + max(0, len(answers) - ANSWER_SESSION_MAX)
+    return kept, dropped
+
+
 # ── the startup run ────────────────────────────────────────────────────────
 
 
@@ -319,27 +494,28 @@ def _capture_session(
     if session is None:  # missing, unreadable, or a readable file without the session (R5)
         _miss(settings, window, misses, report)
         return
-    signals = extract(session)
-    report.dropped += max(0, len(signals) - CAPTURE_SESSION_MAX_RECORDS)
+    signals, dropped = session_signals(session)
+    report.dropped += dropped
     known = _captured_calls(service, window.session_id)
-    for signal in signals[:CAPTURE_SESSION_MAX_RECORDS]:
-        if signal.call in known:
+    for signal in signals:
+        if (signal.extractor, signal.call) in known:
             continue  # stored by an earlier, interrupted capture (FR-002, FR-003)
         service.retain(
             signal.content,
-            MemoryType.OBSERVATION,
+            signal.memory_type,
             session_id=window.session_id,
             source=CAPTURE_SOURCE,
             tags=[
                 CAPTURE_ORIGIN_TAG,
                 f"{CAPTURE_SESSION_TAG}{window.session_id}",
                 f"{CAPTURE_CALL_TAG}{signal.call}",
-                f"{CAPTURE_EXTRACTOR_TAG}{EXTRACTOR}",
+                f"{CAPTURE_EXTRACTOR_TAG}{signal.extractor}",
                 f"{CAPTURE_VERSION_TAG}{EXTRACTOR_VERSION}",
             ],
             content_dedup=False,
         )
         report.stored += 1
+        report.by_extractor[signal.extractor] = report.by_extractor.get(signal.extractor, 0) + 1
     session_spool.commit(settings, [window.session_id])
     report.sessions += 1
 
@@ -359,16 +535,15 @@ def _miss(settings: MemKernelSettings, window: SessionWindow, misses: int, repor
     report.left += 1
 
 
-def _captured_calls(service: MemoryService, session_id: str) -> set[str]:
-    """The failing calls already captured for the session by this extractor, whatever version wrote them (D1)."""
-    extractor = f"{CAPTURE_EXTRACTOR_TAG}{EXTRACTOR}"
-    return {
-        tag[len(CAPTURE_CALL_TAG) :]
-        for m in service.list_metadata(session_id, CAPTURE_SOURCE)
-        if extractor in m.tags
-        for tag in m.tags
-        if tag.startswith(CAPTURE_CALL_TAG)
-    }
+def _captured_calls(service: MemoryService, session_id: str) -> set[tuple[str, str]]:
+    """The (extractor, call) keys already captured for the session, whatever version wrote them (D1)."""
+    found: set[tuple[str, str]] = set()
+    for memory in service.list_metadata(session_id, CAPTURE_SOURCE):
+        extractor = next(
+            (t[len(CAPTURE_EXTRACTOR_TAG) :] for t in memory.tags if t.startswith(CAPTURE_EXTRACTOR_TAG)), ""
+        )
+        found.update((extractor, t[len(CAPTURE_CALL_TAG) :]) for t in memory.tags if t.startswith(CAPTURE_CALL_TAG))
+    return found
 
 
 @contextmanager

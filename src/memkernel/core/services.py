@@ -15,7 +15,12 @@ from uuid import uuid4
 
 from memkernel.core.models import (
     ASK_MODES,
+    CAPTURE_ANSWER_CANDIDATES,
+    CAPTURE_EXTRACTOR_OWNER_ANSWER,
+    CAPTURE_EXTRACTOR_TAG,
     CAPTURE_ORIGIN_TAG,
+    CAPTURE_RECALL_PER_SESSION,
+    CAPTURE_SESSION_TAG,
     CODE_CHUNK_KEY,
     CODE_CHUNK_TAG,
     DEFAULT_ASK_MODE,
@@ -115,6 +120,20 @@ class _ExtraMeta:
     supersedes: str | None = None
     promoted_from: str | None = None
     document_id: str | None = None
+
+
+def _is_owner_answer(memory: Memory) -> bool:
+    """A captured owner answer (memkernel-0-14-capture-signals FR-002)."""
+    return (
+        CAPTURE_ORIGIN_TAG in memory.tags and f"{CAPTURE_EXTRACTOR_TAG}{CAPTURE_EXTRACTOR_OWNER_ANSWER}" in memory.tags
+    )
+
+
+def _capture_session(memory: Memory) -> str | None:
+    """The origin session of a captured record, or None for a record the agent stored itself."""
+    if CAPTURE_ORIGIN_TAG not in memory.tags:
+        return None
+    return next((t[len(CAPTURE_SESSION_TAG) :] for t in memory.tags if t.startswith(CAPTURE_SESSION_TAG)), "")
 
 
 def _is_document_part(memory: Memory) -> bool:
@@ -913,6 +932,7 @@ class MemoryService:
         owners: dict[str, Memory | None] = {}
         live: list[ArtifactRef] = []
         seen: set[str] = set()
+        captured_per_session: dict[str, int] = {}
         for ref in results:
             memory = memories.get(ref.ref_id)
             if memory is None or memory.retired():
@@ -941,6 +961,11 @@ class MemoryService:
                 continue
             if memory_is_expired(memory, self._settings):
                 continue
+            origin = _capture_session(memory)
+            if origin is not None:  # memkernel-0-14-capture-signals D7: one heavy session cannot fill a result
+                if captured_per_session.get(origin, 0) >= CAPTURE_RECALL_PER_SESSION:
+                    continue
+                captured_per_session[origin] = captured_per_session.get(origin, 0) + 1
             seen.add(ref.ref_id)
             live.append(ref)
         return live
@@ -1218,7 +1243,8 @@ class MemoryService:
            been promoted yet by ``importance * (1 + access_count)`` — the
            memories the agent kept coming back to — and return the top
            ``limit`` as candidates for :meth:`promote`. Captured records
-           (tagged ``origin:capture``) are never candidates.
+           (tagged ``origin:capture``) are never candidates, except up to
+           ``CAPTURE_ANSWER_CANDIDATES`` of the owner's captured answers.
         3. With ``synthesize=True`` and an external reasoner configured, ask
            it once to distil the candidates into long-term statements,
            returned under ``"suggested"`` as ``{"content", "type"}`` items
@@ -1233,16 +1259,24 @@ class MemoryService:
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
         all_memories = self._vector_store.list_all(where)
         promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from}
-        candidates = [
+        eligible = [
             m
             for m in all_memories
             if m.tier != MemoryTier.LONG_TERM
             and m.ref_id not in promoted_sources
             and not m.checkpoint
             and not m.retired()
-            and CAPTURE_ORIGIN_TAG not in m.tags  # memkernel-0-12-capture-core D5: the agent chooses what to promote
         ]
-        candidates.sort(key=lambda m: m.importance * (1 + m.access_count), reverse=True)
+
+        def rank(m: Memory) -> float:
+            return m.importance * (1 + m.access_count)
+
+        # memkernel-0-12-capture-core D5: captured records are never candidates, except the owner's answers, at most
+        # CAPTURE_ANSWER_CANDIDATES of them (memkernel-0-14-capture-signals D6), ranked like any candidate.
+        answers = sorted((m for m in eligible if _is_owner_answer(m)), key=rank, reverse=True)
+        candidates = [m for m in eligible if CAPTURE_ORIGIN_TAG not in m.tags]
+        candidates.extend(answers[:CAPTURE_ANSWER_CANDIDATES])
+        candidates.sort(key=rank, reverse=True)
         top = candidates[:limit]
         preview_len = self._settings.preview_length
         suggested: list[dict[str, str]] = []
