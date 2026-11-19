@@ -298,7 +298,7 @@ def test_startup_stores_one_keyed_record_and_commits_the_session(tmp_path: Path)
         record.tags
     )
     assert f"{CAPTURE_VERSION_TAG}{capture.EXTRACTOR_VERSION}" in record.tags
-    assert "Capture: 1 record(s) stored from 1 session(s)" in text
+    assert "Capture: 1 record(s) stored (failed-then-fixed 1) from 1 session(s)" in text
     assert "s1" not in _spooled_sessions(lifecycle._settings)
 
 

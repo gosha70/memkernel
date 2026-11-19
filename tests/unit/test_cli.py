@@ -54,4 +54,10 @@ def test_no_arguments_runs_the_server(
     monkeypatch.setenv("MEMKERNEL_HOST", "127.0.0.1")
     monkeypatch.setenv("MEMKERNEL_PORT", "9123")
     assert server_module.main([]) == 0
+    security = calls.pop("transport_security", None)
     assert calls == expected
+    if transport == "streamable-http":  # #148: the Host/Origin check, with the loopback names
+        assert security is not None and security.enable_dns_rebinding_protection
+        assert "127.0.0.1:*" in security.allowed_hosts and "localhost:*" in security.allowed_hosts
+    else:
+        assert security is None
