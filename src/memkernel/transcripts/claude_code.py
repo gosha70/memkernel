@@ -115,6 +115,7 @@ def _call(part: dict[str, Any], when: datetime, sidechain: bool, agent_id: str) 
         command=str(tool_input.get("command", "")),
         file_path=str(tool_input.get("file_path", "")),
         query=str(tool_input.get("query", "")),
+        tool_input=tool_input,
         sidechain=sidechain,
         agent_id=agent_id,
     )
@@ -127,6 +128,11 @@ def _fill(step: ToolStep, part: dict[str, Any], entry: dict[str, Any], when: dat
     step.is_error = part.get("is_error") is True  # absent means false
     step.denied = "toolDenialKind" in entry
     step.result = _text(part.get("content"))
+    structured = entry.get("toolUseResult")  # an AskUserQuestion call's questions and answers (FR-001)
+    if isinstance(structured, dict) and isinstance(structured.get("answers"), dict):
+        questions = structured.get("questions")
+        step.questions = [q for q in questions if isinstance(q, dict)] if isinstance(questions, list) else []
+        step.answers = {str(k): str(v) for k, v in structured["answers"].items()}
 
 
 def _text(content: Any) -> str:
