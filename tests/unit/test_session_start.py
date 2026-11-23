@@ -8,6 +8,7 @@ import io
 import json
 import re
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import chromadb
@@ -95,6 +96,28 @@ def test_no_source_gets_the_startup_block_and_no_spool_line_is_written(
     path = session_spool.spool_path(MemKernelSettings())
     assert path is not None
     assert not path.exists() or path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("output_format", session_start.FORMATS)
+def test_startup_drains_claude_codes_spool_and_adds_no_line_of_its_own(
+    store: Any, monkeypatch: pytest.MonkeyPatch, capsys: Any, output_format: str
+) -> None:
+    """A non-empty spool: an ended Claude Code session is reported and removed, a live one is kept, and the other
+    tool's own session leaves no line (FR-003)."""
+    settings = MemKernelSettings()
+    now = datetime.now(UTC)
+    session_spool.append(settings, session_spool.EVENT_STARTED, "cc-ended", now - timedelta(hours=2))
+    session_spool.append(settings, session_spool.EVENT_ENDED, "cc-ended", now - timedelta(hours=1), reason="other")
+    session_spool.append(settings, session_spool.EVENT_STARTED, "cc-live", now - timedelta(minutes=10))
+    payload = json.dumps({"source": "startup", "session_id": "other-tool-1"})
+
+    out = _run(store, monkeypatch, capsys, ["--format", output_format], payload)
+
+    assert "ended without a saved checkpoint" in out
+    path = session_spool.spool_path(settings)
+    assert path is not None
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [(r["event"], r["session_id"]) for r in records] == [(session_spool.EVENT_STARTED, "cc-live")]
 
 
 def test_max_chars_keeps_headings_the_notice_and_whole_elements(

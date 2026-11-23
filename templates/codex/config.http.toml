@@ -1,6 +1,8 @@
 # memkernel for Codex over one shared server: start it once with
 #   MEMKERNEL_TRANSPORT=streamable-http memkernel
 # (the same MEMKERNEL_* settings as the other tools), then register its URL. Local only, no authentication.
+# The SessionStart hook in hooks.json opens the store itself, not through this server: give its command the same
+# MEMKERNEL_* values the server runs with.
 
 [mcp_servers.memkernel]
 url = "http://127.0.0.1:8765/mcp"

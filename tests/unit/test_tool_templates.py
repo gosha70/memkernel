@@ -5,14 +5,18 @@
 from __future__ import annotations
 
 import json
+import shlex
 import tomllib
 from pathlib import Path
 
 import pytest
 
+from memkernel.lifecycle import HEADING_POST_COMPACT, HEADING_SESSION_START
+
 pytestmark = pytest.mark.unit
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
+RECOVERED = "Recovered from MemKernel"
 SESSION_START = "memkernel session-start"
 FIRST_RECALL = 'recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)'
 
@@ -33,13 +37,38 @@ def test_codex_config_registers_memkernel_over_stdio_and_http() -> None:
     assert http["mcp_servers"]["memkernel"]["url"] == "http://127.0.0.1:8765/mcp"
 
 
-def test_codex_hook_runs_session_start_with_the_6000_character_cap() -> None:
-    """D3: a hook for Codex only; D5: --max-chars 6000."""
+def _codex_hook() -> dict[str, str]:
     hooks = json.loads((TEMPLATES / "codex" / "hooks.json").read_text(encoding="utf-8"))
     (entry,) = hooks["hooks"]["SessionStart"]
     assert set(entry["matcher"].split("|")) == {"startup", "clear", "compact"}
     (hook,) = entry["hooks"]
-    assert hook["type"] == "command" and hook["command"] == f"{SESSION_START} --format plain --max-chars 6000"
+    assert hook["type"] == "command"
+    command: dict[str, str] = hook
+    return command
+
+
+def test_codex_hook_runs_session_start_with_the_6000_character_cap() -> None:
+    """D3: a hook for Codex only; D5: --max-chars 6000."""
+    assert _codex_hook()["command"].endswith(f" {SESSION_START} --format plain --max-chars 6000")
+
+
+def test_codex_hook_opens_the_store_the_mcp_server_opens() -> None:
+    """[mcp_servers.memkernel.env] reaches only the MCP server; the hook is its own process, so its command sets the
+    same MEMKERNEL_* values, or it opens the default store and finds no checkpoint."""
+    server_env = tomllib.loads((TEMPLATES / "codex" / "config.toml").read_text(encoding="utf-8"))["mcp_servers"][
+        "memkernel"
+    ]["env"]
+    words = shlex.split(_codex_hook()["command"])
+    assert words[0] == "env"
+    assignments = dict(word.split("=", 1) for word in words[1:] if "=" in word)
+    assert assignments == server_env
+
+
+def test_codex_instructions_skip_recall_only_when_the_hook_block_is_shown() -> None:
+    """An installed hook can inject nothing (not yet trusted, or memkernel failed): key on the block itself."""
+    text = (TEMPLATES / "codex" / "AGENTS.md").read_text(encoding="utf-8")
+    assert all(heading.startswith(f"## {RECOVERED}") for heading in (HEADING_SESSION_START, HEADING_POST_COMPACT))
+    assert f'"{RECOVERED}"' in text
 
 
 @pytest.mark.parametrize(

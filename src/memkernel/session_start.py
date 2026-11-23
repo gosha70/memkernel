@@ -4,8 +4,10 @@
 
 A tool's session-start hook runs ``memkernel session-start --format <tool>``. It reads the hook's JSON from stdin
 when there is one (``source`` and a session id), runs :meth:`MemoryLifecycle.on_session_start`, and prints the block
-in the shape the tool's hook expects. It writes nothing to the session spool: only Claude Code's hooks write both a
-start and an end, and a start without an end would be reported as a session that "recorded no end" (FR-003).
+in the shape the tool's hook expects. It writes no ``started`` line for its own session: only Claude Code's hooks write
+both a start and an end, and a start without an end would be reported as a session that "recorded no end" (FR-003).
+On a startup it still drains the spool as a Claude Code start does (ended sessions removed and reported, capture when
+it is on), so that report appears in whichever tool starts next.
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "memkernel session-start --format plain --max-chars 6000",
+            "command": "env MEMKERNEL_PROJECT_ID=my-project MEMKERNEL_CHROMA_PERSIST_PATH=/home/you/.memkernel/my-project MEMKERNEL_STATE_DIR=/home/you/.memkernel/my-project-state MEMKERNEL_PROJECT_ROOT=/path/to/my-project memkernel session-start --format plain --max-chars 6000",
             "statusMessage": "Loading memkernel context"
           }
         ]

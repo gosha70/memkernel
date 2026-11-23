@@ -228,7 +228,7 @@ Templates, checked against each tool's documentation on 2026-11-18:
 
 | Tool | Templates | Copy to | Session start |
 |------|-----------|---------|---------------|
-| Codex | [`templates/codex/`](templates/codex/): `config.toml` (stdio) or `config.http.toml`; `AGENTS.md`; `hooks.json` | `.codex/config.toml` (a trusted project); your `AGENTS.md`; `.codex/hooks.json` | a `SessionStart` hook runs `memkernel session-start --format plain --max-chars 6000`; Codex runs no hook you have not trusted: open `/hooks` in Codex, review the memkernel hook and trust it, once and again after any change to it |
+| Codex | [`templates/codex/`](templates/codex/): `config.toml` (stdio) or `config.http.toml`; `AGENTS.md`; `hooks.json` | `.codex/config.toml` (a trusted project); your `AGENTS.md`; `.codex/hooks.json` | a `SessionStart` hook runs `memkernel session-start --format plain --max-chars 6000` under `env` with the same `MEMKERNEL_*` values as `config.toml` (its `env` table reaches only the MCP server, and the hook is its own process, so set them in both files); Codex runs no hook you have not trusted: open `/hooks` in Codex, review the memkernel hook and trust it, once and again after any change to it |
 | Cursor | [`templates/cursor/`](templates/cursor/): `mcp.json` (stdio) or `mcp.http.json`; `rules/memkernel.mdc` | `.cursor/mcp.json`; `.cursor/rules/memkernel.mdc` | the rule (`alwaysApply: true`) tells the agent to recall the latest checkpoint and the project's decisions |
 | Antigravity | [`templates/antigravity/`](templates/antigravity/): `mcp_config.json` (stdio) or `mcp_config.http.json`; `rules/memkernel.md` | `.agents/mcp_config.json`; `.agents/rules/memkernel.md` | the rule (`trigger: always_on`), likewise |
 
@@ -240,8 +240,11 @@ block as `--format cursor` (`{"additional_context": …}`) and `--format antigra
 those hooks become reliable.
 
 Limits:
-- **Capture** (`MEMKERNEL_CAPTURE`) reads Claude Code transcripts only. `memkernel session-start` writes nothing to
-  the session spool, so other tools' sessions are neither reported nor captured.
+- **Capture** (`MEMKERNEL_CAPTURE`) reads Claude Code transcripts only. `memkernel session-start` writes no
+  `started` line for its own session, so other tools' sessions are neither reported nor captured. On a startup it
+  still handles the spool as a Claude Code start does: it removes ended Claude Code sessions, reports those that
+  saved no checkpoint, and runs capture when `MEMKERNEL_CAPTURE` is on. So that report appears in whichever tool
+  starts next.
 - **On Windows** the store locks run unlocked, with a warning, so concurrent servers are not safe there.
 - **A running server notices other processes' writes by the record count:** an addition and a deletion by others
   between two of its recalls go unseen until the next difference.

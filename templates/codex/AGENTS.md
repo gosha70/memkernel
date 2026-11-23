@@ -9,7 +9,9 @@ Memory has three tiers. Pick the type; the tier follows.
 - working (expires in ~24h): task
 
 ### Session start
-(Skip these two calls when memkernel's SessionStart hook is installed in .codex/hooks.json: it injects the same context.)
+(Skip these two calls only when this session already shows a "Recovered from MemKernel" block: memkernel's
+SessionStart hook injected the same context. An installed hook shows nothing until it is trusted in Codex's /hooks,
+or when memkernel fails, so without that block make both calls.)
   recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
   recall(query="<current task>", tier="long_term", top_k=8)
 Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
