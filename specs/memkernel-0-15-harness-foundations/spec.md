@@ -147,3 +147,64 @@ A3–A7 follow from the spec and the review, and are stated so the review can ch
 
 Unchanged: the MCP tool set and the `recall` response (a JSON list); `MemoryService.recall` returns the same list
 (the receipt comes back through an optional argument); the log stays off unless `MEMKERNEL_RECALL_LOG` is set.
+
+## Amendment H2: scope and abstention (draft, 2026-11-23)
+
+The H2 build (D5: FR-001, FR-005, SC-1, SC-4, SC-6) as it will be built. H1's ids are the caller: `agent_id` and
+`task_id` (A1), from the call or the process. Decisions B1–B5 await the owner; B6–B11 follow from the spec and are
+stated so the review can check them.
+
+- **B1 How `retain` names a scope (owner).** `retain(scope=…)` takes `project` (the default), `agent` or `task`,
+  meaning the caller's own `agent_id` or `task_id`; the record stores `agent:<id>` or `task:<id>`. A call without
+  that id is refused. So a caller cannot write into another agent's scope by a typo, and the stored form is the
+  spec's. (The alternative, a free `agent:<id>` string, lets one agent write a note only another agent can see.)
+- **B2 An out-of-scope record by id (owner).** `get`, `ask`, `forget`, `promote` and a `supersedes=` target treat a
+  record the caller cannot see as not found, the same answer as a missing one: `get` and `ask` return not found,
+  `forget` returns `deleted: false`, and a `supersedes=` target is ignored, as a missing one is today. Scope is a
+  convention (FR-001), so this hides nothing from a hostile client; it keeps every path giving one answer. The cost:
+  an agent that names another agent's record by mistake gets "not found", not a scope error.
+- **B3 Wiki export (owner).** `wiki_export` drafts pages from `project` records only, whoever calls it: a wiki is
+  shared knowledge, and a private note becomes shared only by promoting it with `scope="project"` first.
+- **B4 Hook checkpoints (owner; recommended: scoped to the agent).** A checkpoint the hooks save (session end,
+  compaction) is `agent:<MEMKERNEL_AGENT_ID>` when that variable is set, and `project` otherwise. With two agents on
+  one project, each session start and compaction recovery then shows that agent's own newest checkpoint, not the
+  other agent's current task (scenario 1). A single-agent user without the variable sees no change; one with it set
+  keeps seeing their own checkpoints, since every session of that agent carries the same id. Tools that share one
+  store (#107) must then set the same `MEMKERNEL_AGENT_ID`, or none: if Claude Code sets it and Codex does not, a
+  session started in one is not continued in the other, because Codex cannot see Claude Code's agent checkpoints.
+  The README's "One store across tools" section and the Codex and Cursor templates say so. (The alternative keeps
+  every hook checkpoint `project`, as today: then agent A's session start can show agent B's checkpoint, a limit the
+  README would have to state.)
+- **B5 Filtering in Python, not in the store (owner).** Scope is applied after the store returns candidates, by one
+  predicate, on every path. A store `where` filter cannot match the records older stores wrote without the key
+  (SC-4), and the BM25 index has no metadata. Cost: recall's window widens past out-of-scope candidates, as it
+  already does past superseded ones: it keeps doubling until it has `top_k` visible results or the store runs out,
+  however many of the top candidates are another agent's. One predicate decides visibility everywhere, and it reads
+  a record without the key as `project`.
+- **B6 Storage.** Metadata key `scope`, written only when not `project`; absent loads as `project` (SC-4). An explicit
+  `scope="project"` is stored the same way as the default: the two mean the same. Older records are not migrated:
+  dedup, like every other path, reads a missing key as `project`, so a pre-H2 record and a new `project` record with
+  the same text are one record.
+- **B7 Who the caller is on each path.** MCP: `recall`, `retain`, `get`, `ask`, `forget`, `promote` and
+  `consolidate` take `agent_id` and `task_id` (H1's two on `recall`/`retain`, new on the others), each defaulting
+  to `MEMKERNEL_AGENT_ID`/`MEMKERNEL_TASK_ID`. Hook blocks use the process's. The Python API takes them on the same
+  `MemoryService` methods, defaulting to the settings. A caller with neither sees `project` records only (FR-001).
+  The admin API (`src/memkernel/api/`) is the operator's and sees every record, the full health report
+  (`/health/store`, with `ref_id`s) included.
+- **B8 Every read path (SC-1).** `recall` (both orders), `get`, `list_memories`, `ask`, `consolidate`'s promotion
+  candidates (it lists them; `promote` writes, per B9), the hook blocks (checkpoint, long-term context, needs-review list, candidates), and `wiki_export`
+  (B3). Store maintenance stays store-wide: purge, revalidation, and the health summary, which reaches callers
+  (`consolidate`'s `health`, the session-start block) as counts only, never as records.
+- **B9 Writes.** Dedup is per scope: identical text in two scopes is two records, so a private note never merges into
+  a project one; the two copies are not linked, and the private one reaches the wiki only by `promote` with
+  `scope="project"` (B3). `promote` keeps the source's scope; `scope="project"` publishes, never by default (FR-001).
+  `supersedes=`, `forget` and `promote` need a target the caller can see (B2). Records memkernel writes itself, the
+  wiki import's pages and capture's records, are `project`; `withdraw` is the wiki import's own path on those records,
+  not an MCP tool, and takes no caller.
+- **B10 Exclusion counts.** `excluded` adds `out_of_scope` and `capped` (the limit of 3 captured records per session,
+  left out of H1's counts). Each dropped candidate counts once, under the first reason that applies, in this order:
+  `out_of_scope`, `superseded`, `flagged`, `expired`, `capped`. An out-of-scope candidate is never in the receipt's
+  `memories` or `returned_chars`.
+- **B11 Abstention (FR-005, SC-6).** An empty `recall` puts `empty_reason` in its receipt: `no_match` (the last
+  window had no candidates), `out_of_scope` (every candidate counted as `out_of_scope`), or `excluded` (any other
+  mix). The MCP response stays a JSON list.
