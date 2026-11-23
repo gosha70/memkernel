@@ -154,7 +154,8 @@ The H2 build (D5: FR-001, FR-005, SC-1, SC-4, SC-6) as it will be built. H1's id
 `task_id` (A1), from the call or the process. Decisions B1–B5 await the owner; B6–B11 follow from the spec and are
 stated so the review can check them.
 
-- **B1 How `retain` names a scope (owner).** `retain(scope=…)` takes `project` (the default), `agent` or `task`,
+- **B1 How `retain` names a scope (owner).** `retain(scope=…)` takes `project` (the default; a checkpoint's under B4),
+  `agent` or `task`,
   meaning the caller's own `agent_id` or `task_id`; the record stores `agent:<id>` or `task:<id>`. A call without
   that id is refused. So a caller cannot write into another agent's scope by a typo, and the stored form is the
   spec's. (The alternative, a free `agent:<id>` string, lets one agent write a note only another agent can see.)
@@ -172,7 +173,11 @@ stated so the review can check them.
   keeps seeing their own checkpoints, since every session of that agent carries the same id. Tools that share one
   store (#107) must then set the same `MEMKERNEL_AGENT_ID`, or none: if Claude Code sets it and Codex does not, a
   session started in one is not continued in the other, because Codex cannot see Claude Code's agent checkpoints.
-  The README's "One store across tools" section and the Codex and Cursor templates say so. (The alternative keeps
+  The README's "One store across tools" section and the Codex and Cursor templates say so. The same default holds
+  for the checkpoints an agent saves itself, as the templates tell it to: `retain(checkpoint=true)` without a `scope`
+  is `agent` when the caller has an agent id, and `project` otherwise (a task id alone does not change it); an
+  explicit `scope="project"` shares it.
+  (The alternative keeps
   every hook checkpoint `project`, as today: then agent A's session start can show agent B's checkpoint, a limit the
   README would have to state.)
 - **B5 Filtering in Python, not in the store (owner).** Scope is applied after the store returns candidates, by one
@@ -198,13 +203,26 @@ stated so the review can check them.
 - **B9 Writes.** Dedup is per scope: identical text in two scopes is two records, so a private note never merges into
   a project one; the two copies are not linked, and the private one reaches the wiki only by `promote` with
   `scope="project"` (B3). `promote` keeps the source's scope; `scope="project"` publishes, never by default (FR-001).
-  `supersedes=`, `forget` and `promote` need a target the caller can see (B2). Records memkernel writes itself, the
+  `supersedes=`, `forget` and `promote` need a target the caller can see (B2). **A private record supersedes only
+  its own scope:** an `agent:` or `task:` record may supersede only records in that same scope, and a `project`
+  record anything the caller can see (`project` records and the caller's own private ones, since no one else's are
+  visible), so one agent's note can never hide a shared record from everyone. A
+  `supersedes=` that breaks this is refused with an error naming the rule (the target is visible, so the error hides
+  nothing). Code's automatic supersede (a changed file replaces the live snapshots of the same `source`) follows the
+  same rule, so there is one live snapshot per `source` and scope: a private snapshot replaces only snapshots in its
+  scope, and the others stay live. **Parts take their
+  owner's scope:** a code chunk is visible exactly when its owner is, and a document chunk hit resolves only to a
+  summary the caller can see (document bodies are shared between owners); a chunk with no such summary counts as
+  `out_of_scope` (B10). Records memkernel writes itself, the
   wiki import's pages and capture's records, are `project`; `withdraw` is the wiki import's own path on those records,
   not an MCP tool, and takes no caller.
 - **B10 Exclusion counts.** `excluded` adds `out_of_scope` and `capped` (the limit of 3 captured records per session,
   left out of H1's counts). Each dropped candidate counts once, under the first reason that applies, in this order:
   `out_of_scope`, `superseded`, `flagged`, `expired`, `capped`. An out-of-scope candidate is never in the receipt's
-  `memories` or `returned_chars`.
+  `memories` or `returned_chars`. Each `memories` entry adds `scope` when it is not `project`, so the log can show
+  that no agent received another agent's or task's record.
 - **B11 Abstention (FR-005, SC-6).** An empty `recall` puts `empty_reason` in its receipt: `no_match` (the last
   window had no candidates), `out_of_scope` (every candidate counted as `out_of_scope`), or `excluded` (any other
-  mix). The MCP response stays a JSON list.
+  mix). `recall(order="newest")` has no `excluded` counts (A4); an empty one records `no_match` when the store has no
+  live checkpoint matching its filters, and `out_of_scope` when it has some but none the caller can see. The MCP
+  response stays a JSON list.
