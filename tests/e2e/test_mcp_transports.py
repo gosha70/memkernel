@@ -151,3 +151,47 @@ async def test_the_http_transport_refuses_a_foreign_host_or_origin() -> None:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+
+
+SHARED_DECISION = "Shared-store check: the integration branch is frozen on Fridays"
+
+
+async def _retain_then_recall_elsewhere(writer: Client, reader: Client) -> None:
+    """A decision retained through one client is returned by a relevance recall through the other (#107 SC-1, SC-2)."""
+    retained = json.loads(_text(await writer.call_tool("retain", {"content": SHARED_DECISION, "type": "decision"})))
+    found = json.loads(_text(await reader.call_tool("recall", {"query": "integration branch frozen", "top_k": 3})))
+    assert retained["ref_id"] in [hit["ref_id"] for hit in found]
+
+
+async def test_two_stdio_servers_on_one_store_see_each_others_writes(tmp_path: Path) -> None:
+    """#107 FR-001: each tool starts its own memkernel on the shared store; both servers run before the write."""
+    env = _env(
+        MEMKERNEL_PROJECT_ID="shared_store",
+        MEMKERNEL_CHROMA_PERSIST_PATH=str(tmp_path / "chroma"),
+        MEMKERNEL_STATE_DIR=str(tmp_path / "state"),
+    )
+    params = StdioServerParameters(command=LAUNCHER[0], args=LAUNCHER[1:], env=env, cwd=str(REPO_ROOT))
+    with anyio.fail_after(ROUNDTRIP_TIMEOUT_SECONDS * 2):
+        async with Client(params) as first, Client(params) as second:
+            await second.call_tool("recall", {"query": "warm up", "top_k": 1})  # the second server is live first
+            await _retain_then_recall_elsewhere(first, second)
+
+
+async def test_two_clients_share_one_http_server() -> None:
+    """#107 FR-002: one long-running server, registered in each tool."""
+    port = _free_port()
+    env = _env(MEMKERNEL_TRANSPORT="streamable-http", MEMKERNEL_HOST=LOCALHOST, MEMKERNEL_PORT=str(port))
+    process = subprocess.Popen(LAUNCHER, cwd=REPO_ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
+    try:
+        _wait_for_port(port, process)
+        with anyio.fail_after(ROUNDTRIP_TIMEOUT_SECONDS):
+            url = f"http://{LOCALHOST}:{port}/mcp"
+            async with Client(url) as first, Client(url) as second:
+                await _retain_then_recall_elsewhere(first, second)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=HTTP_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()

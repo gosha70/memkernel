@@ -212,6 +212,45 @@ Kiro (and the Kiro CLI, formerly Amazon Q Developer CLI) connects to MemKernel a
 
 ---
 
+## One store across tools
+
+Codex, Cursor and Antigravity can use the same memkernel store as Claude Code, so a decision recorded in one tool is
+recalled in the next. Point every tool at the same store: the same `MEMKERNEL_PROJECT_ID`,
+`MEMKERNEL_CHROMA_PERSIST_PATH` and `MEMKERNEL_STATE_DIR` (absolute paths). There are two ways to run it:
+
+- **Each tool starts its own memkernel** over stdio, the default every MCP config uses. Several servers on one store
+  are supported: a record one writes is recalled by the others.
+- **One shared server.** Start it once with `MEMKERNEL_TRANSPORT=streamable-http memkernel` and register
+  `http://127.0.0.1:8765/mcp` in each tool. **Local only, no authentication:** see
+  [Streamable HTTP](#streamable-http) for the `Host`/`Origin` check and `MEMKERNEL_ALLOWED_HOSTS`.
+
+Templates, checked against each tool's documentation on 2026-11-18:
+
+| Tool | Templates | Copy to | Session start |
+|------|-----------|---------|---------------|
+| Codex | [`templates/codex/`](templates/codex/): `config.toml` (stdio) or `config.http.toml`; `AGENTS.md`; `hooks.json` | `.codex/config.toml` (a trusted project); your `AGENTS.md`; `.codex/hooks.json` | a `SessionStart` hook runs `memkernel session-start --format plain --max-chars 6000` under `env` with the same `MEMKERNEL_*` values as `config.toml` (its `env` table reaches only the MCP server, and the hook is its own process, so set them in both files); Codex runs no hook you have not trusted: open `/hooks` in Codex, review the memkernel hook and trust it, once and again after any change to it |
+| Cursor | [`templates/cursor/`](templates/cursor/): `mcp.json` (stdio) or `mcp.http.json`; `rules/memkernel.mdc` | `.cursor/mcp.json`; `.cursor/rules/memkernel.mdc` | the rule (`alwaysApply: true`) tells the agent to recall the latest checkpoint and the project's decisions |
+| Antigravity | [`templates/antigravity/`](templates/antigravity/): `mcp_config.json` (stdio) or `mcp_config.http.json`; `rules/memkernel.md` | `.agents/mcp_config.json`; `.agents/rules/memkernel.md` | the rule (`trigger: always_on`), likewise |
+
+**Why only Codex gets a hook:** its `SessionStart` takes plain text on stdout, as Claude Code's does, and caps each
+hook message at about 2,500 tokens, hence `--max-chars 6000`. Cursor's `sessionStart` hook is fire-and-forget and
+drops its context on the first request in the Agents Window (a known Cursor bug), and Antigravity's hook output
+shape is inconsistent in its own docs, so both use an always-on rule. `memkernel session-start` also prints the
+block as `--format cursor` (`{"additional_context": …}`) and `--format antigravity` (`{"injectSteps": …}`), for when
+those hooks become reliable.
+
+Limits:
+- **Capture** (`MEMKERNEL_CAPTURE`) reads Claude Code transcripts only. `memkernel session-start` writes no
+  `started` line for its own session, so other tools' sessions are neither reported nor captured. On a startup it
+  still handles the spool as a Claude Code start does: it removes ended Claude Code sessions, reports those that
+  saved no checkpoint, and runs capture when `MEMKERNEL_CAPTURE` is on. So that report appears in whichever tool
+  starts next.
+- **On Windows** the store locks run unlocked, with a warning, so concurrent servers are not safe there.
+- **A running server notices other processes' writes by the record count:** an addition and a deletion by others
+  between two of its recalls go unseen until the next difference.
+
+---
+
 ## MCP Tools
 
 | Tool | What it does |
