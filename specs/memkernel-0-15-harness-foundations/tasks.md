@@ -1,8 +1,8 @@
 # Tasks: memkernel-0-15-harness-foundations
 
 ## US1 (H1): receipts and correlation
-- [ ] Run, agent and task ids per call and per process (FR-002)
-- [ ] Receipt fields in the recall log: hashes, states, latency, size, exclusion counts (FR-003); the count grouped by run and agent (FR-006)
+- [x] Run, agent and task ids per call and per process (FR-002)
+- [x] Receipt fields in the recall log: hashes, states, latency, size, exclusion counts (FR-003); the count grouped by run and agent (FR-006)
 
 ## US2 (H2): scope and abstention
 - [ ] `scope` on records, `agent`/`task` on every read path, promotion keeping scope (FR-001, SC-1); the empty-result reason in the receipt (FR-005, SC-6)

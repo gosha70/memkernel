@@ -6,9 +6,13 @@ Off unless ``MEMKERNEL_RECALL_LOG`` is set, because it stores query text. Each M
 and so does each hook block that shows memories (amendment A1), under
 ``MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl``. Before an append that would pass
 ``recall_log_max_bytes`` the file is rotated (``recall.jsonl.1``, ``.2``, ...), keeping ``recall_log_max_files`` files;
-a single record larger than the limit gives up query text first, then trailing ``ref_ids``, and is marked
-``truncated`` (and ``ref_ids_truncated`` when ids were dropped); ``query_sha256`` always hashes the full query, so
-a record can be paired with its call either way.
+a single record larger than the limit gives up query text first, then trailing ``memories`` details
+(``memories_truncated``), then trailing ``ref_ids`` (``ref_ids_truncated``), and is marked ``truncated``;
+``query_sha256`` always hashes the full query, so a record can be paired with its call either way.
+
+Each record is also a context receipt (memkernel-0-15-harness-foundations FR-002, FR-003, A3): the run, agent and
+task ids; per returned memory its ``content_hash`` with the hashing scheme, source, source hash and state; the
+characters returned; and for an MCP recall its latency and the candidates excluded, by reason.
 A write failure is logged once per process and never fails the recall. With an in-memory store there is no log.
 The lock is POSIX-only (``fcntl``): on Windows the log runs unlocked, with one warning per process.
 """
@@ -19,17 +23,20 @@ import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from memkernel import session_spool
+from memkernel.memory.dedup import CONTENT_HASH_SCHEME
 from memkernel.session_spool import locked
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from memkernel.config import MemKernelSettings
+    from memkernel.core.models import Memory
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +46,8 @@ ORIGIN_TOOL = "tool"
 ORIGIN_HOOK = "hook"
 QUERY_MAX_CHARS = 2_000
 FILE_MODE = 0o600
+STATE_LIVE = "live"
+STATE_FLAGGED = "flagged"
 
 _warned = False
 _warned_unlocked = False
@@ -61,11 +70,21 @@ def append(
     filters: dict[str, Any] | None = None,
     block: str = "",
     now: datetime | None = None,
+    ids: Correlation | None = None,
+    memories: Sequence[Memory] = (),
+    returned_chars: int = 0,
+    latency_ms: float | None = None,
+    excluded: dict[str, int] | None = None,
 ) -> None:
-    """Append one record; nothing when the log is off. Never raises: a failure is logged once per process."""
+    """Append one record; nothing when the log is off. Never raises: a failure is logged once per process.
+
+    ``memories`` are the returned records in ``ref_ids`` order; ``ids`` default to the process's settings.
+    ``latency_ms`` and ``excluded`` are left out of the record when None (a hook block, or ``order="newest"``).
+    """
     path = log_path(settings)
     if path is None:
         return
+    correlation = ids or Correlation.from_settings(settings)
     record: dict[str, Any] = {
         "time": (now or datetime.now(UTC)).isoformat(),
         "origin": origin,
@@ -74,9 +93,18 @@ def append(
         "query_sha256": query_hash(query),
         "filters": filters or {},
         "ref_ids": list(ref_ids),
+        "run_id": correlation.run_id,
+        "agent_id": correlation.agent_id,
+        "task_id": correlation.task_id,
+        "memories": [receipt_entry(memory) for memory in memories],
+        "returned_chars": returned_chars,
     }
     if block:
         record["block"] = block
+    if latency_ms is not None:
+        record["latency_ms"] = round(latency_ms, 3)
+    if excluded is not None:
+        record["excluded"] = dict(excluded)
     line = _fit(record, settings.recall_log_max_bytes)
     if line is None:
         _warn_once(path, "a record does not fit in recall_log_max_bytes")
@@ -93,6 +121,34 @@ def append(
                 handle.write(line)
     except OSError as exc:
         _warn_once(path, str(exc))
+
+
+@dataclass(frozen=True)
+class Correlation:
+    """The run, agent and task ids a record carries (FR-002): a call's own, or the process's settings."""
+
+    run_id: str = ""
+    agent_id: str = ""
+    task_id: str = ""
+
+    @classmethod
+    def from_settings(cls, settings: MemKernelSettings) -> Correlation:
+        return cls(settings.run_id, settings.agent_id, settings.task_id)
+
+
+def receipt_entry(memory: Memory) -> dict[str, str]:
+    """One returned memory as a receipt lists it (A3, A8): hashes and state, never content."""
+    entry = {
+        "ref_id": memory.ref_id,
+        "content_hash": memory.content_hash,
+        "content_hash_scheme": CONTENT_HASH_SCHEME,
+        "state": STATE_FLAGGED if memory.needs_review else STATE_LIVE,
+    }
+    if memory.source:
+        entry["source"] = memory.source
+    if memory.source_hash:
+        entry["source_hash"] = memory.source_hash
+    return entry
 
 
 def _warn_once(path: Path, reason: str) -> None:
@@ -112,27 +168,44 @@ def query_hash(query: str) -> str:
 
 
 def _fit(record: dict[str, Any], max_bytes: int) -> bytes | None:
-    """The record as one line within ``max_bytes``: query text is cut first, then trailing ref_ids, and the record is
-    marked ``truncated``; None if even an empty query and no ref_ids do not fit. Both cuts are binary searches."""
+    """The record as one line within ``max_bytes``, cutting in order (A5): query text, then trailing ``memories``
+    details, then trailing ref_ids, marking the record ``truncated``; None if even an empty query, no details and no
+    ref_ids do not fit. Each cut is a binary search. ref_ids go last: the count relies on them."""
     line = _encode(record)
     if len(line) <= max_bytes:
         return line
-    refs = list(record["ref_ids"])
-    query = record["query"]
+    refs, details, query = list(record["ref_ids"]), list(record["memories"]), record["query"]
 
-    def size(query_chars: int, ref_count: int) -> int:
-        trial = {**record, "query": query[:query_chars], "ref_ids": refs[:ref_count], "truncated": True}
+    def size(query_chars: int, detail_count: int, ref_count: int) -> int:
+        trial = {
+            **record,
+            "query": query[:query_chars],
+            "memories": details[:detail_count],
+            "ref_ids": refs[:ref_count],
+            "truncated": True,
+        }
         return len(_encode(trial))
 
-    keep_refs = len(refs)
-    if size(0, keep_refs) > max_bytes:
-        keep_refs = _largest(lambda n: size(0, n) <= max_bytes, len(refs))
+    keep_query, keep_details, keep_refs = len(query), len(details), len(refs)
+    if size(0, keep_details, keep_refs) <= max_bytes:
+        keep_query = _largest(lambda n: size(n, keep_details, keep_refs) <= max_bytes, len(query))
+    elif size(0, 0, keep_refs) <= max_bytes:
+        keep_query = 0
+        keep_details = _largest(lambda n: size(0, n, keep_refs) <= max_bytes, len(details))
+    else:
+        keep_query, keep_details = 0, 0
+        keep_refs = _largest(lambda n: size(0, 0, n) <= max_bytes, len(refs))
         if keep_refs < 0:
             return None
-        keep_query = 0
-    else:
-        keep_query = _largest(lambda n: size(n, keep_refs) <= max_bytes, len(query))
-    fitted = {**record, "query": query[:keep_query], "ref_ids": refs[:keep_refs], "truncated": True}
+    fitted = {
+        **record,
+        "query": query[:keep_query],
+        "memories": details[:keep_details],
+        "ref_ids": refs[:keep_refs],
+        "truncated": True,
+    }
+    if keep_details < len(details):
+        fitted["memories_truncated"] = True
     if keep_refs < len(refs):
         fitted["ref_ids_truncated"] = True  # the count cannot take this record as proof that a memory was missed
     return _encode(fitted)

@@ -5,12 +5,13 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 — runtime import required by MCPServer introspection
 
 from memkernel import recall_log
-from memkernel.core.models import DEFAULT_ASK_MODE, MemoryTier, MemoryType
+from memkernel.core.models import DEFAULT_ASK_MODE, MemoryTier, MemoryType, RecallReceipt, check_id
 from memkernel.mcp.tools.errors import reported_errors
 
 
@@ -18,6 +19,16 @@ def _service(ctx: Context[Any, Any] | None) -> Any:
     if ctx is None:
         raise RuntimeError("Tool called outside of MCP request context")
     return ctx.request_context.lifespan_context.memory_service
+
+
+def _correlation(svc: Any, run_id: str | None, agent_id: str | None, task_id: str | None) -> recall_log.Correlation:
+    """A call's ids, each falling back to the process's setting (FR-002); longer than ID_MAX_CHARS raises (A7)."""
+    process = recall_log.Correlation.from_settings(svc.settings)
+    return recall_log.Correlation(
+        check_id("run_id", run_id) if run_id else process.run_id,
+        check_id("agent_id", agent_id) if agent_id else process.agent_id,
+        check_id("task_id", task_id) if task_id else process.task_id,
+    )
 
 
 def register_memory_tools(server: MCPServer[Any]) -> None:
@@ -34,6 +45,9 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         importance: float | None = None,
         tags: list[str] | None = None,
         supersedes: str | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
         ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Store a memory. Returns ref_id. Idempotent for identical content+type.
@@ -44,8 +58,11 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         chunk-indexed, get() returns a summary, ask(ref_id, question) reads the body.
         importance: 0..1, defaults per type. supersedes: ref_id this memory replaces.
         Tags starting with wiki-path: or wiki-id: are reserved for wiki_import and refused.
+        run_id, agent_id, task_id: the calling harness's ids (at most 128 characters each); a new
+        memory keeps run_id as provenance. Default: MEMKERNEL_RUN_ID, MEMKERNEL_AGENT_ID, MEMKERNEL_TASK_ID.
         """
         svc = _service(ctx)
+        ids = _correlation(svc, run_id, agent_id, task_id)
         ref_id = svc.retain(
             content=content,
             type=MemoryType(type),
@@ -55,6 +72,7 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             importance=importance,
             tags=tags,
             supersedes=supersedes,
+            run_id=ids.run_id,
         )
         return json.dumps({"ref_id": ref_id})
 
@@ -69,6 +87,9 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         top_k: int | None = None,
         include_needs_review: bool = False,
         order: str = "relevance",
+        run_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
         ctx: Context[Any, Any] | None = None,
     ) -> str:
         """Search memories by query. Returns ref_id + preview pairs ranked by relevance,
@@ -83,8 +104,13 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         vanished since they were retained (flagged by revalidation; hidden by default).
         Flagged decisions are always returned. Each result has needs_review and review_reason;
         re-check a flagged decision's evidence before relying on it.
+        run_id, agent_id, task_id: the calling harness's ids (at most 128 characters each), written
+        to the recall log when it is on. Default: MEMKERNEL_RUN_ID, MEMKERNEL_AGENT_ID, MEMKERNEL_TASK_ID.
         """
         svc = _service(ctx)
+        ids = _correlation(svc, run_id, agent_id, task_id)
+        receipt = RecallReceipt()
+        started = time.perf_counter()
         results = svc.recall(
             query=query,
             type=MemoryType(type) if type else None,
@@ -94,7 +120,9 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             top_k=top_k,
             include_needs_review=include_needs_review,
             order=order,
+            receipt=receipt,
         )
+        latency_ms = (time.perf_counter() - started) * 1000
         recall_log.append(
             svc.settings,
             recall_log.ORIGIN_TOOL,
@@ -109,6 +137,11 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
                 "include_needs_review": include_needs_review,
                 "order": order,
             },
+            ids=ids,
+            memories=receipt.memories,
+            returned_chars=sum(len(ref.preview) for ref in results),
+            latency_ms=latency_ms,
+            excluded=receipt.excluded,
         )
         return json.dumps([ref.model_dump(mode="json") for ref in results])
 

@@ -279,9 +279,22 @@ class MemoryLifecycle:
     # ------------------------------------------------------------------
 
     def _logged(self, text: str, block: str, candidates: list[str], session_id: str) -> str:
-        """Log the memories whose ref_id ``text`` shows, in order of appearance (A1); return ``text``."""
+        """Log the memories whose ref_id ``text`` shows, in order of appearance (A1), with their receipt details and the
+        block's length (memkernel-0-15-harness-foundations A3); return ``text``."""
+        settings = self._service.settings
+        if recall_log.log_path(settings) is None:
+            return text  # the log is off: no record, and no lookups for one
         shown = sorted({ref for ref in candidates if ref and ref in text}, key=text.index)
-        recall_log.append(self._service.settings, recall_log.ORIGIN_HOOK, shown, session_id=session_id, block=block)
+        found = [self._service.get(ref, touch=False) for ref in shown]
+        recall_log.append(
+            settings,
+            recall_log.ORIGIN_HOOK,
+            shown,
+            session_id=session_id,
+            block=block,
+            memories=[memory for memory in found if memory is not None],
+            returned_chars=len(text),
+        )
         return text
 
     def _retain_checkpoint(self, summary: str, now: datetime, tags: list[str]) -> str:
