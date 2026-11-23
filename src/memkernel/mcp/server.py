@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+SESSION_START_COMMAND = "session-start"  # #107 FR-003
+
 # The HTTP transport's Host/Origin check (#148): which binds are loopback, and which listen on every interface.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})  # noqa: S104 (names, not a bind)
@@ -151,6 +153,7 @@ def _register_health_resource(server: MCPServer[MemKernelContext], running: _Run
 
 
 _USAGE = """usage: memkernel [--version] [--help]
+       memkernel session-start [--format plain|cursor|antigravity] [--max-chars N]
 
 MemKernel MCP server. With no arguments it starts the server on the configured
 transport (MEMKERNEL_TRANSPORT=stdio|streamable-http) and waits for a client;
@@ -159,6 +162,10 @@ stop it with Ctrl-C. All settings come from MEMKERNEL_* environment variables
 
   -V, --version  print the version and exit
   -h, --help     print this help and exit
+
+session-start prints the session-start block for a coding tool's hook (Codex,
+Cursor, Antigravity), reading the hook's JSON from stdin; see the README section
+"One store across tools".
 """
 
 
@@ -174,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"memkernel {__version__}")
         return 0
+    if args and args[0] == SESSION_START_COMMAND:
+        from memkernel import session_start
+
+        return session_start.main(args[1:])
     if args in (["--help"], ["-h"]):
         print(_USAGE, end="")
         return 0

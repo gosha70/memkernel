@@ -17,6 +17,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **One store across Codex, Cursor, Antigravity and Claude Code** (#107; specs/memkernel-0-13-one-store-across-tools).
+  Templates for Codex (`config.toml`, `AGENTS.md`, a `SessionStart` hook), Cursor (`mcp.json`, an always-applied
+  rule) and Antigravity (`mcp_config.json`, an always-on rule), each over stdio or one shared HTTP server; a new
+  `memkernel session-start [--format plain|cursor|antigravity] [--max-chars N]` prints the session-start block for a
+  tool's hook. Several stdio servers on one store are supported and tested, as is one HTTP server with two clients.
+  On Windows the store locks run unlocked, with a warning, so concurrent servers are not safe there.
+
 - **Capture stores your answers and each session's outcome** (#147; specs/memkernel-0-14-capture-signals). With
   `MEMKERNEL_CAPTURE=1`, each answer to the agent's `AskUserQuestion` becomes a short-term episode (the option you
   chose, or your own words), and each session gets one outcome record: PRs opened and merged, issues filed (from

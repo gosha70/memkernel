@@ -182,7 +182,10 @@ cython_debug/
 .DS_Store
 /.claude
 /doc_internal
-AGENTS.md
+/AGENTS.md
 
 # memkernel's own local state: ChromaDB store and wiki-studio proposals (never committed)
 .memkernel/
+
+# code-copilot-team review loop state (findings, loop summary)
+.cct/

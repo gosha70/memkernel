@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memkernel session-start --format plain --max-chars 6000",
+            "statusMessage": "Loading memkernel context"
+          }
+        ]
+      }
+    ]
+  }
+}

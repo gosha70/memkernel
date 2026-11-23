@@ -1,0 +1,13 @@
+# memkernel for Codex: copy into .codex/config.toml (a trusted project) or ~/.codex/config.toml.
+# Each tool that starts its own memkernel on the same MEMKERNEL_CHROMA_PERSIST_PATH shares one store.
+# To use one shared server instead, see config.http.toml.
+
+[mcp_servers.memkernel]
+command = "memkernel"
+args = []
+
+[mcp_servers.memkernel.env]
+MEMKERNEL_PROJECT_ID = "my-project"
+MEMKERNEL_CHROMA_PERSIST_PATH = "/home/you/.memkernel/my-project"
+MEMKERNEL_STATE_DIR = "/home/you/.memkernel/my-project-state"
+MEMKERNEL_PROJECT_ROOT = "/path/to/my-project"
