@@ -125,8 +125,8 @@ A3–A7 follow from the spec and the review, and are stated so the review can ch
   record's `run_id`, so it names the run that created the memory.
 - **A3 Receipt fields.** Each recall-log record, MCP `recall` and hook block alike, adds `run_id`, `agent_id`,
   `task_id`; `memories`, one entry per returned memory in `ref_ids` order (`ref_id`, `content_hash`, `source`,
-  `source_hash` where it has one, `state`: `live` or `flagged`); `returned_chars` (the previews returned, or the
-  block's length); and, for MCP `recall`, `latency_ms` and `excluded` (`superseded`, withdrawn included, `flagged`,
+  `source_hash` where it has one, `state`: `live` or `flagged`); `returned_chars` (the length of the MCP
+  response the agent receives, or the block's length); and, for MCP `recall`, `latency_ms` and `excluded` (`superseded`, withdrawn included, `flagged`,
   `expired`). `ref_ids` stays as it is, so the count and older readers work unchanged.
 - **A4 What `excluded` counts.** Candidates the search returned in its last window and the live filter dropped, by
   reason: not the whole store. `recall(order="newest")` selects by metadata and reports `excluded` as absent, not

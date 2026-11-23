@@ -59,7 +59,8 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         importance: 0..1, defaults per type. supersedes: ref_id this memory replaces.
         Tags starting with wiki-path: or wiki-id: are reserved for wiki_import and refused.
         run_id, agent_id, task_id: the calling harness's ids (at most 128 characters each); a new
-        memory keeps run_id as provenance. Default: MEMKERNEL_RUN_ID, MEMKERNEL_AGENT_ID, MEMKERNEL_TASK_ID.
+        memory keeps run_id as provenance. agent_id and task_id are checked but not recorded by retain.
+        Default: MEMKERNEL_RUN_ID, MEMKERNEL_AGENT_ID, MEMKERNEL_TASK_ID.
         """
         svc = _service(ctx)
         ids = _correlation(svc, run_id, agent_id, task_id)
@@ -123,6 +124,7 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             receipt=receipt,
         )
         latency_ms = (time.perf_counter() - started) * 1000
+        response = json.dumps([ref.model_dump(mode="json") for ref in results])
         recall_log.append(
             svc.settings,
             recall_log.ORIGIN_TOOL,
@@ -139,11 +141,11 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             },
             ids=ids,
             memories=receipt.memories,
-            returned_chars=sum(len(ref.preview) for ref in results),
+            returned_chars=len(response),  # what the agent receives, not only the previews
             latency_ms=latency_ms,
             excluded=receipt.excluded,
         )
-        return json.dumps([ref.model_dump(mode="json") for ref in results])
+        return response
 
     @server.tool()
     @reported_errors

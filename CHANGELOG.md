@@ -22,7 +22,7 @@ All notable changes to this project are documented here. The format follows
   `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID` for the process), at most 128 characters each, a longer argument
   refused. With `MEMKERNEL_RECALL_LOG` on, each record also carries those ids and a receipt: per returned memory
   its `content_hash` and hashing scheme (`sha256-raw`), source, source hash and state, never content; the
-  characters returned; and for an MCP recall its latency and the candidates left out as superseded, flagged or
+  characters returned (the whole response or block); and for an MCP recall its latency and the candidates left out as superseded, flagged or
   expired. A new memory keeps `run_id` as provenance (older records load with none). The repeated-mistake count
   groups its report by run and agent when the log has them. The `recall` response and the tool set are unchanged.
 

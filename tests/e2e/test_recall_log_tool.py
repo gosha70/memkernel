@@ -97,7 +97,7 @@ async def test_an_mcp_recall_record_is_a_receipt_with_the_callers_ids(tmp_path: 
     (entry,) = record["memories"]
     assert entry["ref_id"] == ref_id and entry["content_hash"] == got["content_hash"]
     assert entry["content_hash_scheme"] == CONTENT_HASH_SCHEME and entry["state"] == "live"
-    assert record["returned_chars"] == sum(len(ref["preview"]) for ref in returned)
+    assert record["returned_chars"] == len(_text(result))  # the whole response, not only the previews
     assert record["latency_ms"] >= 0 and set(record["excluded"]) == set(EXCLUSION_REASONS)
     for refused in (refused_recall, refused_retain):
         assert refused.is_error and f"the limit is {ID_MAX_CHARS}" in _text(refused)
