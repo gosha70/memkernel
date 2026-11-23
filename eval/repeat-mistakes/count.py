@@ -499,8 +499,8 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
         "details": [_detail(r) for r in repeats],
         "limits": list(LIMITS),
     }
-    for name, key in (("by_run", "run_id"), ("by_agent", "harness_agent_id")):
-        groups = _grouped(repeats, key)
+    for name, attribute_name in (("by_run", "run_id"), ("by_agent", "harness_agent_id")):
+        groups = _grouped(repeats, attribute_name)
         if groups:
             report[name] = groups
     return report
