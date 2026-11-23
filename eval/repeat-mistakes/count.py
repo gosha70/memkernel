@@ -16,6 +16,10 @@
    A subagent gets no startup context: its repeat is ``shown`` only when its own recall returned the memory, and
    ``not shown`` rather than ``missed`` (R10, R14).
 
+4. **By run and agent** (memkernel-0-15-harness-foundations FR-006, A6): when the log records attributed to a
+   repeat's thread carry a harness ``run_id`` or ``agent_id``, the report adds ``by_run`` and ``by_agent``, the same
+   outcome counts per id (``several`` when that thread's records name more than one). Without ids it is unchanged.
+
 A hook record names its session; a tool record is paired with the transcript's own recall call (the same full
 query, by its hash, within 5 seconds, one to one, nearest first). A record whose candidates lie in more than one
 session is never guessed (D2).
@@ -53,6 +57,7 @@ NOT_SHOWN = "not shown"  # a subagent's repeat its own recalls did not show (R14
 OUTCOMES = (SHOWN, MISSED, OTHER_STORE, UNKNOWN)
 SUBAGENT_OUTCOMES = (SHOWN, NOT_SHOWN, OTHER_STORE, UNKNOWN)
 MAIN_THREAD = ""
+SEVERAL = "several"  # a thread whose log records name more than one run or agent id
 DEFAULT_RECALL_TOOL = "mcp__memkernel__recall"
 LIMITS = (
     "exact text only: a reworded or differently quoted error is not matched",
@@ -102,6 +107,8 @@ class LogRecord:
     ref_ids: list[str]
     query_sha256: str = ""
     truncated: bool = False  # ref_ids were cut: not proof that a memory was not returned
+    run_id: str = ""  # the harness's ids (memkernel-0-15-harness-foundations FR-002), empty in older logs
+    agent_id: str = ""
 
 
 @dataclass
@@ -116,6 +123,8 @@ class Repeat:
     command: str = ""  # the failing run's command, redacted and cut (R8)
     agent_id: str = MAIN_THREAD  # empty on the main thread; a subagent's repeat is reported apart (R10)
     captured: bool = False  # the memory is a captured record (FR-011)
+    run_id: str = ""  # the harness's run and agent ids from the thread's log records (A6); not Claude Code's agent_id
+    harness_agent_id: str = ""
 
 
 @dataclass
@@ -228,6 +237,8 @@ def _parse(store: str, raw: Any) -> LogRecord | None:
         "session_id": raw.get("session_id", ""),
         "query": raw.get("query", ""),
         "query_sha256": raw.get("query_sha256", ""),
+        "run_id": raw.get("run_id", ""),
+        "agent_id": raw.get("agent_id", ""),
     }
     filters, ref_ids = raw.get("filters", {}), raw.get("ref_ids", [])
     truncated, ids_cut = raw.get("truncated", False), raw.get("ref_ids_truncated", False)
@@ -252,6 +263,8 @@ def _parse(store: str, raw: Any) -> LogRecord | None:
         ref_ids,
         fields["query_sha256"],
         ids_cut,  # a record that lost only query text still lists every id it returned
+        fields["run_id"],
+        fields["agent_id"],
     )
 
 
@@ -387,6 +400,34 @@ def classify_subagent(
     return NOT_SHOWN, {"tool_recalls_before_failure": sum(r.store == error.store for r in before)}
 
 
+def _one_id(values: list[str]) -> str:
+    """The id a thread's records name: the one non-empty value, SEVERAL for more than one, empty for none."""
+    named = {value for value in values if value}
+    return SEVERAL if len(named) > 1 else next(iter(named), "")
+
+
+def _grouped(repeats: list[Repeat], key: str) -> dict[str, dict[str, Any]]:
+    """Repeat and outcome counts per harness id (A6); repeats without one are left out."""
+    groups: dict[str, dict[str, Any]] = {}
+    for repeat in repeats:
+        name = getattr(repeat, key)
+        if not name:
+            continue
+        group = groups.setdefault(name, {"repeats": 0, "by_outcome": {}})
+        group["repeats"] += 1
+        group["by_outcome"][repeat.outcome] = group["by_outcome"].get(repeat.outcome, 0) + 1
+    return dict(sorted(groups.items()))
+
+
+def _detail(repeat: Repeat) -> dict[str, Any]:
+    """A repeat for the report; the harness ids only when set, so a log without them reports as before (A6)."""
+    detail = asdict(repeat)
+    for key in ("run_id", "harness_agent_id"):
+        if not detail[key]:
+            del detail[key]
+    return detail
+
+
 def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
     errors = [e for store in stores for e in stored_errors(store)]
     logs = [read_log(store) for store in stores]
@@ -417,7 +458,8 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
             for thread, (out, error) in hits.items():
                 key = (session.session_id, thread)
                 judge = classify if thread == MAIN_THREAD else classify_subagent
-                outcome, evidence = judge(error, by_thread.get(key, []), out.time, possible.get(key))
+                thread_records = by_thread.get(key, [])
+                outcome, evidence = judge(error, thread_records, out.time, possible.get(key))
                 repeats.append(
                     Repeat(
                         store_name,
@@ -430,11 +472,13 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
                         stored_text(out.command),
                         thread,
                         error.captured,
+                        _one_id([r.run_id for r in thread_records]),
+                        _one_id([r.agent_id for r in thread_records]),
                     )
                 )
     main = [r for r in repeats if r.agent_id == MAIN_THREAD]
     subagent = [r for r in repeats if r.agent_id != MAIN_THREAD]
-    return {
+    report: dict[str, Any] = {
         "stored_errors": len(errors),
         "captured_errors": sum(e.captured for e in errors),
         "memories_with_errors": len(memories),
@@ -452,9 +496,14 @@ def count(stores: list[Store], sessions: list[Session]) -> dict[str, Any]:
         "shown_without_repeat": len(shown_without_repeat),
         "unattributed_tool_records": unattributed,
         "malformed_log_records": sum(bad for _, bad in logs),
-        "details": [asdict(r) for r in repeats],
+        "details": [_detail(r) for r in repeats],
         "limits": list(LIMITS),
     }
+    for name, attribute_name in (("by_run", "run_id"), ("by_agent", "harness_agent_id")):
+        groups = _grouped(repeats, attribute_name)
+        if groups:
+            report[name] = groups
+    return report
 
 
 def render(report: dict[str, Any]) -> str:
@@ -489,6 +538,10 @@ def render(report: dict[str, Any]) -> str:
         lines.append(f"{report['malformed_log_records']} malformed recall-log line(s) were skipped.")
     if report["unattributed_tool_records"]:
         lines.append(f"{report['unattributed_tool_records']} tool record(s) could not be paired with a session.")
+    for name, label in (("by_run", "run"), ("by_agent", "agent")):
+        for harness_id, group in report.get(name, {}).items():
+            outcomes = ", ".join(f"{n} {o}" for o, n in sorted(group["by_outcome"].items()))
+            lines.append(f"By {label} {harness_id}: {group['repeats']} repeat(s): {outcomes}.")
     for r in report["details"]:
         thread = (f" (subagent {r['agent_id']})" if r["agent_id"] else "") + (" (captured)" if r["captured"] else "")
         lines.append(

@@ -119,6 +119,15 @@ REVIEW_REASON_MISSING = "missing"
 # The content hash of a decision's ``source`` file when the decision was created (memkernel-0-10-decision-revalidation
 # FR-001); absent, so empty, on older records and on decisions whose source was not a readable project file.
 SOURCE_HASH_KEY = "source_hash"
+# Correlation (memkernel-0-15-harness-foundations FR-002, A1, A2, A7): the run that created a record, set on new records
+# only; absent, so empty, on older records. Run, agent and task ids are caller text of at most ID_MAX_CHARS.
+RUN_ID_KEY = "run_id"
+ID_MAX_CHARS = 128
+# Why the live filter dropped a candidate, as a recall receipt counts it (A3, A4); withdrawn counts as superseded.
+EXCLUDED_SUPERSEDED = "superseded"
+EXCLUDED_FLAGGED = "flagged"
+EXCLUDED_EXPIRED = "expired"
+EXCLUSION_REASONS = (EXCLUDED_SUPERSEDED, EXCLUDED_FLAGGED, EXCLUDED_EXPIRED)
 # Wiki-import tags (memkernel-0-6, memkernel-0-7-wiki-scope): what the wiki import writes on a memory. The two
 # identity tags name the wiki a memory belongs to; only the import sets them (S8).
 WIKI_TAG = "wiki"
@@ -214,6 +223,7 @@ class Memory(BaseModel):
     # 0.7: withdrawn without a replacement (memkernel-0-7 FR-001); absent, so live, in older stores.
     withdrawn_reason: str | None = None
     withdrawn_at: datetime | None = None
+    run_id: str = ""  # memkernel-0-15-harness-foundations A2: the run that created the record
 
     def retired(self) -> bool:
         """True for history: superseded by another record or withdrawn (memkernel-0-7 FR-002)."""
@@ -305,6 +315,25 @@ class ArtifactRef(BaseModel):
     # memkernel-0-10-decision-revalidation FR-004: a flagged decision is returned with its flag and reason.
     needs_review: bool = False
     review_reason: str = ""
+
+
+class RecallReceipt(BaseModel):
+    """What one recall returned and left out (memkernel-0-15-harness-foundations FR-003, A3, A4), filled in by
+    ``MemoryService.recall`` when the caller passes one.
+
+    ``memories`` holds the returned records in result order. ``excluded`` counts, by reason, the candidates the
+    search's last window returned and the live filter dropped; None for ``order="newest"``, which selects by metadata.
+    """
+
+    memories: list[Memory] = []
+    excluded: dict[str, int] | None = None
+
+
+def check_id(name: str, value: str) -> str:
+    """``value`` if it is a valid run, agent or task id (at most ID_MAX_CHARS); else ValueError naming the limit."""
+    if len(value) > ID_MAX_CHARS:
+        raise ValueError(f"{name} is {len(value)} characters; the limit is {ID_MAX_CHARS}")
+    return value
 
 
 class SearchResult(BaseModel):

@@ -7,13 +7,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+
+from memkernel.core.models import ID_MAX_CHARS
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
 logger = logging.getLogger(__name__)
+_warned_ids: set[str] = set()  # an over-long id setting is reported once per process
 
 ENV_PREFIX = "MEMKERNEL_"
 ENV_FILE = ".env"
@@ -108,6 +111,23 @@ class MemKernelSettings(BaseSettings):
     # Streamable HTTP's Host/Origin check (#148): extra host names a client may use, comma-separated, beside the ones
     # MEMKERNEL_HOST implies. Needed for a wildcard bind (0.0.0.0, ::), where clients send the machine's real name.
     allowed_hosts: str = ""
+
+    # Correlation (memkernel-0-15-harness-foundations FR-002, D2): the harness's run, agent and task ids for every call
+    # of this process; a call's own argument wins. At most ID_MAX_CHARS each: a longer value is ignored, with a warning.
+    run_id: str = ""
+    agent_id: str = ""
+    task_id: str = ""
+
+    @field_validator("run_id", "agent_id", "task_id")
+    @classmethod
+    def _id_within_limit(cls, value: str, info: ValidationInfo) -> str:
+        if len(value) <= ID_MAX_CHARS:
+            return value
+        name = f"{ENV_PREFIX}{(info.field_name or '').upper()}"
+        if name not in _warned_ids:
+            _warned_ids.add(name)
+            logger.warning("memkernel: %s is %d characters (limit %d) and is ignored", name, len(value), ID_MAX_CHARS)
+        return ""
 
     @classmethod
     def settings_customise_sources(

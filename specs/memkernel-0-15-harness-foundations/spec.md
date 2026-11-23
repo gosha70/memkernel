@@ -108,3 +108,42 @@ with a default from older stores (CLAUDE.md); `core/` depends only on ports.
   H2, then H3. #119 asks that the three areas be evaluated together, which this spec does; it leaves the number of
   PRs to the plan.
 - **D6 Who decides an agent or task id:** the caller (the harness), never memkernel.
+
+## Amendment H1: receipts and correlation (approved by the owner, 2026-11-23)
+
+The H1 build (D5) as it will be built; nothing in H2 or H3 changes. The owner decided A1, A2 and A8 on 2026-11-23;
+A3–A7 follow from the spec and the review, and are stated so the review can check them.
+
+- **A1 Argument names (owner: yes).** `recall` and `retain` take `run_id`, `agent_id` and `task_id`, the names of the
+  environment variables (`MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID`, FR-002). H2 reuses
+  `agent_id` and `task_id` for scope, so FR-001's "the caller's `agent` and `task`" means these two arguments: a
+  caller passes its ids once, and from H2 they also widen `recall` to that agent's or task's records. In H1 they are
+  only logged.
+- **A2 What a retained record keeps (owner: yes).** `run_id` only, as FR-002 says (`agent_id` and `task_id` reach the log,
+  not the record; H2's `scope` carries an agent or task where it matters). A new metadata key that loads as `""` from
+  older stores. Set when a record is created, like `source_hash`: a retain that matches an existing record keeps that
+  record's `run_id`, so it names the run that created the memory.
+- **A3 Receipt fields.** Each recall-log record, MCP `recall` and hook block alike, adds `run_id`, `agent_id`,
+  `task_id`; `memories`, one entry per returned memory in `ref_ids` order (`ref_id`, `content_hash`, `source`,
+  `source_hash` where it has one, `state`: `live` or `flagged`); `returned_chars` (the length of the MCP
+  response the agent receives, or the block's length); and, for MCP `recall`, `latency_ms` and `excluded` (`superseded`, withdrawn included, `flagged`,
+  `expired`). `ref_ids` stays as it is, so the count and older readers work unchanged.
+- **A4 What `excluded` counts.** Candidates the search returned in its last window and the live filter dropped, by
+  reason: not the whole store. `recall(order="newest")` selects by metadata and reports `excluded` as absent, not
+  zero. H2 adds `out_of_scope`.
+- **A5 One size limit.** Receipts make records larger. A record over `recall_log_max_bytes` drops, in order: query
+  text, then the per-memory details (trailing `memories` entries, marked `memories_truncated`), then trailing
+  `ref_ids` (marked `ref_ids_truncated`, as now). Each cut marks the record `truncated`. `ref_ids` go last, so the
+  count keeps the evidence it relies on.
+- **A6 The count (FR-006).** When attributed log records carry `run_id` or `agent_id`, the report adds `by_run` and
+  `by_agent`: the same outcome counts per id. Without ids the report is unchanged.
+- **A7 Ids are caller text, capped.** `run_id`, `agent_id` and `task_id` are at most 128 characters. A longer call
+  argument is refused with an error naming the limit; a longer environment value is ignored, with one warning per
+  process. So a harness cannot bloat the log or the records with them.
+- **A8 Hashing scheme in the receipt (owner: yes).** Each `memories` entry records the scheme that produced its
+  `content_hash`, one short field (`content_hash_scheme`, today `sha256-raw`: SHA-256 of the UTF-8 content). If #59's
+  S4 (#153) changes the hashing, H3 can then tell "hashed differently" from "content changed", and S4 need not be settled
+  before H3. Order after H1 (the owner, 2026-11-23): H2, H3, then S4 (#153) and #90's build in either order.
+
+Unchanged: the MCP tool set and the `recall` response (a JSON list); `MemoryService.recall` returns the same list
+(the receipt comes back through an optional argument); the log stays off unless `MEMKERNEL_RECALL_LOG` is set.

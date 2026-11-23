@@ -28,6 +28,10 @@ from memkernel.core.models import (
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    EXCLUDED_EXPIRED,
+    EXCLUDED_FLAGGED,
+    EXCLUDED_SUPERSEDED,
+    EXCLUSION_REASONS,
     HEALTH_CATEGORIES,
     HEALTH_DANGLING_LINKS,
     HEALTH_EXPIRED_PRESENT,
@@ -42,6 +46,7 @@ from memkernel.core.models import (
     REVIEW_REASON_CHANGED,
     REVIEW_REASON_KEY,
     REVIEW_REASON_MISSING,
+    RUN_ID_KEY,
     SOURCE_HASH_KEY,
     SUPERSEDED_BY_KEY,
     WIKI_ID_TAG,
@@ -61,7 +66,9 @@ from memkernel.core.models import (
     MemoryTier,
     MemoryType,
     ReasonerError,
+    RecallReceipt,
     SearchQuery,
+    check_id,
     has_wiki_identity,
     tier_of,
 )
@@ -120,6 +127,7 @@ class _ExtraMeta:
     supersedes: str | None = None
     promoted_from: str | None = None
     document_id: str | None = None
+    run_id: str = ""  # memkernel-0-15-harness-foundations A2: new records only
 
 
 def _is_owner_answer(memory: Memory) -> bool:
@@ -312,6 +320,7 @@ class MemoryService:
         dedup_owner: Callable[[Memory], bool] | None = None,
         wiki_identity: tuple[str, str | None] | None = None,
         content_dedup: bool = True,
+        run_id: str = "",
     ) -> str:
         """Store content and return its ref_id.
 
@@ -343,11 +352,21 @@ class MemoryService:
 
         ``content_dedup=False`` skips the identical-content check for a single record, so a later write never rewrites
         its session, timestamp or tags (memkernel-0-12-capture-core R1: a captured record is keyed by capture alone).
+
+        ``run_id`` (memkernel-0-15-harness-foundations FR-002, A2), or the process's ``MEMKERNEL_RUN_ID``, is written on
+        a new record as provenance; a retain that matches an existing record keeps that record's own. Longer than
+        ID_MAX_CHARS raises ``ValueError``.
         """
         reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
         if reserved:
             raise ValueError(f"tags {reserved} are reserved for the wiki import ({', '.join(WIKI_IDENTITY_TAGS)})")
-        extra = _ExtraMeta(importance=importance, tags=tags or [], supersedes=supersedes, promoted_from=promoted_from)
+        extra = _ExtraMeta(
+            importance=importance,
+            tags=tags or [],
+            supersedes=supersedes,
+            promoted_from=promoted_from,
+            run_id=check_id("run_id", run_id) or self._settings.run_id,
+        )
         if type == MemoryType.DOCUMENT and self._document_store is not None:
             return self._retain_document(content, session_id, checkpoint, source, extra)
         if type == MemoryType.CODE:
@@ -786,6 +805,8 @@ class MemoryService:
             metadata["supersedes"] = extra.supersedes
         if extra.promoted_from:
             metadata["promoted_from"] = extra.promoted_from
+        if extra.run_id:
+            metadata[RUN_ID_KEY] = extra.run_id
         if extra.document_id:
             metadata["document_id"] = extra.document_id
             metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
@@ -844,6 +865,7 @@ class MemoryService:
         touch: bool = True,
         include_needs_review: bool = False,
         order: str = ORDER_RELEVANCE,
+        receipt: RecallReceipt | None = None,
     ) -> list[ArtifactRef]:
         """Search for memories matching the query.
 
@@ -857,13 +879,17 @@ class MemoryService:
         Returned memories are marked as accessed (``touch``), which reinforces
         their retention — unless ``touch=False`` (used by maintenance paths).
         BM25 index is self-healed (rebuilt from vector store) if needs_rebuild is set.
+
+        With ``receipt`` (memkernel-0-15-harness-foundations FR-003, A3, A4), it is filled with the returned records
+        and, for a relevance recall, the candidates the last search window returned and the live filter dropped, by
+        reason. The returned list is the same either way.
         """
         if order not in (ORDER_RELEVANCE, ORDER_NEWEST):
             raise ValueError(f"order must be {ORDER_RELEVANCE!r} or {ORDER_NEWEST!r}, got {order!r}")
         if order == ORDER_NEWEST:
             if not checkpoint_only:
                 raise ValueError(f"order={ORDER_NEWEST!r} is only for checkpoint_only=true (the latest checkpoints)")
-            return self._newest_checkpoints(type, session_id, top_k, tier, touch)
+            return self._newest_checkpoints(type, session_id, top_k, tier, touch, receipt)
         _start = time.perf_counter()
 
         self._catch_up_with_other_writers()
@@ -877,6 +903,8 @@ class MemoryService:
         # guard is the correct termination condition and handles any corpus size.
         fetch_k = desired_k * 2
         live: list[ArtifactRef] = []
+        excluded: dict[str, int] = {}
+        kept: dict[str, Memory] = {}
 
         while True:
             search_query = SearchQuery(
@@ -888,7 +916,9 @@ class MemoryService:
                 top_k=fetch_k,
             )
             results = self._search_service.search(search_query)
-            live = self._filter_live(results, search_query, include_needs_review)
+            excluded = dict.fromkeys(EXCLUSION_REASONS, 0)  # the last window's, as A4 says
+            kept = {}
+            live = self._filter_live(results, search_query, include_needs_review, excluded, kept)
 
             store_exhausted = len(results) < fetch_k
             if len(live) >= desired_k or store_exhausted:
@@ -900,11 +930,19 @@ class MemoryService:
         if touch:
             for ref in live:
                 self._touch(ref.ref_id)
+        if receipt is not None:
+            receipt.memories = [kept[ref.ref_id] for ref in live if ref.ref_id in kept]  # never fails a recall
+            receipt.excluded = excluded
         self._last_recall_ms = (time.perf_counter() - _start) * 1000
         return live
 
     def _filter_live(
-        self, results: list[ArtifactRef], query: SearchQuery, include_needs_review: bool = False
+        self,
+        results: list[ArtifactRef],
+        query: SearchQuery,
+        include_needs_review: bool = False,
+        excluded: dict[str, int] | None = None,
+        kept: dict[str, Memory] | None = None,
     ) -> list[ArtifactRef]:
         """Drop expired and superseded memories; resolve document chunk hits to their summary.
 
@@ -921,7 +959,15 @@ class MemoryService:
         every owner of a body and are exempt from metadata filters at search
         time, so the query's filters (type, tier, session, checkpoint) are
         applied here, to the owning summary that is actually returned.
+
+        ``excluded`` counts each candidate dropped as superseded (or withdrawn), flagged or expired; ``kept`` maps
+        each returned ref_id to the record it stands for (a receipt's details, A3).
         """
+        counts = excluded if excluded is not None else {}
+
+        def drop(reason: str) -> None:
+            counts[reason] = counts.get(reason, 0) + 1
+
         memories: dict[str, Memory] = {}
         for ref in results:
             memory = self._vector_store.get_by_id(ref.ref_id)
@@ -935,9 +981,13 @@ class MemoryService:
         captured_per_session: dict[str, int] = {}
         for ref in results:
             memory = memories.get(ref.ref_id)
-            if memory is None or memory.retired():
+            if memory is None:
+                continue
+            if memory.retired():
+                drop(EXCLUDED_SUPERSEDED)
                 continue
             if memory.needs_review and not include_needs_review and not _exempt_from_review_hiding(memory):
+                drop(EXCLUDED_FLAGGED)
                 continue
             if memory.parent_ref:
                 # A code chunk lives and dies with its owner: dropped when the
@@ -945,7 +995,13 @@ class MemoryService:
                 if memory.parent_ref not in owners:
                     owners[memory.parent_ref] = self._vector_store.get_by_id(memory.parent_ref)
                 owner = owners[memory.parent_ref]
-                if owner is None or owner.retired() or (owner.needs_review and not include_needs_review):
+                if owner is None:
+                    continue
+                if owner.retired():
+                    drop(EXCLUDED_SUPERSEDED)
+                    continue
+                if owner.needs_review and not include_needs_review:
+                    drop(EXCLUDED_FLAGGED)
                     continue
                 if not _matches_query(owner, query):
                     continue  # the query's filters apply to the owner the chunk stands for
@@ -957,9 +1013,13 @@ class MemoryService:
                     continue
                 memory = summary
                 ref = _artifact_ref(summary, ref.score, self._settings.preview_length)
-            if ref.ref_id in seen or ref.ref_id in superseded:
+            if ref.ref_id in seen:
+                continue
+            if ref.ref_id in superseded:
+                drop(EXCLUDED_SUPERSEDED)
                 continue
             if memory_is_expired(memory, self._settings):
+                drop(EXCLUDED_EXPIRED)
                 continue
             origin = _capture_session(memory)
             if origin is not None:  # memkernel-0-14-capture-signals D7: one heavy session cannot fill a result
@@ -968,6 +1028,8 @@ class MemoryService:
                 captured_per_session[origin] = captured_per_session.get(origin, 0) + 1
             seen.add(ref.ref_id)
             live.append(ref)
+            if kept is not None:
+                kept[ref.ref_id] = memory
         return live
 
     def _document_summary_record(self, document_id: str, query: SearchQuery) -> Memory | None:
@@ -1038,10 +1100,13 @@ class MemoryService:
         top_k: int | None,
         tier: MemoryTier | None,
         touch: bool,
+        receipt: RecallReceipt | None = None,
     ) -> list[ArtifactRef]:
-        """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints, filtered like recall."""
+        """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints, filtered like recall. A
+        ``receipt`` gets the records and no ``excluded`` counts: the selection is by metadata (A4)."""
         limit = top_k if top_k is not None else self._settings.search_top_k
         picked: list[ArtifactRef] = []
+        records: list[Memory] = []
         for candidate in self.checkpoints_newest_first(include_flagged_decisions=True):
             if len(picked) >= limit:
                 break
@@ -1054,6 +1119,9 @@ class MemoryService:
             memory = self.get(candidate.ref_id, touch=touch)
             if memory is not None:
                 picked.append(_artifact_ref(memory, 1.0, self._settings.preview_length))
+                records.append(memory)
+        if receipt is not None:
+            receipt.memories, receipt.excluded = records, None
         return picked
 
     def checkpoints_newest_first(self, include_flagged_decisions: bool = False) -> list[Memory]:

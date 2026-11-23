@@ -577,3 +577,70 @@ def test_sc8_outcomes_on_the_claude_code_shaped_folder(tmp_path: Path) -> None:
     assert report["stored_errors"] == SC8_EXPECTED["stored_errors"]
     assert report["repeats"] == SC8_EXPECTED["repeats_main"]
     assert report["subagent_repeats"] == SC8_EXPECTED["subagent_repeats"]
+
+
+def test_repeats_are_grouped_by_the_harness_run_and_agent(tmp_path: Path) -> None:
+    """memkernel-0-15-harness-foundations FR-006, A6: per-id outcome counts; several ids on one thread are `several`;
+    a thread without ids is not grouped, and a report without any ids has no groups."""
+    a = _settings(tmp_path, "a")
+    svc = build_service(a, embedding=MockEmbedding(dimension=384))
+    svc.retain("agent note: `Error: disk full` on the build host", MemoryType.FACT)
+    del svc
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    start = datetime.now(UTC) + timedelta(hours=1)
+    sessions = {
+        "s1": [recall_log.Correlation("run-1", "planner")],
+        "s2": [recall_log.Correlation("run-2", "coder")],
+        "s3": [recall_log.Correlation("run-1", "coder"), recall_log.Correlation("run-3", "coder")],
+        "s4": [recall_log.Correlation()],
+    }
+    for index, (session_id, ids) in enumerate(sessions.items()):
+        when = start + timedelta(minutes=10 * index)
+        for offset, correlation in enumerate(ids):
+            recall_log.append(
+                a,
+                "hook",
+                [],
+                session_id=session_id,
+                block="session-start",
+                now=when + timedelta(seconds=offset),
+                ids=correlation,
+            )
+        Transcript(folder, session_id).tool(
+            when + timedelta(minutes=1), "Bash", {"command": "make"}, "Error: disk full", True
+        )
+    report = count_module.count(
+        [count_module.parse_store(_store_arg(tmp_path, "a"))], count_module.read_sessions(folder, "x")
+    )
+    assert report["repeats"] == 4
+    assert report["by_run"] == {
+        "run-1": {"repeats": 1, "by_outcome": {"missed": 1}},
+        "run-2": {"repeats": 1, "by_outcome": {"missed": 1}},
+        count_module.SEVERAL: {"repeats": 1, "by_outcome": {"missed": 1}},
+    }
+    assert report["by_agent"] == {
+        "coder": {"repeats": 2, "by_outcome": {"missed": 2}},
+        "planner": {"repeats": 1, "by_outcome": {"missed": 1}},
+    }
+    by_session = {d["session_id"]: d for d in report["details"]}
+    assert by_session["s1"]["run_id"] == "run-1" and by_session["s1"]["harness_agent_id"] == "planner"
+    assert "run_id" not in by_session["s4"] and "harness_agent_id" not in by_session["s4"]
+    assert "By run run-1: 1 repeat(s): 1 missed." in count_module.render(report)
+
+
+def test_a_log_without_harness_ids_reports_no_groups(tmp_path: Path) -> None:
+    a = _settings(tmp_path, "a")
+    svc = build_service(a, embedding=MockEmbedding(dimension=384))
+    svc.retain("agent note: `Error: disk full` on the build host", MemoryType.FACT)
+    del svc
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    when = datetime.now(UTC) + timedelta(hours=1)
+    recall_log.append(a, "hook", [], session_id="s1", block="session-start", now=when)
+    Transcript(folder, "s1").tool(when + timedelta(minutes=1), "Bash", {"command": "make"}, "Error: disk full", True)
+    report = count_module.count(
+        [count_module.parse_store(_store_arg(tmp_path, "a"))], count_module.read_sessions(folder, "x")
+    )
+    assert report["repeats"] == 1 and "by_run" not in report and "by_agent" not in report
+    assert "run_id" not in report["details"][0] and "By run" not in count_module.render(report)

@@ -17,6 +17,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Context receipts and correlation in the recall log** (#119 H1; specs/memkernel-0-15-harness-foundations,
+  amendment H1). `recall` and `retain` take `run_id`, `agent_id` and `task_id` (or `MEMKERNEL_RUN_ID`,
+  `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID` for the process), at most 128 characters each, a longer argument
+  refused. With `MEMKERNEL_RECALL_LOG` on, each record also carries those ids and a receipt: per returned memory
+  its `content_hash` and hashing scheme (`sha256-raw`), source, source hash and state, never content; the
+  characters returned (the whole response or block); and for an MCP recall its latency and the candidates left out as superseded, flagged or
+  expired. A new memory keeps `run_id` as provenance (older records load with none). The repeated-mistake count
+  groups its report by run and agent when the log has them. The `recall` response and the tool set are unchanged.
+
 - **One store across Codex, Cursor, Antigravity and Claude Code** (#107; specs/memkernel-0-13-one-store-across-tools).
   Templates for Codex (`config.toml`, `AGENTS.md`, a `SessionStart` hook), Cursor (`mcp.json`, an always-applied
   rule) and Antigravity (`mcp_config.json`, an always-on rule), each over stdio or one shared HTTP server; a new
