@@ -12,9 +12,9 @@ each memory the run received the statuses that apply against the store now (amen
   memkernel's, so it is not compared (C2); for code, the source check then only notices a file that is gone.
 - ``flagged``: needs review now, and ``live`` in its receipt (the run did not see a flag).
 - ``source changed`` (decisions and code only, as revalidation: another record's ``source`` is a label, such as
-  ``capture``): the memory's ``source`` file under the project root no longer hashes to the receipt's
-  ``source_hash`` (a decision) or ``content_hash`` (code), through memkernel's own ``compute_content_hash``; a file
-  that is gone counts too. It says nothing about whether the memory is wrong, or about other files its text cites.
+  ``capture``; and not for records the wiki import manages, #160): the memory's ``source`` file under the project
+  root no longer hashes to the receipt's ``source_hash`` (a decision) or ``content_hash`` (code), through
+  memkernel's own ``compute_content_hash``; a file that is gone counts too. It says nothing about whether the memory is wrong, or about other files its text cites.
 - ``unknown``: no receipt in the run has the memory's hash (every record that returned it was cut down). It combines
   only with ``superseded`` and ``withdrawn``.
 - ``unchanged``: nothing else applies.
@@ -51,7 +51,7 @@ from chromadb.errors import ChromaError  # noqa: E402
 
 from memkernel import recall_log  # noqa: E402
 from memkernel.config import MemKernelSettings  # noqa: E402
-from memkernel.core.models import MemoryType  # noqa: E402
+from memkernel.core.models import MemoryType, has_wiki_identity  # noqa: E402
 from memkernel.memory.dedup import CONTENT_HASH_SCHEME, compute_content_hash  # noqa: E402
 from memkernel.memory.lifecycle import memory_is_expired  # noqa: E402
 from memkernel.storage.chroma import ChromaVectorStore  # noqa: E402
@@ -72,6 +72,7 @@ UNCHANGED = "unchanged"
 STATUSES = (MISSING, SUPERSEDED, WITHDRAWN, CHANGED, REHASHED, FLAGGED, SOURCE_CHANGED, UNKNOWN, UNCHANGED)
 CHUNK_INFIX = "-chunk-"  # a code chunk's id: <owner ref_id>-chunk-<n>
 NOTE_NO_ROOT = "no source check (no root given)"
+NOTE_WIKI = "no source check (managed by the wiki import)"
 NOTE_OUTSIDE_ROOT = "no source check (outside the project root)"
 NOTE_UNREADABLE = "no source check (the file cannot be read as text)"
 EXIT_REPORT, EXIT_NO_RECORDS, EXIT_USAGE = 0, 1, 2
@@ -265,7 +266,9 @@ def judge(
     if entry.get("state") == recall_log.STATE_LIVE and subject.needs_review:
         judged.statuses.append(FLAGGED)
     source = subject.source if owner_id else str(entry.get("source") or subject.source)
-    if source and subject.type in SOURCE_CHECKED_TYPES:
+    if source and subject.type in SOURCE_CHECKED_TYPES and has_wiki_identity(subject.tags):
+        judged.notes.append(NOTE_WIKI)  # its source is a page path inside the wiki; the import keeps it current (#160)
+    elif source and subject.type in SOURCE_CHECKED_TYPES:
         if owner_id:
             expected = subject.content_hash  # made now, with the current scheme: C2 does not apply
         elif subject.type == MemoryType.CODE:
