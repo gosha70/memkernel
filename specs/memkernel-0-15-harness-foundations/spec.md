@@ -172,7 +172,8 @@ B6–B11 follow from the spec and the review, and are stated so the review can c
     (`retain(checkpoint=true)` without a `scope`) are saved in the caller's effective scope.
   - **Recovering:** latest-checkpoint recovery uses only that effective scope: the checkpoint in the session-start
     and compaction-recovery blocks, and `recall(checkpoint_only=true, order="newest")`, consider only checkpoints in
-    the caller's effective scope.
+    the caller's effective scope. A caller with neither id recovers `project` checkpoints, as today; a task or agent
+    scope never falls back to `project`.
   - **Sharing:** `scope="project"` on a checkpoint is an explicit shared handoff. Like any `project` record it is
     visible to every caller through relevance `recall`; it is not what latest-checkpoint recovery picks for a caller
     with a task or agent id.
