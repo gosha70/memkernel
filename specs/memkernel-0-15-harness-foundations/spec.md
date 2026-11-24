@@ -148,39 +148,39 @@ A3–A7 follow from the spec and the review, and are stated so the review can ch
 Unchanged: the MCP tool set and the `recall` response (a JSON list); `MemoryService.recall` returns the same list
 (the receipt comes back through an optional argument); the log stays off unless `MEMKERNEL_RECALL_LOG` is set.
 
-## Amendment H2: scope and abstention (draft, 2026-11-23)
+## Amendment H2: scope and abstention (approved by the owner, 2026-11-23)
 
 The H2 build (D5: FR-001, FR-005, SC-1, SC-4, SC-6) as it will be built. H1's ids are the caller: `agent_id` and
-`task_id` (A1), from the call or the process. Decisions B1–B5 await the owner; B6–B11 follow from the spec and are
-stated so the review can check them.
+`task_id` (A1), from the call or the process. The owner confirmed B1, B2, B3 and B5 and revised B4 on 2026-11-23;
+B6–B11 follow from the spec and the review, and are stated so the review can check them.
 
-- **B1 How `retain` names a scope (owner).** `retain(scope=…)` takes `project` (the default; a checkpoint's under B4),
+- **B1 How `retain` names a scope (owner: yes).** `retain(scope=…)` takes `project` (the default; a checkpoint's is its effective scope, B4),
   `agent` or `task`,
   meaning the caller's own `agent_id` or `task_id`; the record stores `agent:<id>` or `task:<id>`. A call without
   that id is refused. So a caller cannot write into another agent's scope by a typo, and the stored form is the
   spec's. (The alternative, a free `agent:<id>` string, lets one agent write a note only another agent can see.)
-- **B2 An out-of-scope record by id (owner).** `get`, `ask`, `forget`, `promote` and a `supersedes=` target treat a
+- **B2 An out-of-scope record by id (owner: yes).** `get`, `ask`, `forget`, `promote` and a `supersedes=` target treat a
   record the caller cannot see as not found, the same answer as a missing one: `get` and `ask` return not found,
   `forget` returns `deleted: false`, and a `supersedes=` target is ignored, as a missing one is today. Scope is a
   convention (FR-001), so this hides nothing from a hostile client; it keeps every path giving one answer. The cost:
   an agent that names another agent's record by mistake gets "not found", not a scope error.
-- **B3 Wiki export (owner).** `wiki_export` drafts pages from `project` records only, whoever calls it: a wiki is
+- **B3 Wiki export (owner: yes).** `wiki_export` drafts pages from `project` records only, whoever calls it: a wiki is
   shared knowledge, and a private note becomes shared only by promoting it with `scope="project"` first.
-- **B4 Hook checkpoints (owner; recommended: scoped to the agent).** A checkpoint the hooks save (session end,
-  compaction) is `agent:<MEMKERNEL_AGENT_ID>` when that variable is set, and `project` otherwise. With two agents on
-  one project, each session start and compaction recovery then shows that agent's own newest checkpoint, not the
-  other agent's current task (scenario 1). A single-agent user without the variable sees no change; one with it set
-  keeps seeing their own checkpoints, since every session of that agent carries the same id. Tools that share one
-  store (#107) must then set the same `MEMKERNEL_AGENT_ID`, or none: if Claude Code sets it and Codex does not, a
-  session started in one is not continued in the other, because Codex cannot see Claude Code's agent checkpoints.
-  The README's "One store across tools" section and the Codex and Cursor templates say so. The same default holds
-  for the checkpoints an agent saves itself, as the templates tell it to: `retain(checkpoint=true)` without a `scope`
-  is `agent` when the caller has an agent id, and `project` otherwise (a task id alone does not change it); an
-  explicit `scope="project"` shares it.
-  (The alternative keeps
-  every hook checkpoint `project`, as today: then agent A's session start can show agent B's checkpoint, a limit the
-  README would have to state.)
-- **B5 Filtering in Python, not in the store (owner).** Scope is applied after the store returns candidates, by one
+- **B4 Checkpoints follow the caller's effective scope (owner, revised 2026-11-23).** A caller's effective scope is
+  `task:<task_id>` when it has a task id, otherwise `agent:<agent_id>` when it has an agent id, otherwise `project`.
+  - **Writing:** automatic checkpoints (the hooks' session-end and compaction checkpoints) and implicit ones
+    (`retain(checkpoint=true)` without a `scope`) are saved in the caller's effective scope.
+  - **Recovering:** latest-checkpoint recovery uses only that effective scope: the checkpoint in the session-start
+    and compaction-recovery blocks, and `recall(checkpoint_only=true, order="newest")`, consider only checkpoints in
+    the caller's effective scope.
+  - **Sharing:** `scope="project"` on a checkpoint is an explicit shared handoff. Like any `project` record it is
+    visible to every caller through relevance `recall`; it is not what latest-checkpoint recovery picks for a caller
+    with a task or agent id.
+  - **Tools sharing a store (#107):** tools continuing the same work use the same task id
+    (`MEMKERNEL_TASK_ID`); tools acting as the same logical agent use the same agent id (`MEMKERNEL_AGENT_ID`). A
+    tool with different ids does not recover the other's latest checkpoint. The README's "One store across tools"
+    section and the Codex and Cursor templates say so.
+- **B5 Filtering in Python, not in the store (owner: yes).** Scope is applied after the store returns candidates, by one
   predicate, on every path. A store `where` filter cannot match the records older stores wrote without the key
   (SC-4), and the BM25 index has no metadata. Cost: recall's window widens past out-of-scope candidates, as it
   already does past superseded ones: it keeps doubling until it has `top_k` visible results or the store runs out,
@@ -224,5 +224,6 @@ stated so the review can check them.
 - **B11 Abstention (FR-005, SC-6).** An empty `recall` puts `empty_reason` in its receipt: `no_match` (the last
   window had no candidates), `out_of_scope` (every candidate counted as `out_of_scope`), or `excluded` (any other
   mix). `recall(order="newest")` has no `excluded` counts (A4); an empty one records `no_match` when the store has no
-  live checkpoint matching its filters, and `out_of_scope` when it has some but none the caller can see. The MCP
+  live checkpoint matching its filters, and `out_of_scope` when it has some but none in the caller's effective
+  scope (B4). The MCP
   response stays a JSON list.
