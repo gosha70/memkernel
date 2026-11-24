@@ -418,6 +418,12 @@ class MemoryService:
             wiki_identity=wiki_identity,
         )
 
+    def _visible_ref(self, item: dict[str, Any], who: Caller) -> bool:
+        """True when the record a report item names exists and ``who`` can see it."""
+        ref_id = item.get("ref_id")
+        memory = self._vector_store.get_by_id(ref_id) if isinstance(ref_id, str) and ref_id else None
+        return memory is not None and who.can_see(memory)
+
     def _caller(self, caller: Caller | None) -> Caller:
         """``caller``, or the process's ids from the settings (memkernel-0-15-harness-foundations B7)."""
         return caller if caller is not None else Caller(self._settings.agent_id, self._settings.task_id)
@@ -1433,8 +1439,8 @@ class MemoryService:
     ) -> dict[str, Any]:
         """Run a consolidation pass and return promotion candidates.
 
-        Candidates are records ``caller`` can see (B8; default: the settings' ids); the purge, revalidation and the
-        health summary stay store-wide.
+        Candidates, and the items this pass's revalidation flagged, are records ``caller`` can see (B8; default: the
+        settings' ids); the purge, revalidation itself, its counts and the health summary stay store-wide.
 
         ``revalidate=True`` first runs :meth:`revalidate` and adds its report
         under ``"revalidated"``.
@@ -1455,11 +1461,13 @@ class MemoryService:
         the bookkeeping, the agent does the synthesis (see
         docs/architecture/memory-tiers.md).
         """
+        who = self._caller(caller)
         revalidated = self.revalidate() if revalidate else None
+        if revalidated is not None:  # the counts stay store-wide; the listed items only what the caller can see
+            revalidated["flagged"] = [item for item in revalidated["flagged"] if self._visible_ref(item, who)]
         purged = self.forget_expired() if purge else 0
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
         all_memories = self._vector_store.list_all(where)
-        who = self._caller(caller)
         # A source counts as promoted only through a copy the caller can see: another agent's private promotion of a
         # shared record does not take it off this caller's candidates (B8).
         promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from and who.can_see(m)}

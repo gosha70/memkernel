@@ -351,3 +351,27 @@ def test_another_agents_private_promotion_leaves_the_shared_source_a_candidate(s
     svc.promote(source, MemoryType.FACT, scope="agent", caller=A)
     assert source not in {c["ref_id"] for c in svc.consolidate(purge=False, caller=A)["candidates"]}
     assert source in {c["ref_id"] for c in svc.consolidate(purge=False, caller=B)["candidates"]}
+
+
+def test_flags_found_by_this_pass_are_shown_only_to_who_can_see_them(tmp_path: Path) -> None:
+    """B8: revalidation runs store-wide and counts every record, but lists only what the caller can see; the session
+    start (which revalidates) and consolidate(revalidate=True) both go through it."""
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "design-notes.md").write_text("Use the v1 API.\n", encoding="utf-8")
+    client = chromadb.EphemeralClient()
+    settings_a = _settings(tmp_path, project_root=str(root), agent_id="a")
+    settings_b = settings_a.model_copy(update={"agent_id": "b"})
+    svc_a = build_service(settings_a, embedding=MockEmbedding(), chroma_client=client)
+    svc_b = build_service(settings_b, embedding=MockEmbedding(), chroma_client=client)
+    decision = svc_a.retain("Agent a: call the v1 API.", MemoryType.DECISION, source="design-notes.md", scope="agent")
+    (root / "design-notes.md").write_text("Use the v2 API.\n", encoding="utf-8")
+
+    report_b = svc_b.consolidate(revalidate=True)["revalidated"]
+    assert report_b["changed"] == 1 and report_b["flagged"] == []
+    text_b = MemoryLifecycle(svc_b, settings_b).on_session_start("startup", session_id="b1")
+    assert decision not in text_b and "design-notes.md" not in text_b
+
+    report_a = svc_a.consolidate(revalidate=True)["revalidated"]
+    assert [item["ref_id"] for item in report_a["flagged"]] == [decision]
+    assert decision in MemoryLifecycle(svc_a, settings_a).on_session_start("startup", session_id="a1")
