@@ -147,3 +147,93 @@ A3–A7 follow from the spec and the review, and are stated so the review can ch
 
 Unchanged: the MCP tool set and the `recall` response (a JSON list); `MemoryService.recall` returns the same list
 (the receipt comes back through an optional argument); the log stays off unless `MEMKERNEL_RECALL_LOG` is set.
+
+## Amendment H2: scope and abstention (approved by the owner, 2026-11-23)
+
+The H2 build (D5: FR-001, FR-005, SC-1, SC-4, SC-6) as it will be built. H1's ids are the caller: `agent_id` and
+`task_id` (A1), from the call or the process. The owner confirmed B1, B2, B3 and B5 and revised B4 on 2026-11-23;
+B6–B11 follow from the spec and the review, and are stated so the review can check them.
+
+- **B1 How `retain` names a scope (owner: yes).** `retain(scope=…)` takes `project` (the default; a checkpoint's is its effective scope, B4),
+  `agent` or `task`,
+  meaning the caller's own `agent_id` or `task_id`; the record stores `agent:<id>` or `task:<id>`. A call without
+  that id is refused. So a caller cannot write into another agent's scope by a typo, and the stored form is the
+  spec's. (The alternative, a free `agent:<id>` string, lets one agent write a note only another agent can see.)
+- **B2 An out-of-scope record by id (owner: yes).** `get`, `ask`, `forget`, `promote` and a `supersedes=` target treat a
+  record the caller cannot see as not found, the same answer as a missing one: `get` and `ask` return not found,
+  `forget` returns `deleted: false`, and a `supersedes=` target is ignored, as a missing one is today. Scope is a
+  convention (FR-001), so this hides nothing from a hostile client; it keeps every path giving one answer. The cost:
+  an agent that names another agent's record by mistake gets "not found", not a scope error.
+- **B3 Wiki export (owner: yes).** `wiki_export` drafts pages from `project` records only, whoever calls it: a wiki is
+  shared knowledge, and a private note becomes shared only by promoting it with `scope="project"` first.
+- **B4 Checkpoints follow the caller's effective scope (owner, revised 2026-11-23).** A caller's effective scope is
+  `task:<task_id>` when it has a task id, otherwise `agent:<agent_id>` when it has an agent id, otherwise `project`.
+  - **Writing:** automatic checkpoints (the hooks' session-end and compaction checkpoints) and implicit ones
+    (`retain(checkpoint=true)` without a `scope`) are saved in the caller's effective scope.
+  - **Recovering:** latest-checkpoint recovery uses only that effective scope: the checkpoint in the session-start
+    and compaction-recovery blocks, and `recall(checkpoint_only=true, order="newest")`, consider only checkpoints in
+    the caller's effective scope. A caller with neither id recovers `project` checkpoints, as today; a task or agent
+    scope never falls back to `project`.
+  - **Sharing:** `scope="project"` on a checkpoint is an explicit shared handoff. Like any `project` record it is
+    visible to every caller through relevance `recall`; it is not what latest-checkpoint recovery picks for a caller
+    with a task or agent id.
+  - **Tools sharing a store (#107):** tools continuing the same work use the same task id
+    (`MEMKERNEL_TASK_ID`); tools acting as the same logical agent use the same agent id (`MEMKERNEL_AGENT_ID`). A
+    tool with different ids does not recover the other's latest checkpoint. The README's "One store across tools"
+    section and the Codex and Cursor templates say so.
+  - **Consequences the README and templates state:** (1) the hooks are separate processes and read only
+    `MEMKERNEL_AGENT_ID` and `MEMKERNEL_TASK_ID` from their own environment, so checkpoint recovery needs the ids in
+    the environment of both the server and the hooks; ids passed only as call arguments put the agent's own
+    checkpoints in a scope the hooks never read (the #152 lesson again). (2) A task id must stay the same across the
+    sessions that continue the same work: a harness that makes a new task id per session never recovers a
+    checkpoint. (3) Setting an id for the first time starts that scope empty: existing checkpoints are `project`,
+    and recovery does not fall back to them, so the first session shows "No checkpoint found yet".
+- **B5 Filtering in Python, not in the store (owner: yes).** Scope is applied after the store returns candidates, by one
+  predicate, on every path. A store `where` filter cannot match the records older stores wrote without the key
+  (SC-4), and the BM25 index has no metadata. Cost: recall's window widens past out-of-scope candidates, as it
+  already does past superseded ones: it keeps doubling until it has `top_k` visible results or the store runs out,
+  however many of the top candidates are another agent's. One predicate decides visibility everywhere, and it reads
+  a record without the key as `project`.
+- **B6 Storage.** Metadata key `scope`, written only when not `project`; absent loads as `project` (SC-4). An explicit
+  `scope="project"` is stored the same way as the default: the two mean the same. Older records are not migrated:
+  dedup, like every other path, reads a missing key as `project`, so a pre-H2 record and a new `project` record with
+  the same text are one record.
+- **B7 Who the caller is on each path.** MCP: `recall`, `retain`, `get`, `ask`, `forget`, `promote` and
+  `consolidate` take `agent_id` and `task_id` (H1's two on `recall`/`retain`, new on the others), each defaulting
+  to `MEMKERNEL_AGENT_ID`/`MEMKERNEL_TASK_ID`. Hook blocks use the process's. The Python API takes them on the same
+  `MemoryService` methods, defaulting to the settings. A caller with neither sees `project` records only (FR-001).
+  The admin API (`src/memkernel/api/`) is the operator's and sees every record, the full health report
+  (`/health/store`, with `ref_id`s) included.
+- **B8 Every read path (SC-1).** `recall` (both orders), `get`, `list_memories`, `ask`, `consolidate`'s promotion
+  candidates (it lists them; `promote` writes, per B9), the hook blocks (checkpoint, long-term context, needs-review list, candidates), and `wiki_export`
+  (B3). Store maintenance stays store-wide: purge, revalidation, the startup report of ended sessions that saved no
+  checkpoint (a checkpoint in any scope counts, so a session saved under another task id is not reported unsaved),
+  and the health summary, which reaches callers
+  (`consolidate`'s `health`, the session-start block) as counts only, never as records.
+- **B9 Writes.** Dedup is per scope: identical text in two scopes is two records, so a private note never merges into
+  a project one; the two copies are not linked, and the private one reaches the wiki only by `promote` with
+  `scope="project"` (B3). `promote` keeps the source's scope; `scope="project"` publishes, never by default (FR-001).
+  `supersedes=`, `forget` and `promote` need a target the caller can see (B2). **A private record supersedes only
+  its own scope:** an `agent:` or `task:` record may supersede only records in that same scope, and a `project`
+  record anything the caller can see (`project` records and the caller's own private ones, since no one else's are
+  visible), so one agent's note can never hide a shared record from everyone. A
+  `supersedes=` that breaks this is refused with an error naming the rule (the target is visible, so the error hides
+  nothing). Code's automatic supersede (a changed file replaces the live snapshots of the same `source`) follows the
+  same rule, so there is one live snapshot per `source` and scope: a private snapshot replaces only snapshots in its
+  scope, and the others stay live. **Parts take their
+  owner's scope:** a code chunk is visible exactly when its owner is, and a document chunk hit resolves only to a
+  summary the caller can see (document bodies are shared between owners); a chunk with no such summary counts as
+  `out_of_scope` (B10). Records memkernel writes itself, the
+  wiki import's pages and capture's records, are `project`; `withdraw` is the wiki import's own path on those records,
+  not an MCP tool, and takes no caller.
+- **B10 Exclusion counts.** `excluded` adds `out_of_scope` and `capped` (the limit of 3 captured records per session,
+  left out of H1's counts). Each dropped candidate counts once, under the first reason that applies, in this order:
+  `out_of_scope`, `superseded`, `flagged`, `expired`, `capped`. An out-of-scope candidate is never in the receipt's
+  `memories` or `returned_chars`. Each `memories` entry adds `scope` when it is not `project`, so the log can show
+  that no agent received another agent's or task's record.
+- **B11 Abstention (FR-005, SC-6).** An empty `recall` puts `empty_reason` in its receipt: `no_match` (the last
+  window had no candidates), `out_of_scope` (every candidate counted as `out_of_scope`), or `excluded` (any other
+  mix). `recall(order="newest")` has no `excluded` counts (A4); an empty one records `no_match` when the store has no
+  live checkpoint matching its filters, and `out_of_scope` when it has some but none in the caller's effective
+  scope (B4). The MCP
+  response stays a JSON list.
