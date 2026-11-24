@@ -247,7 +247,7 @@ repeated-mistake count. No server, tool, store or retrieval change. The owner de
 - **C1 Which receipt a memory is judged by (owner: yes, refined).** When a run received a memory more than once, the
   diff compares the store with the **last receipt in the run that has that memory's hash** (its `memories` entry):
   the context the run last worked from. A memory is `unknown` only when no receipt in the run has its hash, which
-  happens when every record that returned it was cut down (C7).
+  happens when every record that returned it was cut down (C7); it can still be `superseded` or `withdrawn` (C3).
 - **C2 A different hashing scheme (owner: yes).** When a receipt's `content_hash_scheme` (A8) differs from the
   current scheme, the diff reports `rehashed` and does not compare the hashes, so a change of scheme (#153) is never
   reported as changed content. **The current scheme** is the one the installed memkernel's `compute_content_hash`
@@ -256,9 +256,10 @@ repeated-mistake count. No server, tool, store or retrieval change. The owner de
   `sha256-raw`. If #153 lets records carry their scheme, the diff reads it from the record
   instead, and #153's spec says so.
 - **C3 Several statuses at once (owner: yes).** Each memory lists every status that applies; the report counts each
-  status. The combination rules: `missing` and `unknown` each stand alone (there is nothing to compare); `unchanged`
-  stands alone and means no other status applies; `changed` and `rehashed` exclude each other (C2); every other pair
-  can combine, for example `superseded` with `source changed`, or `flagged` with `changed`.
+  status. The combination rules: `missing` stands alone (there is nothing left to compare); `unknown` combines only
+  with `superseded` and `withdrawn`, which need no hash: they are read from the store now, not from a receipt; `unchanged` stands alone and means no other status applies;
+  `changed` and `rehashed` exclude each other (C2); every other pair can combine, for example `superseded` with
+  `source changed`, or `flagged` with `changed`.
 - **C4 Checked like the count (owner: yes).** `eval/context-diff/diff.py` joins `mypy --strict` in CI's Type Check beside
   `eval/repeat-mistakes/` (one line in `.github/workflows/`), since it is maintained the same way.
 - **C5 Input and output.** `diff.py --store name=…,chroma=…,state=…,project=… --run <run_id> [--json report.json]`,
@@ -274,8 +275,15 @@ repeated-mistake count. No server, tool, store or retrieval change. The owner de
   `flagged`, judged against the receipt's own `state`: `live` in the receipt and flagged in the store now (a memory
   already `flagged` in its receipt gets no flag status, since the run saw the flag); `source changed` (the file under the project root no longer
   hashes to the receipt's `source_hash` for a decision, or to its `content_hash` for code, as revalidation judges
-  them; a file that is gone counts as `source changed`; a receipt without the hash it would need, such as a decision
-  saved before `source_hash` existed, gets no source check); `unchanged`. Statuses combine as C3 says.
+  them; a file that is gone counts as `source changed`, even for a receipt without a `source_hash`; a receipt without
+  the hash it would need, such as a decision saved before `source_hash` existed, whose file is still there gets no
+  source check); `unchanged`. Statuses combine as C3 says.
+  **Code chunks** are judged by the file record they belong to: the owner is found from the chunk's id
+  (`<owner>-chunk-<n>`, split at the last `-chunk-`; owner ids are UUIDs), so it is found even after the chunk record
+  was deleted, as a superseded snapshot's chunks are; a chunk whose owner cannot be found is `missing`. `superseded`, `withdrawn`, `missing` (only when the owner is gone) and `flagged` come from the owner, and
+  `source changed` compares the file with the owner's `content_hash`, since a chunk's own hash never matches the
+  whole file. Both of those hashes are made now, with the current scheme, so C2's check, which concerns the
+  receipt's hash, does not apply to them.
   **What `source changed` can and cannot say:** it says only that the memory's `source` file now hashes differently
   from the hash recorded for it: the file's text through memkernel's own `compute_content_hash`, the function
   revalidation uses, so the two cannot drift apart. It cannot say the memory is now wrong (an
@@ -291,6 +299,8 @@ repeated-mistake count. No server, tool, store or retrieval change. The owner de
 - **C9 Tests (SC-2).** A run's receipts, after a decision it received is superseded and a code file it received
   changes, diff as `superseded` and `source changed`; plus each other status (a deleted and an expired memory, a
   withdrawn one, changed content, a newly flagged one and one already flagged in its receipt, a source file that is
-  gone, a source outside the project root), two statuses on one memory, a memory judged by an earlier full receipt, a
+  gone with and without a `source_hash`, a source outside the project root), a code chunk whose snapshot was
+  superseded and its chunk records deleted, two statuses on one memory, `unknown` with `superseded`, a memory judged
+  by an earlier full receipt, a
   scheme change, a receipt without a `source_hash`, a cut-down record, a private memory found across scopes, and the
   three exit codes.
