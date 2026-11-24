@@ -18,6 +18,7 @@ only choose a type; the tier, default importance and decay policy follow.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -123,11 +124,33 @@ SOURCE_HASH_KEY = "source_hash"
 # only; absent, so empty, on older records. Run, agent and task ids are caller text of at most ID_MAX_CHARS.
 RUN_ID_KEY = "run_id"
 ID_MAX_CHARS = 128
-# Why the live filter dropped a candidate, as a recall receipt counts it (A3, A4); withdrawn counts as superseded.
+# Why the live filter dropped a candidate, as a recall receipt counts it (A3, A4, B10); withdrawn counts as superseded.
+# Each candidate counts once, under the first reason that applies, in this order.
+EXCLUDED_OUT_OF_SCOPE = "out_of_scope"
 EXCLUDED_SUPERSEDED = "superseded"
 EXCLUDED_FLAGGED = "flagged"
 EXCLUDED_EXPIRED = "expired"
-EXCLUSION_REASONS = (EXCLUDED_SUPERSEDED, EXCLUDED_FLAGGED, EXCLUDED_EXPIRED)
+EXCLUDED_CAPPED = "capped"  # the limit of captured records per session in one result
+EXCLUSION_REASONS = (
+    EXCLUDED_OUT_OF_SCOPE,
+    EXCLUDED_SUPERSEDED,
+    EXCLUDED_FLAGGED,
+    EXCLUDED_EXPIRED,
+    EXCLUDED_CAPPED,
+)
+# Why an empty recall is empty (FR-005, B11).
+EMPTY_NO_MATCH = "no_match"
+EMPTY_OUT_OF_SCOPE = "out_of_scope"
+EMPTY_EXCLUDED = "excluded"
+# Scope (memkernel-0-15-harness-foundations FR-001, H2): who may read a record. Stored as SCOPE_KEY only when not
+# SCOPE_PROJECT; a record without the key (an older store) is SCOPE_PROJECT (B6). retain's scope argument names the
+# caller's own agent or task (B1).
+SCOPE_KEY = "scope"
+SCOPE_PROJECT = "project"
+SCOPE_AGENT = "agent"
+SCOPE_TASK = "task"
+AGENT_SCOPE_PREFIX = "agent:"
+TASK_SCOPE_PREFIX = "task:"
 # Wiki-import tags (memkernel-0-6, memkernel-0-7-wiki-scope): what the wiki import writes on a memory. The two
 # identity tags name the wiki a memory belongs to; only the import sets them (S8).
 WIKI_TAG = "wiki"
@@ -224,6 +247,7 @@ class Memory(BaseModel):
     withdrawn_reason: str | None = None
     withdrawn_at: datetime | None = None
     run_id: str = ""  # memkernel-0-15-harness-foundations A2: the run that created the record
+    scope: str = SCOPE_PROJECT  # memkernel-0-15-harness-foundations B6: absent in older stores, so project
 
     def retired(self) -> bool:
         """True for history: superseded by another record or withdrawn (memkernel-0-7 FR-002)."""
@@ -327,6 +351,62 @@ class RecallReceipt(BaseModel):
 
     memories: list[Memory] = []
     excluded: dict[str, int] | None = None
+    empty_reason: str | None = None  # B11: set only when nothing was returned
+
+
+@dataclass(frozen=True)
+class Caller:
+    """Who reads or writes (memkernel-0-15-harness-foundations FR-001, B1–B7): the harness's agent and task ids.
+
+    A caller sees ``project`` records and the records of its own agent and task; ``everyone`` (store maintenance and
+    the operator, B7, B8) sees every record. Scope is a convention between cooperating callers, not access control.
+    """
+
+    agent_id: str = ""
+    task_id: str = ""
+    everyone: bool = False
+
+    def visible(self, scope: str) -> bool:
+        """True when this caller may read a record of ``scope`` (B5's one predicate)."""
+        return (
+            self.everyone
+            or scope == SCOPE_PROJECT
+            or (bool(self.agent_id) and scope == f"{AGENT_SCOPE_PREFIX}{self.agent_id}")
+            or (bool(self.task_id) and scope == f"{TASK_SCOPE_PREFIX}{self.task_id}")
+        )
+
+    def can_see(self, memory: Memory) -> bool:
+        return self.visible(memory.scope)
+
+    @property
+    def effective_scope(self) -> str:
+        """Where this caller's automatic and implicit checkpoints go, and the only scope its latest-checkpoint
+        recovery reads (B4): its task, otherwise its agent, otherwise ``project``."""
+        if self.task_id:
+            return f"{TASK_SCOPE_PREFIX}{self.task_id}"
+        if self.agent_id:
+            return f"{AGENT_SCOPE_PREFIX}{self.agent_id}"
+        return SCOPE_PROJECT
+
+    def resolve(self, scope: str) -> str:
+        """The stored scope for ``retain``'s or ``promote``'s ``scope`` argument (B1): ``project``, ``agent`` or
+        ``task`` (the caller's own id), or the caller's own stored ``agent:<id>``/``task:<id>``. Anything else, or
+        ``agent``/``task`` without that id, raises ``ValueError``."""
+        own = {
+            SCOPE_PROJECT: SCOPE_PROJECT,
+            **({SCOPE_AGENT: f"{AGENT_SCOPE_PREFIX}{self.agent_id}"} if self.agent_id else {}),
+            **({SCOPE_TASK: f"{TASK_SCOPE_PREFIX}{self.task_id}"} if self.task_id else {}),
+        }
+        if scope in own:
+            return own[scope]
+        if scope in own.values():
+            return scope
+        if scope in (SCOPE_AGENT, SCOPE_TASK):
+            raise ValueError(f"scope={scope!r} needs the caller's {scope}_id")
+        raise ValueError(f"scope must be {SCOPE_PROJECT!r}, {SCOPE_AGENT!r} or {SCOPE_TASK!r}, got {scope!r}")
+
+
+EVERYONE = Caller(everyone=True)
 
 
 def check_id(name: str, value: str) -> str:

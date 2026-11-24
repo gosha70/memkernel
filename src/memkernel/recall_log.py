@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from memkernel import session_spool
+from memkernel.core.models import SCOPE_PROJECT
 from memkernel.memory.dedup import CONTENT_HASH_SCHEME
 from memkernel.session_spool import locked
 
@@ -75,11 +76,13 @@ def append(
     returned_chars: int = 0,
     latency_ms: float | None = None,
     excluded: dict[str, int] | None = None,
+    empty_reason: str | None = None,
 ) -> None:
     """Append one record; nothing when the log is off. Never raises: a failure is logged once per process.
 
     ``memories`` are the returned records in ``ref_ids`` order; ``ids`` default to the process's settings.
-    ``latency_ms`` and ``excluded`` are left out of the record when None (a hook block, or ``order="newest"``).
+    ``latency_ms`` and ``excluded`` are left out of the record when None (a hook block, or ``order="newest"``);
+    ``empty_reason`` (memkernel-0-15-harness-foundations B11) is written only for an empty recall.
     """
     path = log_path(settings)
     if path is None:
@@ -105,6 +108,8 @@ def append(
         record["latency_ms"] = round(latency_ms, 3)
     if excluded is not None:
         record["excluded"] = dict(excluded)
+    if empty_reason is not None:
+        record["empty_reason"] = empty_reason
     line = _fit(record, settings.recall_log_max_bytes)
     if line is None:
         _warn_once(path, "a record does not fit in recall_log_max_bytes")
@@ -148,6 +153,8 @@ def receipt_entry(memory: Memory) -> dict[str, str]:
         entry["source"] = memory.source
     if memory.source_hash:
         entry["source_hash"] = memory.source_hash
+    if memory.scope != SCOPE_PROJECT:
+        entry["scope"] = memory.scope  # B10: the log shows no agent received another agent's or task's record
     return entry
 
 

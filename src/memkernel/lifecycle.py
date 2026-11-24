@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from memkernel import capture, recall_log, session_spool
 from memkernel.config import MemKernelSettings
-from memkernel.core.models import MemoryTier, MemoryType
+from memkernel.core.models import EVERYONE, Caller, MemoryTier, MemoryType
 from memkernel.transcripts.claude_code import ClaudeCodeTranscriptReader
 from memkernel.wiki.curation import curation_debt_lines
 
@@ -297,6 +297,12 @@ class MemoryLifecycle:
         )
         return text
 
+    def _recovery_scope(self) -> str:
+        """The only scope latest-checkpoint recovery reads (B4): the process's task, otherwise its agent, otherwise
+        ``project``. The hooks' own checkpoints are saved there too, by ``retain(checkpoint=True)``."""
+        settings = self._service.settings
+        return Caller(settings.agent_id, settings.task_id).effective_scope
+
     def _retain_checkpoint(self, summary: str, now: datetime, tags: list[str]) -> str:
         return self._service.retain(
             content=f"{_CHECKPOINT_PREFIX}{now.isoformat()}\n\n{summary}",
@@ -310,7 +316,14 @@ class MemoryLifecycle:
     def _compact_recovery(self, session_id: str) -> str:
         """After a compaction: the latest checkpoint not captured from the compaction summary, with its age, and the
         long-term context. No consolidation, revalidation, purge or candidates; the same whichever hook ran first."""
-        chosen = next((m for m in self._service.checkpoints_newest_first() if COMPACT_SUMMARY_TAG not in m.tags), None)
+        chosen = next(
+            (
+                m
+                for m in self._service.checkpoints_newest_first(scope=self._recovery_scope())
+                if COMPACT_SUMMARY_TAG not in m.tags
+            ),
+            None,
+        )
         checkpoint = self._service.get(chosen.ref_id, touch=False) if chosen is not None else None
         if checkpoint is not None:  # H1: the work in progress is the query
             refs = self._service.recall(
@@ -355,7 +368,8 @@ class MemoryLifecycle:
         still saved during that session. ``list_memories(include_superseded=True)`` returns retired records and
         applies no expiry filter, and the drain runs before startup's consolidation purges expired records.
         """
-        checkpoints = [m for m in self._service.list_memories(include_superseded=True) if m.checkpoint]
+        # Store-wide (memkernel-0-15-harness-foundations B8): a checkpoint in any scope saves its session.
+        checkpoints = [m for m in self._service.list_memories(include_superseded=True, caller=EVERYONE) if m.checkpoint]
 
         def checkpointed(window: SessionWindow) -> bool:
             tag = f"{SESSION_TAG_PREFIX}{window.session_id}"
@@ -384,8 +398,9 @@ class MemoryLifecycle:
         )
 
     def _latest_checkpoint_memory(self) -> Memory | None:
-        """The newest live checkpoint, read with one access (memkernel-0-6-compaction-hooks FR-011)."""
-        checkpoints = self._service.checkpoints_newest_first()
+        """The newest live checkpoint in the process's effective scope (memkernel-0-15-harness-foundations B4), read
+        with one access (memkernel-0-6-compaction-hooks FR-011)."""
+        checkpoints = self._service.checkpoints_newest_first(scope=self._recovery_scope())
         return self._service.get(checkpoints[0].ref_id) if checkpoints else None
 
     def _checkpoint_lines(self, checkpoint: Memory) -> list[str]:

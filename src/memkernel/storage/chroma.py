@@ -24,6 +24,8 @@ from memkernel.core.models import (
     PARENT_REF_KEY,
     REVIEW_REASON_KEY,
     RUN_ID_KEY,
+    SCOPE_KEY,
+    SCOPE_PROJECT,
     SOURCE_HASH_KEY,
     STORE_LOCK_NAMES,
     STORE_LOCK_TAGS,
@@ -202,6 +204,7 @@ def _memory_from_chroma(
         review_reason=str(meta.get(REVIEW_REASON_KEY) or ""),
         source_hash=str(meta.get(SOURCE_HASH_KEY) or ""),
         run_id=str(meta.get(RUN_ID_KEY) or ""),
+        scope=str(meta.get(SCOPE_KEY) or SCOPE_PROJECT),
         withdrawn_reason=str(meta[WITHDRAWN_REASON_KEY]) if meta.get(WITHDRAWN_REASON_KEY) else None,
         withdrawn_at=datetime.fromisoformat(str(meta[WITHDRAWN_AT_KEY])) if meta.get(WITHDRAWN_AT_KEY) else None,
     )
@@ -404,8 +407,13 @@ class ChromaVectorStore:
 
         return [_memory_from_chroma(ids, documents, metadatas, i) for i in range(len(ids))]
 
-    def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
+    def find_by_hash(
+        self, content_hash: str, memory_type: str, source: str | None = None, scope: str | None = None
+    ) -> Memory | None:
         """Find a memory by content hash + type (+ source). Returns the first live non-chunk match or None.
+
+        With ``scope`` (memkernel-0-15-harness-foundations B6, B9) the match must be in that scope, compared in
+        Python so a record without the key counts as ``project``.
 
         Code chunk records (``code_chunk: true``) are skipped so that a file
         whose single chunk equals the whole file cannot shadow its canonical;
@@ -425,7 +433,9 @@ class ChromaVectorStore:
         for index, meta in enumerate(metadatas):
             if meta.get(CODE_CHUNK_KEY) is True or meta.get(SUPERSEDED_BY_KEY) or meta.get(WITHDRAWN_REASON_KEY):
                 continue  # chunk records and retired (superseded or withdrawn) records are never dedup hits
-            return _memory_from_chroma(ids, documents, metadatas, index)
+            memory = _memory_from_chroma(ids, documents, metadatas, index)
+            if scope is None or memory.scope == scope:
+                return memory
         return None
 
     def update_metadata(self, ref_id: str, metadata: dict[str, Any]) -> None:

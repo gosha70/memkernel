@@ -28,8 +28,14 @@ from memkernel.core.models import (
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    EMPTY_EXCLUDED,
+    EMPTY_NO_MATCH,
+    EMPTY_OUT_OF_SCOPE,
+    EVERYONE,
+    EXCLUDED_CAPPED,
     EXCLUDED_EXPIRED,
     EXCLUDED_FLAGGED,
+    EXCLUDED_OUT_OF_SCOPE,
     EXCLUDED_SUPERSEDED,
     EXCLUSION_REASONS,
     HEALTH_CATEGORIES,
@@ -47,6 +53,8 @@ from memkernel.core.models import (
     REVIEW_REASON_KEY,
     REVIEW_REASON_MISSING,
     RUN_ID_KEY,
+    SCOPE_KEY,
+    SCOPE_PROJECT,
     SOURCE_HASH_KEY,
     SUPERSEDED_BY_KEY,
     WIKI_ID_TAG,
@@ -60,6 +68,7 @@ from memkernel.core.models import (
     AmbiguousDedupError,
     Answer,
     ArtifactRef,
+    Caller,
     HealthItem,
     HealthReport,
     Memory,
@@ -128,6 +137,7 @@ class _ExtraMeta:
     promoted_from: str | None = None
     document_id: str | None = None
     run_id: str = ""  # memkernel-0-15-harness-foundations A2: new records only
+    scope: str = SCOPE_PROJECT  # memkernel-0-15-harness-foundations B6: stored only when not project
 
 
 def _is_owner_answer(memory: Memory) -> bool:
@@ -242,6 +252,17 @@ def _exempt_from_review_hiding(memory: Memory) -> bool:
     return memory.type == MemoryType.DECISION
 
 
+def _empty_reason(excluded: dict[str, int]) -> str:
+    """Why a relevance recall returned nothing (B11): no candidate counted, only out-of-scope ones, or any other mix."""
+    if not any(excluded.values()):
+        return EMPTY_NO_MATCH
+    if excluded.get(EXCLUDED_OUT_OF_SCOPE) and not any(
+        n for reason, n in excluded.items() if reason != EXCLUDED_OUT_OF_SCOPE
+    ):
+        return EMPTY_OUT_OF_SCOPE
+    return EMPTY_EXCLUDED
+
+
 class MemoryService:
     """Orchestrates retain, recall, get, and forget operations.
 
@@ -321,6 +342,8 @@ class MemoryService:
         wiki_identity: tuple[str, str | None] | None = None,
         content_dedup: bool = True,
         run_id: str = "",
+        scope: str | None = None,
+        caller: Caller | None = None,
     ) -> str:
         """Store content and return its ref_id.
 
@@ -356,21 +379,31 @@ class MemoryService:
         ``run_id`` (memkernel-0-15-harness-foundations FR-002, A2), or the process's ``MEMKERNEL_RUN_ID``, is written on
         a new record as provenance; a retain that matches an existing record keeps that record's own. Longer than
         ID_MAX_CHARS raises ``ValueError``.
+
+        ``scope`` (memkernel-0-15-harness-foundations B1) is ``project``, ``agent`` or ``task`` for ``caller``'s
+        own id (default: the settings' ids). Without it a record is ``project``, and a checkpoint is in the caller's
+        effective scope (B4). Dedup is per scope (B9). A ``supersedes`` target the caller cannot see is ignored
+        (B2); a private record superseding a record outside its own scope raises ``ValueError`` (B9).
         """
         reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
         if reserved:
             raise ValueError(f"tags {reserved} are reserved for the wiki import ({', '.join(WIKI_IDENTITY_TAGS)})")
+        who = self._caller(caller)
+        record_scope = (
+            who.resolve(scope) if scope is not None else (who.effective_scope if checkpoint else SCOPE_PROJECT)
+        )
         extra = _ExtraMeta(
             importance=importance,
             tags=tags or [],
-            supersedes=supersedes,
+            supersedes=self._allowed_supersedes(supersedes, record_scope, who) if supersedes else None,
             promoted_from=promoted_from,
             run_id=check_id("run_id", run_id) or self._settings.run_id,
+            scope=record_scope,
         )
         if type == MemoryType.DOCUMENT and self._document_store is not None:
             return self._retain_document(content, session_id, checkpoint, source, extra)
         if type == MemoryType.CODE:
-            return self._retain_code(content, session_id, checkpoint, source, extra)
+            return self._retain_code(content, session_id, checkpoint, source, extra, who)
 
         return self._retain_single(
             content,
@@ -385,6 +418,26 @@ class MemoryService:
             wiki_identity=wiki_identity,
         )
 
+    def _caller(self, caller: Caller | None) -> Caller:
+        """``caller``, or the process's ids from the settings (memkernel-0-15-harness-foundations B7)."""
+        return caller if caller is not None else Caller(self._settings.agent_id, self._settings.task_id)
+
+    def _allowed_supersedes(self, target_ref: str, record_scope: str, who: Caller) -> str | None:
+        """The ``supersedes`` link a new record of ``record_scope`` may keep (B2, B9). A missing target keeps its link,
+        as before (nothing is marked; health reports it dangling). A target the caller cannot see is ignored and its
+        link dropped, so no record hides one its writer could not see. A private record superseding outside its own
+        scope raises ``ValueError``."""
+        target = self._vector_store.get_by_id(target_ref)
+        if target is None:
+            return target_ref
+        if not who.can_see(target):
+            return None
+        if record_scope != SCOPE_PROJECT and target.scope != record_scope:
+            raise ValueError(
+                f"a {record_scope} record supersedes only records in its own scope; {target_ref} is {target.scope}"
+            )
+        return target_ref
+
     def _retain_code(
         self,
         content: str,
@@ -392,6 +445,7 @@ class MemoryService:
         checkpoint: bool,
         source: str,
         extra: _ExtraMeta,
+        who: Caller,
     ) -> str:
         """Store a code snapshot: canonical record plus owner-specific chunk records.
 
@@ -407,12 +461,14 @@ class MemoryService:
         """
         resolved_session = session_id or self._settings.default_session_id
         content_hash = compute_content_hash(content)
-        existing = self._vector_store.find_by_hash(content_hash, MemoryType.CODE.value, source=source or None)
+        existing = self._vector_store.find_by_hash(
+            content_hash, MemoryType.CODE.value, source=source or None, scope=extra.scope
+        )
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             self._refresh_owned_chunks(existing.ref_id, resolved_session, checkpoint)
             self._index_missing_chunks(existing.ref_id, content, resolved_session, checkpoint, source, extra)
-            self._supersede_other_snapshots(existing.ref_id, source)
+            self._supersede_other_snapshots(existing.ref_id, source, who)
             return existing.ref_id
 
         ref_id = self._retain_single(content, MemoryType.CODE, session_id, checkpoint, source, extra, dedup=False)
@@ -430,7 +486,7 @@ class MemoryService:
                 except Exception:
                     logger.warning("could not remove chunk %s while compensating a failed retain", chunk.ref_id)
             raise
-        self._supersede_other_snapshots(ref_id, source)
+        self._supersede_other_snapshots(ref_id, source, who)
         return ref_id
 
     def _index_missing_chunks(
@@ -454,8 +510,11 @@ class MemoryService:
         if chunk_ids:
             self._vector_store.update_metadata(ref_id, {"chunk_refs": ",".join(chunk_ids)})
 
-    def _supersede_other_snapshots(self, ref_id: str, source: str) -> None:
-        """Make ``ref_id`` the only live snapshot of ``source`` (idempotent; a no-op without a source).
+    def _supersede_other_snapshots(self, ref_id: str, source: str, who: Caller) -> None:
+        """Make ``ref_id`` the only live snapshot of ``source`` in its scope (idempotent; a no-op without a source).
+
+        One live snapshot per ``source`` and scope (memkernel-0-15-harness-foundations B9): a private snapshot replaces
+        only snapshots in its own scope; a ``project`` one replaces every snapshot ``who`` can see.
 
         Every other live canonical is marked first, then loses its owned chunk
         records, so an interruption between the two steps leaves a state a
@@ -465,8 +524,14 @@ class MemoryService:
             return
         records = self._code_records(source)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
+        mine = next((m for m in records if m.ref_id == ref_id), None)
+        scope = mine.scope if mine is not None else SCOPE_PROJECT
         canonicals = [m for m in records if m.ref_id != ref_id and not _is_code_chunk(m, referenced)]
-        others = [m for m in canonicals if not m.retired()]
+        others = [
+            m
+            for m in canonicals
+            if not m.retired() and (m.scope == scope or (scope == SCOPE_PROJECT and who.can_see(m)))
+        ]
         # Snapshots an earlier, interrupted attempt already marked as replaced by
         # this one may still own chunk records: they are cleanup targets too.
         marked_before = [m for m in canonicals if m.superseded_by == ref_id]
@@ -507,7 +572,7 @@ class MemoryService:
         if not chunks:
             return []
         embeddings = self._embedding.embed(chunks)
-        chunk_extra = _ExtraMeta(importance=extra.importance, tags=[*extra.tags, CODE_CHUNK_TAG])
+        chunk_extra = _ExtraMeta(importance=extra.importance, tags=[*extra.tags, CODE_CHUNK_TAG], scope=extra.scope)
         ids: list[str] = []
         for position, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             ref_id = _code_chunk_id(parent_ref, position)
@@ -684,7 +749,9 @@ class MemoryService:
         doc_id = self._document_store.put(content, name)
         doc_extra = replace(extra, document_id=doc_id)
         indexed = self._document_store.indexed(doc_id)
-        existing = next((owner for owner in self._document_owners(doc_id) if owner.source == source), None)
+        existing = next(
+            (o for o in self._document_owners(doc_id) if o.source == source and o.scope == extra.scope), None
+        )
         if indexed == 0:
             # First time this body is seen — or its chunks were lost between put
             # and index — so chunk and embed now. Otherwise nothing is embedded.
@@ -730,8 +797,8 @@ class MemoryService:
         content_hash = compute_content_hash(content)
 
         # Dedup check: same hash + same type -> update metadata, return existing id
-        scope = source if dedup_source else None
-        existing = self._dedup_hit(content_hash, type, scope, dedup_owner) if dedup else None
+        same_source = source if dedup_source else None
+        existing = self._dedup_hit(content_hash, type, same_source, dedup_owner, extra.scope) if dedup else None
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             return existing.ref_id
@@ -755,8 +822,10 @@ class MemoryService:
         type: MemoryType,  # noqa: A002
         source: str | None,
         owner: Callable[[Memory], bool] | None,
+        scope: str,
     ) -> Memory | None:
-        """The live record a retain dedups into (memkernel-0-7-wiki-scope S2), chosen among every match.
+        """The live record a retain dedups into (memkernel-0-7-wiki-scope S2), chosen among every match in ``scope``
+        (memkernel-0-15-harness-foundations B9: dedup is per scope; a record without the key is ``project``).
 
         With ``owner``, the hit must satisfy it, and two or more such records raise ``AmbiguousDedupError``.
         Without it, a record carrying a wiki identity tag is never a hit: the first match without one is.
@@ -767,7 +836,7 @@ class MemoryService:
         matches = [
             m
             for m in self._vector_store.list_all({"$and": conditions}, include_content=False)
-            if not m.retired() and m.parent_ref is None  # chunk records are never dedup hits
+            if not m.retired() and m.parent_ref is None and m.scope == scope  # chunk records are never dedup hits
         ]
         if owner is None:
             return next((m for m in matches if not has_wiki_identity(m.tags)), None)
@@ -807,6 +876,8 @@ class MemoryService:
             metadata["promoted_from"] = extra.promoted_from
         if extra.run_id:
             metadata[RUN_ID_KEY] = extra.run_id
+        if extra.scope != SCOPE_PROJECT:
+            metadata[SCOPE_KEY] = extra.scope  # absent means project (B6)
         if extra.document_id:
             metadata["document_id"] = extra.document_id
             metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
@@ -866,6 +937,7 @@ class MemoryService:
         include_needs_review: bool = False,
         order: str = ORDER_RELEVANCE,
         receipt: RecallReceipt | None = None,
+        caller: Caller | None = None,
     ) -> list[ArtifactRef]:
         """Search for memories matching the query.
 
@@ -883,14 +955,19 @@ class MemoryService:
         With ``receipt`` (memkernel-0-15-harness-foundations FR-003, A3, A4), it is filled with the returned records
         and, for a relevance recall, the candidates the last search window returned and the live filter dropped, by
         reason. The returned list is the same either way.
+
+        ``caller`` (memkernel-0-15-harness-foundations FR-001, B7; default: the settings' ids) sees ``project`` records
+        and its own agent's and task's; ``order="newest"`` reads only the caller's effective scope (B4). An empty
+        result's reason goes into the receipt (B11).
         """
         if order not in (ORDER_RELEVANCE, ORDER_NEWEST):
             raise ValueError(f"order must be {ORDER_RELEVANCE!r} or {ORDER_NEWEST!r}, got {order!r}")
         if order == ORDER_NEWEST:
             if not checkpoint_only:
                 raise ValueError(f"order={ORDER_NEWEST!r} is only for checkpoint_only=true (the latest checkpoints)")
-            return self._newest_checkpoints(type, session_id, top_k, tier, touch, receipt)
+            return self._newest_checkpoints(type, session_id, top_k, tier, touch, receipt, self._caller(caller))
         _start = time.perf_counter()
+        who = self._caller(caller)
 
         self._catch_up_with_other_writers()
         if self._sparse_index.needs_rebuild:
@@ -918,7 +995,7 @@ class MemoryService:
             results = self._search_service.search(search_query)
             excluded = dict.fromkeys(EXCLUSION_REASONS, 0)  # the last window's, as A4 says
             kept = {}
-            live = self._filter_live(results, search_query, include_needs_review, excluded, kept)
+            live = self._filter_live(results, search_query, include_needs_review, excluded, kept, who)
 
             store_exhausted = len(results) < fetch_k
             if len(live) >= desired_k or store_exhausted:
@@ -933,6 +1010,7 @@ class MemoryService:
         if receipt is not None:
             receipt.memories = [kept[ref.ref_id] for ref in live if ref.ref_id in kept]  # never fails a recall
             receipt.excluded = excluded
+            receipt.empty_reason = None if live else _empty_reason(excluded)
         self._last_recall_ms = (time.perf_counter() - _start) * 1000
         return live
 
@@ -943,8 +1021,10 @@ class MemoryService:
         include_needs_review: bool = False,
         excluded: dict[str, int] | None = None,
         kept: dict[str, Memory] | None = None,
+        caller: Caller = EVERYONE,
     ) -> list[ArtifactRef]:
-        """Drop expired and superseded memories; resolve document chunk hits to their summary.
+        """Drop out-of-scope, superseded, flagged, expired and capped memories; resolve document chunk hits to their
+        summary.
 
         Superseded means ``superseded_by`` is set, withdrawn means ``withdrawn_reason`` is (both durable,
         independent of the result window); the result-window check on ``supersedes`` links stays
@@ -960,8 +1040,10 @@ class MemoryService:
         time, so the query's filters (type, tier, session, checkpoint) are
         applied here, to the owning summary that is actually returned.
 
-        ``excluded`` counts each candidate dropped as superseded (or withdrawn), flagged or expired; ``kept`` maps
-        each returned ref_id to the record it stands for (a receipt's details, A3).
+        ``excluded`` counts each dropped candidate once, under the first reason that applies (B10): out of scope (a
+        record ``caller`` cannot see, a code chunk whose owner it cannot see, a document chunk with no summary it can
+        see), superseded (or withdrawn), flagged, expired, capped. ``kept`` maps each returned ref_id to the record it
+        stands for (a receipt's details, A3).
         """
         counts = excluded if excluded is not None else {}
 
@@ -973,7 +1055,8 @@ class MemoryService:
             memory = self._vector_store.get_by_id(ref.ref_id)
             if memory is not None:
                 memories[ref.ref_id] = memory
-        superseded = {m.supersedes for m in memories.values() if m.supersedes}
+        # The legacy link fallback reads only records the caller can see, so no unseen record hides another (B9).
+        superseded = {m.supersedes for m in memories.values() if m.supersedes and caller.can_see(m)}
         summaries: dict[str, Memory | None] = {}
         owners: dict[str, Memory | None] = {}
         live: list[ArtifactRef] = []
@@ -982,6 +1065,10 @@ class MemoryService:
         for ref in results:
             memory = memories.get(ref.ref_id)
             if memory is None:
+                continue
+            is_part = bool(memory.document_id) and _is_document_part(memory)  # shared: judged by its summary
+            if not is_part and not caller.can_see(memory):
+                drop(EXCLUDED_OUT_OF_SCOPE)
                 continue
             if memory.retired():
                 drop(EXCLUDED_SUPERSEDED)
@@ -997,6 +1084,9 @@ class MemoryService:
                 owner = owners[memory.parent_ref]
                 if owner is None:
                     continue
+                if not caller.can_see(owner):
+                    drop(EXCLUDED_OUT_OF_SCOPE)
+                    continue
                 if owner.retired():
                     drop(EXCLUDED_SUPERSEDED)
                     continue
@@ -1005,11 +1095,14 @@ class MemoryService:
                     continue
                 if not _matches_query(owner, query):
                     continue  # the query's filters apply to the owner the chunk stands for
-            if memory.document_id and _is_document_part(memory):
-                if memory.document_id not in summaries:
-                    summaries[memory.document_id] = self._document_summary_record(memory.document_id, query)
-                summary = summaries[memory.document_id]
+            if is_part and memory.document_id:
+                doc_id = memory.document_id
+                if doc_id not in summaries:
+                    summaries[doc_id] = self._document_summary_record(doc_id, query, caller)
+                summary = summaries[doc_id]
                 if summary is None:
+                    if self._document_summary_record(doc_id, query, EVERYONE) is not None:
+                        drop(EXCLUDED_OUT_OF_SCOPE)  # a live summary exists, but not one the caller can see (B9)
                     continue
                 memory = summary
                 ref = _artifact_ref(summary, ref.score, self._settings.preview_length)
@@ -1024,6 +1117,7 @@ class MemoryService:
             origin = _capture_session(memory)
             if origin is not None:  # memkernel-0-14-capture-signals D7: one heavy session cannot fill a result
                 if captured_per_session.get(origin, 0) >= CAPTURE_RECALL_PER_SESSION:
+                    drop(EXCLUDED_CAPPED)
                     continue
                 captured_per_session[origin] = captured_per_session.get(origin, 0) + 1
             seen.add(ref.ref_id)
@@ -1032,14 +1126,17 @@ class MemoryService:
                 kept[ref.ref_id] = memory
         return live
 
-    def _document_summary_record(self, document_id: str, query: SearchQuery) -> Memory | None:
+    def _document_summary_record(
+        self, document_id: str, query: SearchQuery, caller: Caller = EVERYONE
+    ) -> Memory | None:
         """Return the first live ``document`` summary owning ``document_id`` that satisfies ``query``'s filters.
 
         A superseded summary is never resolved to: the liveness check ran on the
-        chunk, not on the owner it stands for.
+        chunk, not on the owner it stands for. Only a summary ``caller`` can see is resolved to (B9: bodies are
+        shared between owners).
         """
         for owner in self._document_owners(document_id):
-            if not owner.retired() and _matches_query(owner, query):
+            if not owner.retired() and caller.can_see(owner) and _matches_query(owner, query):
                 return owner
         return None
 
@@ -1063,8 +1160,12 @@ class MemoryService:
         type: MemoryType | None = None,  # noqa: A002
         session_id: str | None = None,
         include_superseded: bool = False,
+        caller: Caller | None = None,
     ) -> list[Memory]:
         """Return memories matching the given filters (no ranking, no access tracking).
+
+        Only records ``caller`` can see (memkernel-0-15-harness-foundations B8; default: the settings' ids); store
+        maintenance passes ``EVERYONE``.
 
         ``tier`` is filtered in Python because records written before tiers
         existed carry no ``tier`` metadata; the adapter derives it from the type.
@@ -1080,7 +1181,8 @@ class MemoryService:
             where = conditions[0]
         elif conditions:
             where = {"$and": conditions}
-        memories = [m for m in self._vector_store.list_all(where) if not _is_document_part(m)]
+        who = self._caller(caller)
+        memories = [m for m in self._vector_store.list_all(where) if not _is_document_part(m) and who.can_see(m)]
         if not include_superseded:
             memories = [m for m in memories if not m.retired()]
         if tier is not None:
@@ -1101,30 +1203,43 @@ class MemoryService:
         tier: MemoryTier | None,
         touch: bool,
         receipt: RecallReceipt | None = None,
+        caller: Caller = EVERYONE,
     ) -> list[ArtifactRef]:
-        """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints, filtered like recall. A
-        ``receipt`` gets the records and no ``excluded`` counts: the selection is by metadata (A4)."""
+        """``recall(order="newest", checkpoint_only=True)``: the newest live checkpoints in ``caller``'s effective
+        scope (B4), filtered like recall. A ``receipt`` gets the records and no ``excluded`` counts: the selection is
+        by metadata (A4); an empty one records ``no_match`` or ``out_of_scope`` (B11)."""
         limit = top_k if top_k is not None else self._settings.search_top_k
+
+        def matching(candidates: list[Memory]) -> list[Memory]:
+            return [
+                c
+                for c in candidates
+                if (memory_type is None or c.type == memory_type)
+                and (session_id is None or c.session_id == session_id)
+                and (tier is None or c.tier == tier)
+            ]
+
+        scope = None if caller.everyone else caller.effective_scope
         picked: list[ArtifactRef] = []
         records: list[Memory] = []
-        for candidate in self.checkpoints_newest_first(include_flagged_decisions=True):
+        for candidate in matching(self.checkpoints_newest_first(include_flagged_decisions=True, scope=scope)):
             if len(picked) >= limit:
                 break
-            if (memory_type is not None and candidate.type != memory_type) or (
-                session_id is not None and candidate.session_id != session_id
-            ):
-                continue
-            if tier is not None and candidate.tier != tier:
-                continue
-            memory = self.get(candidate.ref_id, touch=touch)
+            memory = self.get(candidate.ref_id, touch=touch, caller=caller)
             if memory is not None:
                 picked.append(_artifact_ref(memory, 1.0, self._settings.preview_length))
                 records.append(memory)
         if receipt is not None:
             receipt.memories, receipt.excluded = records, None
+            receipt.empty_reason = None
+            if not picked:
+                anywhere = matching(self.checkpoints_newest_first(include_flagged_decisions=True))
+                receipt.empty_reason = EMPTY_OUT_OF_SCOPE if anywhere else EMPTY_NO_MATCH
         return picked
 
-    def checkpoints_newest_first(self, include_flagged_decisions: bool = False) -> list[Memory]:
+    def checkpoints_newest_first(
+        self, include_flagged_decisions: bool = False, scope: str | None = None
+    ) -> list[Memory]:
         """Every live checkpoint record, newest first (ties by ``ref_id``), without content and without touching.
 
         Selected by metadata, so the newest is found however many older checkpoints a query would rank higher.
@@ -1132,6 +1247,8 @@ class MemoryService:
         not expired. Code-chunk and document-part records are left out: they are parts of a checkpoint, not one.
         Read the chosen record with :meth:`get`. ``include_flagged_decisions`` keeps flagged decisions; only
         ``recall(order="newest")`` sets it, so the lifecycle's choice of the latest checkpoint is unchanged.
+        ``scope`` keeps only checkpoints in that one scope (latest-checkpoint recovery, B4); None, every scope (store
+        maintenance).
         """
         live = [
             m
@@ -1141,6 +1258,7 @@ class MemoryService:
             and m.parent_ref is None
             and not _is_document_part(m)
             and not memory_is_expired(m, self._settings)
+            and (scope is None or m.scope == scope)
         ]
         return sorted(live, key=lambda m: (m.timestamp, m.ref_id), reverse=True)
 
@@ -1188,18 +1306,22 @@ class MemoryService:
         """Return all collections visible to the storage backend with their record counts."""
         return self._vector_store.list_collections()
 
-    def get(self, ref_id: str, touch: bool = True) -> Memory | None:
-        """Fetch full memory content by ref_id. Returns None if not found.
+    def get(self, ref_id: str, touch: bool = True, caller: Caller | None = None) -> Memory | None:
+        """Fetch full memory content by ref_id. Returns None if not found, or if ``caller`` cannot see it (B2).
 
         Reading the full content is the strongest signal that a memory is
         useful, so it is recorded as an access unless ``touch=False``.
         """
         memory = self._vector_store.get_by_id(ref_id)
+        if memory is not None and not self._caller(caller).can_see(memory):
+            return None
         if memory is not None and touch:
             self._touch(ref_id)
         return memory
 
-    def ask(self, ref_id: str, question: str, mode: str = DEFAULT_ASK_MODE) -> Answer | None:
+    def ask(
+        self, ref_id: str, question: str, mode: str = DEFAULT_ASK_MODE, caller: Caller | None = None
+    ) -> Answer | None:
         """Answer ``question`` about one memory through the configured ReasonerPort.
 
         For a ``document`` memory an external reasoner gets the full body from
@@ -1208,7 +1330,7 @@ class MemoryService:
         body is gone); any other memory is asked about its own content.
         ``mode`` is one of ``direct``, ``rag``, ``rlm``, ``auto`` and is passed
         to the reasoner unchanged. Asking
-        records an access. Returns None when ``ref_id`` does not exist. When
+        records an access. Returns None when ``ref_id`` does not exist or ``caller`` cannot see it (B2). When
         the reasoner raises :class:`ReasonerError` the fallback reasoner answers
         instead (``usage["fallback"] == 1``, warning logged); without a fallback
         the error propagates.
@@ -1218,7 +1340,7 @@ class MemoryService:
         if self._reasoner is None:
             raise RuntimeError("ask() requires a ReasonerPort; build the service through build_service()")
         memory = self._vector_store.get_by_id(ref_id)
-        if memory is None:
+        if memory is None or not self._caller(caller).can_see(memory):
             return None
         is_document = (
             memory.type == MemoryType.DOCUMENT and bool(memory.document_id) and self._document_store is not None
@@ -1267,6 +1389,8 @@ class MemoryService:
         importance: float | None = None,
         tags: list[str] | None = None,
         session_id: str | None = None,
+        scope: str | None = None,
+        caller: Caller | None = None,
     ) -> str | None:
         """Promote a memory into a (normally long-term) type and return the new ref_id.
 
@@ -1274,10 +1398,13 @@ class MemoryService:
         LLM in the loop — supplies the distilled ``content``; when omitted the
         original content is reused verbatim. The source memory is kept (it
         decays on its own schedule) and linked via ``promoted_from`` so that
-        provenance survives. Returns None if ``ref_id`` does not exist.
+        provenance survives. Returns None if ``ref_id`` does not exist or ``caller`` cannot see it (B2).
+
+        The new memory keeps the source's scope; ``scope="project"`` publishes it, never by default (B9).
         """
+        who = self._caller(caller)
         source = self._vector_store.get_by_id(ref_id)
-        if source is None:
+        if source is None or not who.can_see(source):
             return None
         # A promoted copy is an ordinary memory: it never carries the wiki import's tags, so it is never a second
         # record of a wiki page (memkernel-0-7-wiki-scope S8).
@@ -1291,6 +1418,8 @@ class MemoryService:
             importance=importance,
             tags=merged_tags,
             promoted_from=ref_id,
+            scope=scope if scope is not None else source.scope,
+            caller=who,
         )
 
     def consolidate(
@@ -1300,8 +1429,12 @@ class MemoryService:
         purge: bool = True,
         synthesize: bool = False,
         revalidate: bool = False,
+        caller: Caller | None = None,
     ) -> dict[str, Any]:
         """Run a consolidation pass and return promotion candidates.
+
+        Candidates are records ``caller`` can see (B8; default: the settings' ids); the purge, revalidation and the
+        health summary stay store-wide.
 
         ``revalidate=True`` first runs :meth:`revalidate` and adds its report
         under ``"revalidated"``.
@@ -1326,7 +1459,10 @@ class MemoryService:
         purged = self.forget_expired() if purge else 0
         where: dict[str, Any] | None = {"session_id": session_id} if session_id else None
         all_memories = self._vector_store.list_all(where)
-        promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from}
+        who = self._caller(caller)
+        # A source counts as promoted only through a copy the caller can see: another agent's private promotion of a
+        # shared record does not take it off this caller's candidates (B8).
+        promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from and who.can_see(m)}
         eligible = [
             m
             for m in all_memories
@@ -1334,6 +1470,7 @@ class MemoryService:
             and m.ref_id not in promoted_sources
             and not m.checkpoint
             and not m.retired()
+            and who.can_see(m)
         ]
 
         def rank(m: Memory) -> float:
@@ -1591,18 +1728,21 @@ class MemoryService:
             if (
                 memory.tier != MemoryTier.LONG_TERM
                 and memory_is_expired(memory, self._settings)
-                and self.forget(memory.ref_id)
+                and self.forget(memory.ref_id, caller=EVERYONE)  # the purge is store-wide (B8)
             ):
                 deleted += 1
         return deleted
 
-    def forget(self, ref_id: str) -> bool:
+    def forget(self, ref_id: str, caller: Caller | None = None) -> bool:
         """Delete a memory from all stores.
 
-        Returns True if the memory existed and was deleted, False otherwise.
+        Returns True if the memory existed and was deleted, False otherwise, and False for a memory ``caller`` cannot
+        see (B2).
         BM25 removal failure is non-fatal — the index is marked for rebuild.
         """
         canonical = self._vector_store.get_by_id(ref_id)
+        if canonical is not None and not self._caller(caller).can_see(canonical):
+            return False
         if canonical is not None:
             # CODE canonical records: delete the owned chunk records first
             # (legacy shared chunks only when nothing else references them).

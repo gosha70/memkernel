@@ -224,6 +224,18 @@ recalled in the next. Point every tool at the same store: the same `MEMKERNEL_PR
   `http://127.0.0.1:8765/mcp` in each tool. **Local only, no authentication:** see
   [Streamable HTTP](#streamable-http) for the `Host`/`Origin` check and `MEMKERNEL_ALLOWED_HOSTS`.
 
+**Agent and task ids decide which checkpoint a session recovers.** With `MEMKERNEL_TASK_ID` or `MEMKERNEL_AGENT_ID`
+set, a session's checkpoints are saved in that task's (else that agent's) scope, and the session start recovers only
+from there (see [Scope](#scope-agents-and-tasks)). So:
+- tools continuing the same work set the **same `MEMKERNEL_TASK_ID`**; tools acting as the same agent set the **same
+  `MEMKERNEL_AGENT_ID`**; a tool with different ids, or none, does not pick up the other's latest checkpoint;
+- set the ids in the environment of **both the MCP server and the hooks** (for Codex: `config.toml`'s `env` table and
+  the `hooks.json` command); ids passed only as `recall`/`retain` arguments never reach the hooks;
+- keep a task id the same across the sessions that continue that work: a new id per session never recovers a
+  checkpoint, and setting an id for the first time starts empty ("No checkpoint found yet"), since existing
+  checkpoints are shared `project` ones;
+- to hand work to any tool, save the checkpoint with `scope="project"`.
+
 Templates, checked against each tool's documentation on 2026-11-18:
 
 | Tool | Templates | Copy to | Session start |
@@ -251,17 +263,38 @@ Limits:
 
 ---
 
+## Scope: agents and tasks
+
+Several agents can share one store and still keep private notes. A memory's **scope** is `project` (the default:
+every caller sees it), or private to one agent or one task. The caller names itself with `agent_id` and `task_id`
+(tool arguments, or `MEMKERNEL_AGENT_ID` and `MEMKERNEL_TASK_ID` for the process), and sees `project` memories plus
+its own agent's and task's. A caller with neither sees `project` memories only.
+
+- `retain(..., scope="agent")` or `scope="task"` makes a memory private to the caller's own agent or task (refused
+  without that id). Identical text in two scopes is two memories.
+- **Checkpoints** without a `scope` go to the caller's task, else its agent, else `project`, and the latest-checkpoint
+  recovery (the hooks' session start and compaction recovery, `recall(checkpoint_only=true, order="newest")`) reads
+  only that scope, with no fallback to `project`. `scope="project"` is an explicit shared handoff.
+- `promote` keeps the source's scope; `scope="project"` publishes. A private memory supersedes only memories in its
+  own scope, so one agent cannot hide a shared memory from the others.
+- Another agent's or task's memory is not found by `get`, `ask`, `forget` or `promote`, never recalled, never a
+  promotion candidate, never in a hook block, and `wiki_export` drafts `project` memories only.
+- Memories from older stores are `project`. Store maintenance (purge, revalidation, health counts, the report of
+  sessions that ended without a checkpoint) and the admin API see every memory.
+- **A convention, not access control:** any client can claim any id. Scope keeps cooperating agents out of each
+  other's notes; it does not keep a hostile client out.
+
 ## MCP Tools
 
 | Tool | What it does |
 |------|-------------|
-| `retain(content, type, session_id?, checkpoint?, source?, importance?, tags?, supersedes?, run_id?, agent_id?, task_id?)` | Store a memory. Returns `ref_id`. Idempotent — identical content + type returns the same `ref_id`. `supersedes` hides the memory it replaces. A new memory keeps `run_id` (or `MEMKERNEL_RUN_ID`) as provenance; a matching retain keeps the original's. `agent_id` and `task_id` are checked but not recorded. |
+| `retain(content, type, session_id?, checkpoint?, source?, importance?, tags?, supersedes?, run_id?, agent_id?, task_id?, scope?)` | Store a memory. Returns `ref_id`. Idempotent — identical content + type returns the same `ref_id`. `supersedes` hides the memory it replaces. A new memory keeps `run_id` (or `MEMKERNEL_RUN_ID`) as provenance; a matching retain keeps the original's. `scope`: `project` (default), `agent` or `task`, private to the caller's own `agent_id` or `task_id` (see [Scope](#scope-agents-and-tasks)). |
 | `recall(query, type?, tier?, session_id?, checkpoint_only?, top_k?, include_needs_review?, order?, run_id?, agent_id?, task_id?)` | Search by natural language or identifier. Returns lightweight `ArtifactRef` list ranked by relevance + recency + importance. Records an access (reinforces retention). Each result carries `needs_review` and `review_reason`. Code memories flagged `needs_review` are hidden unless `include_needs_review=true`; flagged decisions are returned, marked. `run_id`, `agent_id` and `task_id` name the calling harness's run, agent and task (default: `MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID`) for the recall log; at most 128 characters each, a longer one is refused. |
-| `get(ref_id)` | Fetch full content of a specific memory. Records an access. |
-| `forget(ref_id)` | Delete a memory from all indexes. |
-| `promote(ref_id, type, content?, importance?, tags?)` | Turn a short-term/working memory into a long-term one (you supply the distilled text). Keeps provenance via `promoted_from`. |
-| `consolidate(session_id?, limit?, synthesize?, revalidate?)` | Purge expired short-term memories and list the ones most worth promoting (ranked by importance × how often they were recalled). `synthesize=true` also asks an external reasoner to draft long-term statements (`suggested`); `revalidate=true` first checks every code memory, and every decision with a `source`, against its file (`revalidated`). The report always carries a `health` summary. |
-| `ask(ref_id, question, mode?)` | Answer a question about one memory without loading it — for a `document` the full body is consulted. `mode`: `direct` \| `rag` \| `rlm` \| `auto`, passed to the reasoner unchanged; the built-in reasoner answers in `rag` mode with the best-matching chunks. Returns `answer`, `mode`, `citations`, `usage`. |
+| `get(ref_id, agent_id?, task_id?)` | Fetch full content of a specific memory. Records an access. Another agent's or task's memory is not found. |
+| `forget(ref_id, agent_id?, task_id?)` | Delete a memory from all indexes (not another agent's or task's: `deleted: false`). |
+| `promote(ref_id, type, content?, importance?, tags?, scope?, agent_id?, task_id?)` | Turn a short-term/working memory into a long-term one (you supply the distilled text). Keeps provenance via `promoted_from` and the source's scope; `scope="project"` shares it. |
+| `consolidate(session_id?, limit?, synthesize?, revalidate?, agent_id?, task_id?)` | Purge expired short-term memories and list the ones most worth promoting among the memories the caller can see (ranked by importance × how often they were recalled). `synthesize=true` also asks an external reasoner to draft long-term statements (`suggested`); `revalidate=true` first checks every code memory, and every decision with a `source`, against its file (`revalidated`). The report always carries a `health` summary. |
+| `ask(ref_id, question, mode?, agent_id?, task_id?)` | Answer a question about one memory without loading it — for a `document` the full body is consulted. `mode`: `direct` \| `rag` \| `rlm` \| `auto`, passed to the reasoner unchanged; the built-in reasoner answers in `rag` mode with the best-matching chunks. Returns `answer`, `mode`, `citations`, `usage`. |
 | `wiki_export(wiki_dir?)` | Compile long-term memories without a wiki page into draft markdown pages (`index.md`, `log.md` updated). |
 | `wiki_import(wiki_dir?, adopt_legacy?, adopt_pages?, adopt_manifest?)` | Index wiki pages as long-term memories, each wiki keeping to its own: approved revisions only with wiki-studio ≥ 0.7.0, every page without it (idempotent; changed pages supersede; `corrects` supersedes the memories a page corrects). |
 
@@ -360,9 +393,9 @@ setting is logged as a warning at startup.
 | `MEMKERNEL_RECALL_WEIGHT_IMPORTANCE` | `0.3` | Weight of importance in the final recall score |
 | `MEMKERNEL_WIKI_DIR` | `` | Directory of the LLM wiki used by `wiki_export` / `wiki_import` (empty = pass `wiki_dir` explicitly) |
 | `MEMKERNEL_STATE_DIR` | `.memkernel/state` | memkernel's own state outside ChromaDB: the wiki sync ledger. Resolved like `MEMKERNEL_CHROMA_PERSIST_PATH` (a relative path is relative to the process's working directory, so set it absolute when the persist path is); keep it out of git |
-| `MEMKERNEL_RECALL_LOG` | `false` | Keep a recall log: each MCP `recall`, and each hook block that shows memories, appends one line (time, query, filters, returned `ref_id`s, and a context receipt: the run, agent and task ids; each returned memory's `content_hash` with its hashing scheme, its source and source hash, and whether it is live or flagged, never its content; the characters returned (an MCP `recall`'s whole response, or a hook's whole block); and for an MCP `recall`, its latency and how many candidates it left out as superseded, flagged or expired) to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, created readable by you only. It stores query text, so it is off by default; it stays on this computer, so keep it out of git. Nothing is written for an in-memory store. The log is locked on POSIX (Linux, macOS) only: on Windows it runs unlocked with one logged warning, and concurrent writers can lose records or pass the size limit. Used by the repeated-mistake count (see [Counting repeated mistakes](#counting-repeated-mistakes)) |
+| `MEMKERNEL_RECALL_LOG` | `false` | Keep a recall log: each MCP `recall`, and each hook block that shows memories, appends one line (time, query, filters, returned `ref_id`s, and a context receipt: the run, agent and task ids; each returned memory's `content_hash` with its hashing scheme, its source and source hash, and whether it is live or flagged, never its content; the characters returned (an MCP `recall`'s whole response, or a hook's whole block); and for an MCP `recall`, its latency and how many candidates it left out as another agent's or task's, superseded, flagged, expired or over the captured-records limit, with `empty_reason` when it returned nothing; an entry names its scope when it is not `project`) to `MEMKERNEL_STATE_DIR/recall-log/<project_id>/recall.jsonl`, created readable by you only. It stores query text, so it is off by default; it stays on this computer, so keep it out of git. Nothing is written for an in-memory store. The log is locked on POSIX (Linux, macOS) only: on Windows it runs unlocked with one logged warning, and concurrent writers can lose records or pass the size limit. Used by the repeated-mistake count (see [Counting repeated mistakes](#counting-repeated-mistakes)) |
 | `MEMKERNEL_RECALL_LOG_MAX_BYTES` | `5000000` | Size of one recall-log file before it is rotated to `recall.jsonl.1`, at least `4096`; a single record larger than this gives up query text first, then the per-memory receipt details (`memories_truncated`), then trailing `ref_id`s (`ref_ids_truncated`), and is marked `truncated` |
-| `MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID` | `` | The calling harness's run, agent and task ids for every call of this process, for a harness that starts one server per agent; a `recall` or `retain` argument wins. They go into the recall log, and `run_id` onto new memories. Caller-chosen text, not authentication: at most 128 characters each, and a longer value is ignored with a logged warning |
+| `MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID` | `` | The calling harness's run, agent and task ids for every call of this process, for a harness that starts one server per agent; a `recall` or `retain` argument wins. They go into the recall log, and `run_id` onto new memories. The agent and task ids also decide what the process sees and where its checkpoints go (see [Scope](#scope-agents-and-tasks)); set them for the server and the hooks alike. Caller-chosen text, not authentication: at most 128 characters each, and a longer value is ignored with a logged warning |
 | `MEMKERNEL_RECALL_LOG_MAX_FILES` | `10` | Recall-log files kept, the current one included; the oldest is deleted at rotation |
 | `MEMKERNEL_CAPTURE` | `false` | Capture failed-then-fixed commands from ended sessions' transcripts at the next normal startup (see [Capture](#capture-opt-in)). It reads Claude Code transcripts and stores text from them (redacted, best-effort), so it is off by default. It needs a persistent store and file locking: on Windows it stays off with one logged warning |
 | `MEMKERNEL_WIKI_PROPOSALS_DIR` | `""` | Where wiki-studio patch-sets are written before promote (`memkernel[wiki]`); empty means `<project root>/.memkernel/wiki-proposals`. Setting it requests the gate: without wiki-studio installed, a warning is logged. |
