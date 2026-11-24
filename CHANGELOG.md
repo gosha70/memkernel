@@ -17,6 +17,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **README "Using memkernel from a harness"** (#119, FR-007): naming the caller, scope, receipts, the context diff
+  and the count per run and agent, with their limits. Every instruction template (Claude, Codex, Cursor, Antigravity,
+  Kiro) now says which ids carry a session's latest checkpoint.
+
 - **The context diff** (#119 H3; specs/memkernel-0-15-harness-foundations, amendment H3).
   `eval/context-diff/diff.py --store … --run <run_id>` reads a run's receipts from the recall log and reports, per
   memory the run received, what changed in the store since: `missing`, `superseded` (and by what), `withdrawn`,

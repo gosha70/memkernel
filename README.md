@@ -498,6 +498,53 @@ rebinding; so is a browser request from another origin.
 
 ---
 
+## Using memkernel from a harness
+
+A harness that runs several agents or tasks against one store can tell memkernel who is calling, keep each agent's
+notes apart, record what each run received, and later compare that with the store. memkernel owns memory, retrieval,
+provenance and its own measurements; orchestration and tracing stay the harness's (#119).
+
+1. **Name the caller.** Pass `run_id`, `agent_id` and `task_id` to `recall` and `retain` (and `agent_id`/`task_id` to
+   `get`, `ask`, `forget`, `promote`, `consolidate`), or set `MEMKERNEL_RUN_ID`, `MEMKERNEL_AGENT_ID` and
+   `MEMKERNEL_TASK_ID` for a server started per agent; a call's value wins. At most 128 characters each. Set the agent
+   and task ids for the hooks as well: they read only their own environment, and recover checkpoints from that scope.
+   A new memory keeps `run_id` as provenance.
+2. **Keep private notes private.** `retain(..., scope="agent")` or `scope="task"` makes a memory visible only to that
+   agent or task; everything else is shared `project` knowledge. Checkpoints go to the caller's task, else agent, else
+   `project`; `scope="project"` hands work to anyone, and `promote(..., scope="project")` publishes a private note.
+   See [Scope](#scope-agents-and-tasks).
+3. **Record what each run received.** With `MEMKERNEL_RECALL_LOG=1`, every `recall` and every hook block writes a
+   receipt to the recall log: the run, agent and task ids; per returned memory its `content_hash` and hashing scheme,
+   source, source hash, state and (when private) scope, never its content; the characters returned; and for an MCP
+   `recall` its latency, the candidates it left out (`out_of_scope`, `superseded`, `flagged`, `expired`, `capped`),
+   and `empty_reason` when it returned nothing.
+4. **Compare a run with the store now.** From a clone of this repository:
+
+   ```bash
+   poetry run python eval/context-diff/diff.py \
+       --store chroma=.memkernel/chroma,state=.memkernel/state,project=my-project,root=/path/to/project \
+       --run <run_id> --json context-diff.json
+   ```
+
+   Each memory the run received is `unchanged`, or `missing`, `superseded` (and by what), `withdrawn`, `changed`,
+   `rehashed`, `flagged`, `source changed` or `unknown`, several at once where they apply. Without `root=` it makes
+   no source checks and says so. It exits 0 with a report, 1 when no log record carries the run id, 2 when the store
+   cannot be opened or read.
+5. **Measure repeated mistakes per run and agent.** [The count](#counting-repeated-mistakes) groups its report by
+   `run_id` and `agent_id` when the log has them.
+
+Limits:
+- **Scope is a convention, not access control:** any client can claim any id.
+- **Receipts need the recall log,** which stores query text, so it is off by default and stays on this computer. A
+  record over `MEMKERNEL_RECALL_LOG_MAX_BYTES` gives up query text, then per-memory details, then `ref_id`s; the diff
+  reports a memory it has no hash for as `unknown`.
+- **The diff's source check** compares whole files, for decisions and code, through their `source` only: a changed
+  file does not mean the memory is wrong, and files the memory's text cites are not checked.
+- **Why a memory was selected** is only what the receipt records (the query, its filters, the exclusions); no
+  per-memory score or reason is kept.
+- **No OpenTelemetry:** the ids in the log are what a harness's own tracing joins on.
+- **The diff and the count are repository tools** (`eval/`), not part of the installed package.
+
 ## Embedding MemKernel in your own harness
 
 ```python

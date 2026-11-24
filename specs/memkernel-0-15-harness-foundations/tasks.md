@@ -11,4 +11,4 @@
 - [x] `eval/context-diff/diff.py` over a run's receipts (FR-004)
 
 ## US4: docs and checks
-- [ ] README "Using memkernel from a harness" (FR-007); SC-1–SC-5
+- [x] README "Using memkernel from a harness" (FR-007); SC-1–SC-5

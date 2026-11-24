@@ -23,6 +23,9 @@ Memory has three tiers. Pick the type; the tier follows.
   recall(query="<current task>", tier="long_term", top_k=8)
   recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
 Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
+The latest checkpoint comes from this session's task, else its agent, else the shared project scope
+(MEMKERNEL_TASK_ID, MEMKERNEL_AGENT_ID): a tool continuing the same work needs the same task id, a tool acting
+as the same agent the same agent id. To hand work to any tool, save the checkpoint with scope="project".
 
 ### While working
 - Plan changed or sub-task started → retain(type="task", content="Goal: … Next: … Open: …")
@@ -203,6 +206,7 @@ recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1
 recall(query="<current task or topic>", tier="long_term", top_k=8)
 ```
 
+The checkpoint comes from the session's task, else its agent, else the project scope, as at session start.
 Then `promote` any consolidation candidate that the recovered context shows was important.
 With the hooks below installed, the `SessionStart` hook already injects this recovery after a
 compaction (`source: "compact"`), with the checkpoint's age; you do not need to recall it again.
