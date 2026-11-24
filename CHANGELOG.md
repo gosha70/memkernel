@@ -17,6 +17,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The context diff** (#119 H3; specs/memkernel-0-15-harness-foundations, amendment H3).
+  `eval/context-diff/diff.py --store … --run <run_id>` reads a run's receipts from the recall log and reports, per
+  memory the run received, what changed in the store since: `missing`, `superseded` (and by what), `withdrawn`,
+  `changed`, `rehashed` (another hashing scheme, never reported as changed content), `flagged`, `source changed`
+  (the source file is gone or hashes differently), `unknown` (only cut-down receipts) or `unchanged`. A code chunk is
+  judged by its file record. The report holds ids, hashes and sources, never memory content. Needs the recall log
+  and a `run_id` (H1).
+
 - **Scope: private memory per agent and per task** (#119 H2; specs/memkernel-0-15-harness-foundations, amendment
   H2). A memory is `project` (the default, shared) or private to the caller's agent or task: `retain(scope="agent"
   | "task")`, with `agent_id`/`task_id` as tool arguments or `MEMKERNEL_AGENT_ID`/`MEMKERNEL_TASK_ID`. A caller sees
