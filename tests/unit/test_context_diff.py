@@ -79,6 +79,12 @@ def _rewrite_last(settings: MemKernelSettings, change: Any) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _persist_collection(settings: MemKernelSettings) -> None:
+    """The project's collection in a persistent store at the settings' path, as a memkernel server leaves it."""
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
+    client.get_or_create_collection(f"{settings.chroma_collection_prefix}_{settings.project_id}")
+
+
 def _report(svc: Any, settings: MemKernelSettings) -> dict[str, Any]:
     """The report with source checks on: the fixture's project folder as the root."""
     return diff_module.diff(settings, RUN, store=svc._vector_store, root=Path(settings.project_root))
@@ -239,7 +245,7 @@ def test_exit_codes(env: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     fact = svc.retain("A fact.", MemoryType.FACT)
     _receive(svc, settings, [fact])
     spec = f"chroma={settings.chroma_persist_path},state={settings.state_dir},project={settings.project_id}"
-    Path(settings.chroma_persist_path).mkdir(parents=True, exist_ok=True)  # a store folder the command line opens
+    _persist_collection(settings)  # a store with the project's collection, for the command line to open
     out = tmp_path / "report.json"
     assert diff_module.main(["--store", spec, "--run", RUN, "--json", str(out)]) == 0
     assert json.loads(out.read_text(encoding="utf-8"))["run_id"] == RUN
@@ -280,7 +286,7 @@ def test_unreadable_log_files_are_counted_and_make_the_log_incomplete(
     report = _report(svc, settings)
     assert report["unreadable_log_files"] == 1
     assert "1 log file(s) could not be read and were skipped: the log is incomplete" in report["notes"]
-    Path(settings.chroma_persist_path).mkdir(parents=True, exist_ok=True)
+    _persist_collection(settings)
     spec = f"chroma={settings.chroma_persist_path},state={settings.state_dir},project={settings.project_id}"
     assert diff_module.main(["--store", spec, "--run", "no-such-run"]) == 1
     assert "1 log file(s) could not be read, so the log is incomplete" in capsys.readouterr().out
@@ -314,3 +320,44 @@ def test_a_chunk_from_before_0_4_is_judged_by_the_record_that_lists_it(env: Any)
     report = _report(svc, settings)
     (judged,) = report["memories"]
     assert judged["owner"] == owner and judged["statuses"] == ["source changed"]
+
+
+def test_a_captured_memorys_source_is_a_label_not_a_file(env: Any) -> None:
+    """As revalidation: only decisions and code have their source checked; "capture" names no file."""
+    svc, settings, _ = env
+    captured = svc.retain("Command `make` failed, then passed.", MemoryType.OBSERVATION, source="capture")
+    _receive(svc, settings, [captured])
+    (judged,) = _report(svc, settings)["memories"]
+    assert judged["statuses"] == ["unchanged"] and judged["notes"] == []
+
+
+def test_a_store_without_the_projects_collection_exits_2_and_creates_nothing(
+    env: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    svc, settings, _ = env
+    fact = svc.retain("A fact.", MemoryType.FACT)
+    _receive(svc, settings, [fact])
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
+    client.get_or_create_collection("memkernel_another_project")
+    spec = f"chroma={settings.chroma_persist_path},state={settings.state_dir},project={settings.project_id}"
+    assert diff_module.main(["--store", spec, "--run", RUN]) == 2
+    assert "no readable collection" in capsys.readouterr().err
+    names = {c if isinstance(c, str) else c.name for c in client.list_collections()}
+    assert names == {"memkernel_another_project"}  # the diff created no collection
+
+
+def test_a_failing_store_read_exits_2(env: Any, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    from chromadb.errors import InternalError
+
+    svc, settings, _ = env
+    fact = svc.retain("A fact.", MemoryType.FACT)
+    _receive(svc, settings, [fact])
+    _persist_collection(settings)
+
+    def broken(self: Any, ref_id: str) -> Any:
+        raise InternalError("disk I/O error")
+
+    monkeypatch.setattr(diff_module.ChromaVectorStore, "get_by_id", broken)
+    spec = f"chroma={settings.chroma_persist_path},state={settings.state_dir},project={settings.project_id}"
+    assert diff_module.main(["--store", spec, "--run", RUN]) == 2
+    assert "reading the store failed" in capsys.readouterr().err

@@ -11,7 +11,8 @@ each memory the run received the statuses that apply against the store now (amen
   chunk is judged through its file record). ``rehashed``: the receipt's hash was made with another scheme than this
   memkernel's, so it is not compared (C2); for code, the source check then only notices a file that is gone.
 - ``flagged``: needs review now, and ``live`` in its receipt (the run did not see a flag).
-- ``source changed``: the memory's ``source`` file under the project root no longer hashes to the receipt's
+- ``source changed`` (decisions and code only, as revalidation: another record's ``source`` is a label, such as
+  ``capture``): the memory's ``source`` file under the project root no longer hashes to the receipt's
   ``source_hash`` (a decision) or ``content_hash`` (code), through memkernel's own ``compute_content_hash``; a file
   that is gone counts too. It says nothing about whether the memory is wrong, or about other files its text cites.
 - ``unknown``: no receipt in the run has the memory's hash (every record that returned it was cut down). It combines
@@ -23,8 +24,9 @@ it belongs to: its ``parent_ref``, the id's prefix (``<owner>-chunk-<n>``) once 
 chunk from before 0.4, the code record whose ``chunk_refs`` lists it (as revalidation recognises it). Source checks
 need ``root=``, the project the sources resolve under; without it they are skipped and each memory with a source
 says so. Unreadable log files are skipped and counted. The report holds ids, hashes, sources and statuses, never
-memory content; it reads every scope. Exit codes: 0 report printed, 1 no record carries the run id, 2 usage error or a
-store it cannot open.
+memory content; it reads every scope, and opens the store without creating anything. Exit codes: 0 report printed,
+1 no record carries the run id, 2 usage error, or a store it cannot open or read (no collection for the project
+included).
 
 Usage:
     poetry run python eval/context-diff/diff.py \\
@@ -43,6 +45,9 @@ from typing import TYPE_CHECKING, Any
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))
+
+import chromadb  # noqa: E402
+from chromadb.errors import ChromaError  # noqa: E402
 
 from memkernel import recall_log  # noqa: E402
 from memkernel.config import MemKernelSettings  # noqa: E402
@@ -70,6 +75,12 @@ NOTE_NO_ROOT = "no source check (no root given)"
 NOTE_OUTSIDE_ROOT = "no source check (outside the project root)"
 NOTE_UNREADABLE = "no source check (the file cannot be read as text)"
 EXIT_REPORT, EXIT_NO_RECORDS, EXIT_USAGE = 0, 1, 2
+SOURCE_CHECKED_TYPES = (MemoryType.DECISION, MemoryType.CODE)  # as revalidation: other records' sources are labels
+STORE_ERRORS = (ChromaError, OSError, ValueError, RuntimeError)
+
+
+class StoreUnavailableError(Exception):
+    """The store cannot be opened or read (exit 2): no collection for the project, or chromadb failed."""
 
 
 @dataclass
@@ -102,6 +113,19 @@ def parse_store(spec: str) -> tuple[MemKernelSettings, Path | None]:
         chroma_persist_path=parts["chroma"], state_dir=parts["state"], project_id=parts["project"]
     )
     return settings, root
+
+
+def open_store(settings: MemKernelSettings) -> VectorStorePort:
+    """The project's store, opened without creating a collection; ``StoreUnavailableError`` when it has none or chromadb
+    fails (the adapter itself would create a missing collection, so its existence is checked first)."""
+    name = f"{settings.chroma_collection_prefix}_{settings.project_id}"
+    try:
+        client = chromadb.PersistentClient(path=settings.chroma_persist_path)
+        client.get_collection(name)  # raises NotFoundError for a missing collection; creates nothing
+        return ChromaVectorStore(settings, client=client)
+    except STORE_ERRORS as exc:
+        where = settings.chroma_persist_path
+        raise StoreUnavailableError(f"no readable collection {name!r} at {where} ({exc})") from exc
 
 
 def run_records(settings: MemKernelSettings, run_id: str) -> tuple[list[dict[str, Any]], int]:
@@ -241,7 +265,7 @@ def judge(
     if entry.get("state") == recall_log.STATE_LIVE and subject.needs_review:
         judged.statuses.append(FLAGGED)
     source = subject.source if owner_id else str(entry.get("source") or subject.source)
-    if source:
+    if source and subject.type in SOURCE_CHECKED_TYPES:
         if owner_id:
             expected = subject.content_hash  # made now, with the current scheme: C2 does not apply
         elif subject.type == MemoryType.CODE:
@@ -273,10 +297,13 @@ def diff(
     }
     if not records:
         return report
-    vector_store = store if store is not None else ChromaVectorStore(settings)
-    legacy = legacy_owners(vector_store)
-    order, entries = received(records)
-    judged = [judge(vector_store, settings, ref_id, entries.get(ref_id), root, legacy) for ref_id in order]
+    vector_store = store if store is not None else open_store(settings)
+    try:
+        legacy = legacy_owners(vector_store)
+        order, entries = received(records)
+        judged = [judge(vector_store, settings, ref_id, entries.get(ref_id), root, legacy) for ref_id in order]
+    except STORE_ERRORS as exc:
+        raise StoreUnavailableError(f"reading the store failed ({exc})") from exc
     cut = sum(1 for r in records if r.get("ref_ids_truncated") is True)
     if cut:
         notes.append(
@@ -316,7 +343,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", type=Path, help="also write the report as JSON")
     args = parser.parse_args(argv)
     settings, root = parse_store(args.store)
-    report = diff(settings, args.run, root=root)
+    try:
+        report = diff(settings, args.run, store=open_store(settings), root=root)
+    except StoreUnavailableError as exc:
+        print(f"--store: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     if not report["records"]:
         incomplete = report["unreadable_log_files"]
         print(
