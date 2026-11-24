@@ -8,7 +8,7 @@
 - [x] `scope` on records, `agent`/`task` on every read path, promotion keeping scope (FR-001, SC-1); the empty-result reason in the receipt (FR-005, SC-6)
 
 ## US3 (H3): context diff
-- [ ] `eval/context-diff/diff.py` over a run's receipts (FR-004)
+- [x] `eval/context-diff/diff.py` over a run's receipts (FR-004)
 
 ## US4: docs and checks
 - [ ] README "Using memkernel from a harness" (FR-007); SC-1–SC-5
