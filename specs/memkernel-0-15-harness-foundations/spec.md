@@ -181,6 +181,13 @@ B6–B11 follow from the spec and the review, and are stated so the review can c
     (`MEMKERNEL_TASK_ID`); tools acting as the same logical agent use the same agent id (`MEMKERNEL_AGENT_ID`). A
     tool with different ids does not recover the other's latest checkpoint. The README's "One store across tools"
     section and the Codex and Cursor templates say so.
+  - **Consequences the README and templates state:** (1) the hooks are separate processes and read only
+    `MEMKERNEL_AGENT_ID` and `MEMKERNEL_TASK_ID` from their own environment, so checkpoint recovery needs the ids in
+    the environment of both the server and the hooks; ids passed only as call arguments put the agent's own
+    checkpoints in a scope the hooks never read (the #152 lesson again). (2) A task id must stay the same across the
+    sessions that continue the same work: a harness that makes a new task id per session never recovers a
+    checkpoint. (3) Setting an id for the first time starts that scope empty: existing checkpoints are `project`,
+    and recovery does not fall back to them, so the first session shows "No checkpoint found yet".
 - **B5 Filtering in Python, not in the store (owner: yes).** Scope is applied after the store returns candidates, by one
   predicate, on every path. A store `where` filter cannot match the records older stores wrote without the key
   (SC-4), and the BM25 index has no metadata. Cost: recall's window widens past out-of-scope candidates, as it
@@ -199,7 +206,9 @@ B6–B11 follow from the spec and the review, and are stated so the review can c
   (`/health/store`, with `ref_id`s) included.
 - **B8 Every read path (SC-1).** `recall` (both orders), `get`, `list_memories`, `ask`, `consolidate`'s promotion
   candidates (it lists them; `promote` writes, per B9), the hook blocks (checkpoint, long-term context, needs-review list, candidates), and `wiki_export`
-  (B3). Store maintenance stays store-wide: purge, revalidation, and the health summary, which reaches callers
+  (B3). Store maintenance stays store-wide: purge, revalidation, the startup report of ended sessions that saved no
+  checkpoint (a checkpoint in any scope counts, so a session saved under another task id is not reported unsaved),
+  and the health summary, which reaches callers
   (`consolidate`'s `health`, the session-start block) as counts only, never as records.
 - **B9 Writes.** Dedup is per scope: identical text in two scopes is two records, so a private note never merges into
   a project one; the two copies are not linked, and the private one reaches the wiki only by `promote` with
