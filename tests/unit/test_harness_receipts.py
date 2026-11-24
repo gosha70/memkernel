@@ -134,7 +134,7 @@ def test_a_recall_receipt_counts_each_exclusion_and_lists_what_it_returned(tmp_p
     receipt = RecallReceipt()
     results = svc.recall("user store", top_k=10, receipt=receipt)
 
-    assert receipt.excluded == {"superseded": 1, "flagged": 1, "expired": 1}
+    assert receipt.excluded == {"out_of_scope": 0, "superseded": 1, "flagged": 1, "expired": 1, "capped": 0}
     assert [m.ref_id for m in receipt.memories] == [r.ref_id for r in results]
     assert {old, flagged, expired}.isdisjoint(r.ref_id for r in results)
 
@@ -148,7 +148,8 @@ def test_exclusions_are_the_last_windows_not_a_sum_over_windows(tmp_path: Path) 
         svc._vector_store.update_metadata(ref, {NEEDS_REVIEW_KEY: True, REVIEW_REASON_KEY: "changed"})
     receipt = RecallReceipt()
     assert svc.recall("user store", top_k=1, receipt=receipt) == []
-    assert receipt.excluded == {"superseded": 0, "flagged": 3, "expired": 0} and receipt.memories == []
+    assert receipt.excluded == {"out_of_scope": 0, "superseded": 0, "flagged": 3, "expired": 0, "capped": 0}
+    assert receipt.memories == [] and receipt.empty_reason == "excluded"
 
 
 def test_a_recall_without_a_receipt_returns_the_same_list(tmp_path: Path) -> None:

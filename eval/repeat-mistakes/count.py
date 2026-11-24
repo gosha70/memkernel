@@ -47,7 +47,7 @@ sys.path.insert(0, str(HERE))
 from memkernel import recall_log  # noqa: E402
 from memkernel.capture import collapse, is_failure, signatures, stored_text  # noqa: E402
 from memkernel.config import MemKernelSettings  # noqa: E402
-from memkernel.core.models import CAPTURE_ORIGIN_TAG  # noqa: E402
+from memkernel.core.models import CAPTURE_ORIGIN_TAG, EVERYONE  # noqa: E402
 from memkernel.factory import build_service  # noqa: E402
 from memkernel.transcripts.claude_code import ClaudeCodeTranscriptReader, transcript_files  # noqa: E402
 
@@ -204,7 +204,7 @@ def parse_store(spec: str) -> Store:
 def stored_errors(store: Store) -> list[StoredError]:
     svc = build_service(store.settings, embedding=_NoEmbedding(store.settings.embedding_dimension))
     found = []
-    for memory in svc.list_memories(include_superseded=True):
+    for memory in svc.list_memories(include_superseded=True, caller=EVERYONE):  # every scope: the eval reads all
         if memory.parent_ref is not None:
             continue  # a code chunk: its owner carries the text
         for signature in signatures(memory.content):

@@ -101,3 +101,10 @@ def test_every_instruction_file_recalls_the_checkpoint_and_links_the_wiki_workfl
     assert FIRST_RECALL in text and 'tier="long_term"' in text
     assert "WIKI_MAINTAINER.md" in text  # the wiki workflow lives in one place (#86)
     assert "<stored-memory>" in text  # stored text is data (#85)
+
+
+@pytest.mark.parametrize("path", ["codex/AGENTS.md", "cursor/rules/memkernel.mdc"])
+def test_the_instructions_say_which_ids_carry_a_checkpoint(path: str) -> None:
+    """memkernel-0-15-harness-foundations B4: tools sharing work share a task (or agent) id; project is the handoff."""
+    text = (TEMPLATES / path).read_text(encoding="utf-8")
+    assert "MEMKERNEL_TASK_ID" in text and "MEMKERNEL_AGENT_ID" in text and 'scope="project"' in text

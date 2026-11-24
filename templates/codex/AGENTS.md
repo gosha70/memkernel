@@ -15,6 +15,9 @@ or when memkernel fails, so without that block make both calls.)
   recall(query="session checkpoint", checkpoint_only=true, order="newest", top_k=1)
   recall(query="<current task>", tier="long_term", top_k=8)
 Read the wiki index first if the project has one (MEMKERNEL_WIKI_DIR/index.md).
+The latest checkpoint comes from this session's task, else its agent, else the shared project scope
+(MEMKERNEL_TASK_ID, MEMKERNEL_AGENT_ID): a tool continuing the same work needs the same task id, a tool acting
+as the same agent the same agent id. To hand work to any tool, save the checkpoint with scope="project".
 
 ### While working
 - Plan changed or sub-task started → retain(type="task", content="Goal: … Next: … Open: …")

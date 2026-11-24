@@ -17,6 +17,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Scope: private memory per agent and per task** (#119 H2; specs/memkernel-0-15-harness-foundations, amendment
+  H2). A memory is `project` (the default, shared) or private to the caller's agent or task: `retain(scope="agent"
+  | "task")`, with `agent_id`/`task_id` as tool arguments or `MEMKERNEL_AGENT_ID`/`MEMKERNEL_TASK_ID`. A caller sees
+  `project` memories and its own; every read path applies it (`recall`, `get`, `ask`, `forget`, `promote`,
+  `consolidate`'s candidates, the hook blocks, `wiki_export` drafts `project` only). Checkpoints without a scope go to
+  the caller's task, else agent, else `project`, and latest-checkpoint recovery reads only that scope;
+  `scope="project"` is the shared handoff. A private memory supersedes only its own scope; dedup is per scope.
+  Older records are `project`; store maintenance and the admin API stay store-wide. A convention between cooperating
+  agents, not access control. The recall log's receipt adds `out_of_scope` and `capped` to `excluded`,
+  `empty_reason` for an empty recall, and each entry's scope when it is not `project`. **Changed for anyone setting
+  `MEMKERNEL_AGENT_ID` or `MEMKERNEL_TASK_ID`:** their checkpoints become private to that scope, and the first
+  session after setting an id starts without a checkpoint.
+
 - **Context receipts and correlation in the recall log** (#119 H1; specs/memkernel-0-15-harness-foundations,
   amendment H1). `recall` and `retain` take `run_id`, `agent_id` and `task_id` (or `MEMKERNEL_RUN_ID`,
   `MEMKERNEL_AGENT_ID`, `MEMKERNEL_TASK_ID` for the process), at most 128 characters each, a longer argument

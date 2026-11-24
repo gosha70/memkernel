@@ -45,11 +45,15 @@ class VectorStorePort(Protocol):
         """All records matching ``where``; ``include_content=False`` fetches ids and metadata only (content empty)."""
         ...
 
-    def find_by_hash(self, content_hash: str, memory_type: str, source: str | None = None) -> Memory | None:
+    def find_by_hash(
+        self, content_hash: str, memory_type: str, source: str | None = None, scope: str | None = None
+    ) -> Memory | None:
         """Find by content_hash + type, optionally + source (dedup key per ADR-5 / 0.4 sourced-code identity).
 
         Never returns a code chunk record (a single-chunk file cannot shadow its
         canonical) nor a superseded record (history is not a dedup hit).
+        With ``scope``, only a match in that scope
+        (a record without the key counts as ``project``).
         """
         ...
 

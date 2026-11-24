@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from memkernel.core.models import (
     PAGE_KEY_TAG,
     PAGE_SHA_TAG,
+    SCOPE_PROJECT,
     STORE_LOCK_WIKI_IMPORT,
     WIKI_ID_TAG,
     WIKI_PAGE_TAG,
@@ -254,6 +255,8 @@ class WikiExporter:
                 logger.warning("wiki export to %s refused: %s", self._wiki_dir, exc)
                 return report
         candidates = memories if memories is not None else self._service.list_memories(tier=MemoryTier.LONG_TERM)
+        # memkernel-0-15-harness-foundations B3: a wiki is shared, so only project records are drafted, whoever calls
+        candidates = [m for m in candidates if m.scope == SCOPE_PROJECT]
         # G3: the most important first, then the oldest, then by ref_id, so a batch is deterministic
         candidates = sorted(candidates, key=lambda m: (-m.importance, m.timestamp, m.ref_id))
         planned: list[tuple[str, WikiPage]] = []
