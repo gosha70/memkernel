@@ -75,6 +75,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Revalidation no longer flags decisions imported from the wiki** (#160). The import stores a page's path inside
+  the wiki as `source`, and revalidation looked for it under the project root, so unless the wiki folder was the
+  project root, every imported decision was flagged `missing` and listed under "Needs review" at each session start;
+  the context diff reported it as `source changed`. Records the wiki import manages (a `wiki-path:` or `wiki-id:`
+  tag, which only the import writes) are now skipped by both, and revalidation clears a flag already saved on one.
+  **If your wiki was imported by memkernel 0.6,** its records have only the plain `wiki` tag and are still checked:
+  run `wiki_import(adopt_legacy=true)` once to adopt them, and the next session start clears their flags.
+
 - **A running server's `recall` finds records other processes wrote to its store** (#139): compaction checkpoints
   from `post-compact.py`, records captured at startup, or a second server on the same store. chromadb caches its
   search index per process and the BM25 index was built once; before a relevance recall, memkernel now compares the

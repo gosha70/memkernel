@@ -1662,12 +1662,20 @@ class MemoryService:
         is written. A decision compares against the ``source_hash`` recorded when it
         was created; one without it is flagged only when the file is missing
         (memkernel-0-10-decision-revalidation FR-002). Each flagged item names its type.
+
+        A record the wiki import manages (a ``wiki-path:`` or ``wiki-id:`` identity tag, which only the import writes)
+        is not checked: its ``source`` is a page path inside the wiki, and the import keeps the record current. A
+        flag already saved on one is cleared and counted under ``cleared`` (#160). A record with only the plain
+        ``wiki`` tag (a 0.6 import not yet adopted) is checked as before.
         """
         report: dict[str, Any] = {"checked": 0, "changed": 0, "missing": 0, "cleared": 0, "unknown": 0, "flagged": []}
         records = self._vector_store.list_all({"type": MemoryType.CODE.value}, include_content=False)
         referenced = frozenset(ref for m in records for ref in m.chunk_refs)
         for memory in records:
             if memory.retired() or not memory.source or _is_code_chunk(memory, referenced):
+                continue
+            if has_wiki_identity(memory.tags):
+                self._record_review(report, memory, "")  # managed by the wiki import: never flagged here (#160)
                 continue
             report["checked"] += 1
             path = self._resolve_source(memory.source)
@@ -1686,6 +1694,9 @@ class MemoryService:
             self._record_review(report, memory, reason)
         for memory in self._vector_store.list_all({"type": MemoryType.DECISION.value}, include_content=False):
             if memory.retired() or not memory.source:
+                continue
+            if has_wiki_identity(memory.tags):
+                self._record_review(report, memory, "")  # managed by the wiki import: never flagged here (#160)
                 continue
             report["checked"] += 1
             path = self._resolve_source(memory.source)
