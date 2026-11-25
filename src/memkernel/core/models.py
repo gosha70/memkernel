@@ -124,6 +124,17 @@ SOURCE_HASH_KEY = "source_hash"
 # only; absent, so empty, on older records. Run, agent and task ids are caller text of at most ID_MAX_CHARS.
 RUN_ID_KEY = "run_id"
 ID_MAX_CHARS = 128
+# Content hashing schemes (memkernel-0-17-supersede-and-canonical-hash D5, D6): a record states the scheme that made
+# its content_hash and source_hash under HASH_SCHEME_KEY; a record without it is HASH_SCHEME_RAW (every record written
+# by memkernel 0.9.0 and earlier). New records use HASH_SCHEME_CANONICAL.
+HASH_SCHEME_KEY = "hash_scheme"
+HASH_SCHEME_RAW = "sha256-raw"
+HASH_SCHEME_CANONICAL = "sha256-canonical-v1"
+# Supersede suggestions at retain (memkernel-0-17 FR-001, D2): which new records get them, how many nearest records the
+# search asks for before filtering, and how many it returns.
+SUGGEST_TYPES = frozenset({"decision", "convention", "fact", "procedure"})
+SUGGEST_FETCH = 20
+SUGGEST_MAX = 3
 # Why the live filter dropped a candidate, as a recall receipt counts it (A3, A4, B10); withdrawn counts as superseded.
 # Each candidate counts once, under the first reason that applies, in this order.
 EXCLUDED_OUT_OF_SCOPE = "out_of_scope"
@@ -248,6 +259,7 @@ class Memory(BaseModel):
     withdrawn_at: datetime | None = None
     run_id: str = ""  # memkernel-0-15-harness-foundations A2: the run that created the record
     scope: str = SCOPE_PROJECT  # memkernel-0-15-harness-foundations B6: absent in older stores, so project
+    hash_scheme: str = HASH_SCHEME_RAW  # memkernel-0-17 D6: absent in older stores, so raw
 
     def retired(self) -> bool:
         """True for history: superseded by another record or withdrawn (memkernel-0-7 FR-002)."""
@@ -339,6 +351,15 @@ class ArtifactRef(BaseModel):
     # memkernel-0-10-decision-revalidation FR-004: a flagged decision is returned with its flag and reason.
     needs_review: bool = False
     review_reason: str = ""
+
+
+class SupersedeSuggestion(BaseModel):
+    """A live record a new one could supersede (memkernel-0-17 FR-001): its id, the cosine similarity of the two
+    embeddings, and a preview made as ``recall``'s is."""
+
+    ref_id: str
+    similarity: float
+    preview: str
 
 
 class RecallReceipt(BaseModel):

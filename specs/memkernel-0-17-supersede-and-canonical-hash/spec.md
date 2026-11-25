@@ -98,10 +98,11 @@ it and files #59's Phase 3 separately.
     subject: a changed number, name or option) and 30 **different pairs** (two memories on a related subject that
     say different things), spread evenly over `decision`, `convention`, `fact` and `procedure`.
   - **Each pair's similarity** is the cosine of the two texts' embeddings, as `recall`'s dense search computes it.
-  - **The rule:** the default is the **lowest** threshold, in steps of 0.01 from 0.50 to 0.99, at which **at most 1
-    of the 30 different pairs** would be suggested. The PR reports that threshold and how many of the 30 version
-    pairs it catches. If it catches **fewer than 24 of 30**, the build stops and brings the numbers to the owner
-    instead of shipping a default.
+  - **The rule (as the owner revised it, 2026-11-24):** find the lowest threshold, in steps of 0.01 from 0.50 to 0.99,
+    at which at most 1 of the 30 different pairs would be suggested; the default is **the highest threshold that
+    catches as many version pairs as that lowest qualifying one, with at most 1 different pair suggested**. The PR
+    reports the calibration table. If the lowest qualifying threshold catches **fewer than 24 of 30**, the build
+    stops and brings the numbers to the owner instead of shipping a default.
   - **Kept checkable:** `eval/supersede-threshold/calibrate.py` prints the table; a slow test (it loads the model, like
     the other slow tests) checks the shipped default against the rule. Another model needs its own calibration; the
     setting's documentation says so. The health report's 0.95 is for near-identical text, too strict for a newer

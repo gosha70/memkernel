@@ -20,6 +20,8 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from memkernel.core.models import (
     CODE_CHUNK_KEY,
     DEFAULT_IMPORTANCE,
+    HASH_SCHEME_KEY,
+    HASH_SCHEME_RAW,
     NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
     REVIEW_REASON_KEY,
@@ -205,6 +207,7 @@ def _memory_from_chroma(
         source_hash=str(meta.get(SOURCE_HASH_KEY) or ""),
         run_id=str(meta.get(RUN_ID_KEY) or ""),
         scope=str(meta.get(SCOPE_KEY) or SCOPE_PROJECT),
+        hash_scheme=str(meta.get(HASH_SCHEME_KEY) or HASH_SCHEME_RAW),
         withdrawn_reason=str(meta[WITHDRAWN_REASON_KEY]) if meta.get(WITHDRAWN_REASON_KEY) else None,
         withdrawn_at=datetime.fromisoformat(str(meta[WITHDRAWN_AT_KEY])) if meta.get(WITHDRAWN_AT_KEY) else None,
     )

@@ -38,6 +38,9 @@ from memkernel.core.models import (
     EXCLUDED_OUT_OF_SCOPE,
     EXCLUDED_SUPERSEDED,
     EXCLUSION_REASONS,
+    HASH_SCHEME_CANONICAL,
+    HASH_SCHEME_KEY,
+    HASH_SCHEME_RAW,
     HEALTH_CATEGORIES,
     HEALTH_DANGLING_LINKS,
     HEALTH_EXPIRED_PRESENT,
@@ -56,6 +59,9 @@ from memkernel.core.models import (
     SCOPE_KEY,
     SCOPE_PROJECT,
     SOURCE_HASH_KEY,
+    SUGGEST_FETCH,
+    SUGGEST_MAX,
+    SUGGEST_TYPES,
     SUPERSEDED_BY_KEY,
     WIKI_ID_TAG,
     WIKI_IDENTITY_TAGS,
@@ -77,11 +83,12 @@ from memkernel.core.models import (
     ReasonerError,
     RecallReceipt,
     SearchQuery,
+    SupersedeSuggestion,
     check_id,
     has_wiki_identity,
     tier_of,
 )
-from memkernel.memory.dedup import compute_content_hash
+from memkernel.memory.dedup import CONTENT_HASH_SCHEME, compute_content_hash
 from memkernel.memory.lifecycle import memory_is_expired
 
 if TYPE_CHECKING:
@@ -252,6 +259,29 @@ def _exempt_from_review_hiding(memory: Memory) -> bool:
     return memory.type == MemoryType.DECISION
 
 
+def _hashes(content: str) -> dict[str, str]:
+    """``content``'s hash under each scheme a stored record may use (memkernel-0-17 D6)."""
+    return {scheme: compute_content_hash(content, scheme) for scheme in (HASH_SCHEME_RAW, HASH_SCHEME_CANONICAL)}
+
+
+def _confirmed(memory: Memory, hashes: dict[str, str]) -> bool:
+    """A store hit is a match only when its stored hash equals the new text's hash under the record's own scheme (D6):
+    a raw record matches only byte-identical text, a canonical record any text with the same canonical form."""
+    return memory.content_hash == hashes.get(memory.hash_scheme)
+
+
+def _prefer_canonical(matches: list[Memory]) -> list[Memory]:
+    """After every eligibility check (the owner's order, D6): the canonical matches if any, else the raw ones."""
+    canonical = [m for m in matches if m.hash_scheme == HASH_SCHEME_CANONICAL]
+    return canonical or matches
+
+
+def _hash_condition(hashes: dict[str, str]) -> dict[str, Any]:
+    """One store condition on the existing ``hash`` key for either scheme's hash (no index or schema change)."""
+    values = sorted(set(hashes.values()))
+    return {"hash": values[0]} if len(values) == 1 else {"hash": {"$in": values}}
+
+
 def _empty_reason(excluded: dict[str, int]) -> str:
     """Why a relevance recall returned nothing (B11): no candidate counted, only out-of-scope ones, or any other mix."""
     if not any(excluded.values()):
@@ -344,6 +374,7 @@ class MemoryService:
         run_id: str = "",
         scope: str | None = None,
         caller: Caller | None = None,
+        suggestions: list[SupersedeSuggestion] | None = None,
     ) -> str:
         """Store content and return its ref_id.
 
@@ -384,6 +415,10 @@ class MemoryService:
         own id (default: the settings' ids). Without it a record is ``project``, and a checkpoint is in the caller's
         effective scope (B4). Dedup is per scope (B9). A ``supersedes`` target the caller cannot see is ignored
         (B2); a private record superseding a record outside its own scope raises ``ValueError`` (B9).
+
+        ``suggestions`` (memkernel-0-17 FR-001, D1), when given, is filled with live records the new one could
+        supersede: for a new ``decision``, ``convention``, ``fact`` or ``procedure`` record only, never on a dedup hit
+        or when ``supersedes`` is passed. Nothing is superseded because of them (D4).
         """
         reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
         if reserved:
@@ -405,6 +440,7 @@ class MemoryService:
         if type == MemoryType.CODE:
             return self._retain_code(content, session_id, checkpoint, source, extra, who)
 
+        wants = suggestions is not None and type.value in SUGGEST_TYPES and supersedes is None
         return self._retain_single(
             content,
             type,
@@ -416,6 +452,7 @@ class MemoryService:
             dedup_source=dedup_source,
             dedup_owner=dedup_owner,
             wiki_identity=wiki_identity,
+            suggest=(who, suggestions) if wants and suggestions is not None else None,
         )
 
     def _visible_ref(self, item: dict[str, Any], who: Caller) -> bool:
@@ -466,10 +503,7 @@ class MemoryService:
         half-written canonical is removed again before the error propagates.
         """
         resolved_session = session_id or self._settings.default_session_id
-        content_hash = compute_content_hash(content)
-        existing = self._vector_store.find_by_hash(
-            content_hash, MemoryType.CODE.value, source=source or None, scope=extra.scope
-        )
+        existing = self._code_dedup_hit(_hashes(content), source, extra.scope)
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             self._refresh_owned_chunks(existing.ref_id, resolved_session, checkpoint)
@@ -494,6 +528,21 @@ class MemoryService:
             raise
         self._supersede_other_snapshots(ref_id, source, who)
         return ref_id
+
+    def _code_dedup_hit(self, hashes: dict[str, str], source: str, scope: str) -> Memory | None:
+        """The canonical code record a retain dedups into (memkernel-0-17 D6): eligible first (type code, the same
+        ``source`` when there is one, the scope, live, not a chunk), confirmed under its own scheme, then a canonical
+        record preferred to a raw one; the first in the store's order."""
+        conditions: list[dict[str, Any]] = [_hash_condition(hashes), {"type": MemoryType.CODE.value}]
+        if source:
+            conditions.append({"source": source})
+        matches = [
+            m
+            for m in self._vector_store.list_all({"$and": conditions}, include_content=False)
+            if not m.retired() and not _is_code_chunk(m) and m.scope == scope and _confirmed(m, hashes)
+        ]
+        preferred = _prefer_canonical(matches)
+        return preferred[0] if preferred else None
 
     def _index_missing_chunks(
         self, ref_id: str, content: str, session_id: str, checkpoint: bool, source: str, extra: _ExtraMeta
@@ -791,20 +840,21 @@ class MemoryService:
         dedup_source: bool = False,
         dedup_owner: Callable[[Memory], bool] | None = None,
         wiki_identity: tuple[str, str | None] | None = None,
+        suggest: tuple[Caller, list[SupersedeSuggestion]] | None = None,
     ) -> str:
         """Store a single content string and return its ref_id.
 
         ``dedup=False`` skips the content-hash check for records whose identity
         is not their text (document summaries); ``dedup_source`` scopes it to
-        records with the same ``source``; ``dedup_owner`` and ``wiki_identity`` as in ``retain``.
+        records with the same ``source``; ``dedup_owner`` and ``wiki_identity`` as in ``retain``. ``suggest`` (the
+        caller and the list to fill) asks for supersede suggestions once a new record is written (FR-001).
         """
         extra = extra or _ExtraMeta()
         resolved_session = session_id or self._settings.default_session_id
-        content_hash = compute_content_hash(content)
 
-        # Dedup check: same hash + same type -> update metadata, return existing id
+        # Dedup check: the same text (under the record's own scheme) + same type -> update metadata, return existing id
         same_source = source if dedup_source else None
-        existing = self._dedup_hit(content_hash, type, same_source, dedup_owner, extra.scope) if dedup else None
+        existing = self._dedup_hit(_hashes(content), type, same_source, dedup_owner, extra.scope) if dedup else None
         if existing is not None:
             self._refresh_existing(existing, resolved_session, checkpoint, extra)
             return existing.ref_id
@@ -820,11 +870,41 @@ class MemoryService:
         self._write_record(ref_id, content, embedding, metadata)
         if extra.supersedes:
             self._mark_superseded(extra.supersedes, ref_id)
+        if suggest is not None:
+            who, out = suggest
+            out.extend(self._supersede_suggestions(ref_id, type, embedding, extra.scope, who))
         return ref_id
+
+    def _supersede_suggestions(
+        self,
+        ref_id: str,
+        type: MemoryType,  # noqa: A002
+        embedding: list[float],
+        scope: str,
+        who: Caller,
+    ) -> list[SupersedeSuggestion]:
+        """Live records of ``type`` the new record ``ref_id`` could supersede (memkernel-0-17 FR-001): the store's
+        SUGGEST_FETCH nearest, filtered (not itself; live; not a part; visible to ``who``; allowed by the supersede
+        rule: a private record only its own scope; at or above the threshold), then the best SUGGEST_MAX."""
+        threshold = self._settings.supersede_suggest_threshold
+        found: list[SupersedeSuggestion] = []
+        for hit in self._vector_store.search_dense(embedding, SUGGEST_FETCH, {"type": type.value}):
+            if len(found) >= SUGGEST_MAX:
+                break
+            if hit.ref_id == ref_id or hit.score < threshold:
+                continue
+            memory = self._vector_store.get_by_id(hit.ref_id)
+            if memory is None or memory.retired() or memory.parent_ref or _is_document_part(memory):
+                continue
+            if not who.can_see(memory) or (scope != SCOPE_PROJECT and memory.scope != scope):
+                continue
+            preview = _artifact_ref(memory, hit.score, self._settings.preview_length).preview
+            found.append(SupersedeSuggestion(ref_id=memory.ref_id, similarity=round(hit.score, 4), preview=preview))
+        return found
 
     def _dedup_hit(
         self,
-        content_hash: str,
+        hashes: dict[str, str],
         type: MemoryType,  # noqa: A002
         source: str | None,
         owner: Callable[[Memory], bool] | None,
@@ -835,18 +915,22 @@ class MemoryService:
 
         With ``owner``, the hit must satisfy it, and two or more such records raise ``AmbiguousDedupError``.
         Without it, a record carrying a wiki identity tag is never a hit: the first match without one is.
+
+        memkernel-0-17 D6, in the owner's order: a store hit for either scheme's hash is a match only when confirmed
+        under its own scheme; every eligibility check (type, source, live, not a chunk, scope, the owner check) comes
+        first, and only then is a canonical match preferred to a raw one.
         """
-        conditions: list[dict[str, Any]] = [{"hash": content_hash}, {"type": type.value}]
+        conditions: list[dict[str, Any]] = [_hash_condition(hashes), {"type": type.value}]
         if source is not None:
             conditions.append({"source": source})
         matches = [
             m
             for m in self._vector_store.list_all({"$and": conditions}, include_content=False)
-            if not m.retired() and m.parent_ref is None and m.scope == scope  # chunk records are never dedup hits
+            if not m.retired() and m.parent_ref is None and m.scope == scope and _confirmed(m, hashes)
         ]
         if owner is None:
-            return next((m for m in matches if not has_wiki_identity(m.tags)), None)
-        hits = [m for m in matches if owner(m)]
+            return next(iter(_prefer_canonical([m for m in matches if not has_wiki_identity(m.tags)])), None)
+        hits = _prefer_canonical([m for m in matches if owner(m)])
         if len(hits) > 1:
             raise AmbiguousDedupError(sorted(m.ref_id for m in hits))
         return hits[0] if hits else None
@@ -869,7 +953,8 @@ class MemoryService:
             "type": type.value,
             "tier": tier_of(type).value,
             "source": source,
-            "hash": compute_content_hash(content),
+            "hash": compute_content_hash(content, CONTENT_HASH_SCHEME),
+            HASH_SCHEME_KEY: CONTENT_HASH_SCHEME,  # memkernel-0-17 D6: the scheme of this record's hashes
             "token_count": max(1, len(content) // 4),
             "checkpoint": checkpoint,
             "importance": max(0.0, min(1.0, importance)),
@@ -888,18 +973,18 @@ class MemoryService:
             metadata["document_id"] = extra.document_id
             metadata[DOCUMENT_PART_KEY] = False  # a summary record, not a body/chunk part
         if type == MemoryType.DECISION and source:
-            source_hash = self._source_file_hash(source)
+            source_hash = self._source_file_hash(source, CONTENT_HASH_SCHEME)
             if source_hash is not None:
                 metadata[SOURCE_HASH_KEY] = source_hash  # new records only: a dedup hit keeps its own (FR-001)
         return metadata
 
-    def _source_file_hash(self, source: str) -> str | None:
-        """The content hash of ``source`` if it is a readable file under the project root, else None."""
+    def _source_file_hash(self, source: str, scheme: str) -> str | None:
+        """``source``'s content hash under ``scheme`` if it is a readable file under the project root, else None."""
         path = self._resolve_source(source)
         if path is None or not path.is_file():
             return None
         try:
-            return compute_content_hash(path.read_text(encoding="utf-8"))
+            return compute_content_hash(path.read_text(encoding="utf-8"), scheme)
         except (OSError, UnicodeDecodeError):
             return None
 
@@ -1690,7 +1775,8 @@ class MemoryService:
                 except (OSError, UnicodeDecodeError):
                     report["unknown"] += 1
                     continue
-                reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.content_hash else ""
+                changed = compute_content_hash(text, memory.hash_scheme) != memory.content_hash  # its own scheme
+                reason = REVIEW_REASON_CHANGED if changed else ""
             self._record_review(report, memory, reason)
         for memory in self._vector_store.list_all({"type": MemoryType.DECISION.value}, include_content=False):
             if memory.retired() or not memory.source:
@@ -1711,7 +1797,8 @@ class MemoryService:
                 except (OSError, UnicodeDecodeError):
                     report["unknown"] += 1
                     continue
-                reason = REVIEW_REASON_CHANGED if compute_content_hash(text) != memory.source_hash else ""
+                changed = compute_content_hash(text, memory.hash_scheme) != memory.source_hash  # its own scheme
+                reason = REVIEW_REASON_CHANGED if changed else ""
             elif memory.needs_review and memory.review_reason != REVIEW_REASON_MISSING:
                 report["unknown"] += 1  # no hash: a present file disproves only a missing flag, not this one
                 continue

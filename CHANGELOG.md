@@ -17,7 +17,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **README "Using memkernel from a harness"** (#119, FR-007): naming the caller, scope, receipts, the context diff
+- **Supersede suggestions at retain** (#153; specs/memkernel-0-17-supersede-and-canonical-hash). For a new
+  `decision`, `convention`, `fact` or `procedure`, `retain`'s response lists up to 3 live memories of the same type it
+  may replace (`supersede_suggestions`: `ref_id`, `similarity`, a preview made as `recall`'s is), only ones the caller
+  can see and the new memory may supersede (H2's rule); none on a repeat or when `supersedes` is passed. memkernel
+  never supersedes on its own. `MEMKERNEL_SUPERSEDE_SUGGEST_THRESHOLD`, default `0.61`, calibrated for the default
+  model on 60 labelled pairs (`eval/supersede-threshold/calibrate.py`: all 30 newer versions caught, none of 30
+  different memories suggested). Python: `retain(..., suggestions=[])`.
+
+- **README "Using memkernel from a harness" (#119, FR-007): naming the caller, scope, receipts, the context diff
   and the count per run and agent, with their limits. Every instruction template (Claude, Codex, Cursor, Antigravity,
   Kiro) now says which ids carry a session's latest checkpoint.
 
@@ -90,6 +98,16 @@ All notable changes to this project are documented here. The format follows
   searching a document's chunks.
 
 ### Changed
+
+- **Canonical content hashing** (#153). New memories hash a canonical form of their text (`sha256-canonical-v1`: a
+  leading byte-order mark removed, Unicode NFC, line endings to `\n`, trailing spaces and tabs removed, blank lines
+  removed at both ends; case, inner spaces and indentation kept), so a text differing only in those is stored once.
+  The text itself is stored as given. Each memory states its scheme (`hash_scheme`); memories written before are
+  `sha256-raw` and are not migrated: they still deduplicate byte-identical text, revalidation and the context diff
+  compare each memory in its own scheme, receipts name it, and exported wiki pages carry `memkernel_hash_scheme`. A
+  whitespace-only edit to a file no longer flags a code memory or decision written under the new scheme.
+  **Upgrade every process that shares a store together:** an older memkernel ignores the scheme, stores duplicates
+  of newer texts and flags newer code memories and decisions as `changed`.
 
 - **The repeated-mistake count** (#136, reported by DIADE on #112) reads subagent transcripts and reports their
   repeats apart; counts a repeat only for a `Bash` run that failed with its own exit code, and names the command;

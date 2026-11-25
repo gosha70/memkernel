@@ -1,0 +1,365 @@
+{
+  "description": "Labelled pairs for the supersede-suggestion threshold (specs/memkernel-0-17-supersede-and-canonical-hash D3). Hand-written for the purpose; no stored memory or transcript text. 'version': a memory and its newer version on the same subject; 'different': two memories on a related subject that say different things.",
+  "pairs": [
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Use PostgreSQL 15 for the user database.",
+      "b": "Use PostgreSQL 16 for the user database."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Deploy the API service to AWS us-east-1.",
+      "b": "Deploy the API service to AWS eu-west-1."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Cache session tokens in Redis with a 30-minute expiry.",
+      "b": "Cache session tokens in Redis with a 2-hour expiry."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Use Celery for background jobs.",
+      "b": "Use arq for background jobs instead of Celery."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "The mobile app targets iOS 16 and later.",
+      "b": "The mobile app targets iOS 17 and later."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Log in JSON to stdout and ship logs with Fluent Bit.",
+      "b": "Log in JSON to stdout and ship logs with Vector."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Store uploaded images in S3 with a 90-day lifecycle rule.",
+      "b": "Store uploaded images in S3 with a 30-day lifecycle rule."
+    },
+    {
+      "kind": "version",
+      "type": "decision",
+      "a": "Use REST for the public API; GraphQL is not offered.",
+      "b": "Offer GraphQL alongside REST for the public API."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Python code uses a maximum line length of 100 characters.",
+      "b": "Python code uses a maximum line length of 120 characters."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Branch names start with feature/, fix/ or chore/.",
+      "b": "Branch names start with feat/, fix/, chore/ or docs/."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Commit messages use the imperative mood and stay under 72 characters.",
+      "b": "Commit messages use the imperative mood and stay under 50 characters."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Test files live next to the module they test, named test_<module>.py.",
+      "b": "Test files live under tests/, mirroring the package layout, named test_<module>.py."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Use snake_case for database column names.",
+      "b": "Use camelCase for database column names."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Dates in API responses are ISO 8601 strings in UTC.",
+      "b": "Dates in API responses are Unix timestamps in seconds."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Every public function has a Google-style docstring.",
+      "b": "Every public function has a NumPy-style docstring."
+    },
+    {
+      "kind": "version",
+      "type": "convention",
+      "a": "Feature flags are named with the team prefix, like payments.new_checkout.",
+      "b": "Feature flags are named with the ticket number, like PAY-1234_new_checkout."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The staging database runs on db-staging-02.",
+      "b": "The staging database runs on db-staging-03."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The build takes about 12 minutes on CI.",
+      "b": "The build takes about 7 minutes on CI."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The payments service listens on port 8443.",
+      "b": "The payments service listens on port 9443."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The nightly backup job starts at 02:00 UTC.",
+      "b": "The nightly backup job starts at 03:30 UTC."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The search index holds about 4 million documents.",
+      "b": "The search index holds about 6.5 million documents."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The on-call rotation is weekly, handing over on Mondays.",
+      "b": "The on-call rotation is weekly, handing over on Thursdays."
+    },
+    {
+      "kind": "version",
+      "type": "fact",
+      "a": "The API rate limit is 100 requests per minute per key.",
+      "b": "The API rate limit is 300 requests per minute per key."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To release: tag the commit, push the tag, and the release workflow publishes to PyPI.",
+      "b": "To release: bump the version, tag the commit, push the tag, and approve the release workflow before it publishes to PyPI."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To rotate the database password, update it in Vault, then restart the API pods.",
+      "b": "To rotate the database password, update it in AWS Secrets Manager, then restart the API pods."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To reproduce the flaky test, run pytest -k checkout -p no:randomly 20 times.",
+      "b": "To reproduce the flaky test, run pytest -k checkout --count=50 with pytest-repeat."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To add a migration, run alembic revision --autogenerate and review the script.",
+      "b": "To add a migration, run make migration NAME=<name>, which wraps alembic revision --autogenerate, then review the script."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To onboard a developer, create their GitHub account and add them to the backend team.",
+      "b": "To onboard a developer, create their GitHub account, add them to the backend team, and grant read access to the staging cluster."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To clear the CDN cache, run the purge-cdn script with the distribution id.",
+      "b": "To clear the CDN cache, open the CloudFront console and create an invalidation for /*."
+    },
+    {
+      "kind": "version",
+      "type": "procedure",
+      "a": "To restart the worker, run systemctl restart worker on the queue host.",
+      "b": "To restart the worker, run kubectl rollout restart deployment/worker."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Use PostgreSQL 16 for the user database.",
+      "b": "Use Redis for the session store."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Deploy the API service to AWS eu-west-1.",
+      "b": "Run the batch jobs on spot instances to cut cost."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Cache session tokens in Redis with a 2-hour expiry.",
+      "b": "Encrypt session tokens at rest with KMS."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Use arq for background jobs.",
+      "b": "Retry failed background jobs three times with exponential backoff."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "The mobile app targets iOS 17 and later.",
+      "b": "The Android app targets API level 31 and later."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Log in JSON to stdout.",
+      "b": "Keep application logs for 14 days in the log store."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Store uploaded images in S3.",
+      "b": "Serve images through CloudFront with signed URLs."
+    },
+    {
+      "kind": "different",
+      "type": "decision",
+      "a": "Offer GraphQL alongside REST for the public API.",
+      "b": "Version the public REST API in the URL path, like /v2/."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Python code uses a maximum line length of 120 characters.",
+      "b": "Python imports are sorted by ruff's isort rules."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Branch names start with feat/, fix/, chore/ or docs/.",
+      "b": "Pull requests need one approving review before merge."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Commit messages use the imperative mood.",
+      "b": "Squash-merge pull requests into main."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Test files live under tests/, mirroring the package layout.",
+      "b": "Unit tests must not touch the network."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Use snake_case for database column names.",
+      "b": "Every table has created_at and updated_at columns."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Dates in API responses are ISO 8601 strings in UTC.",
+      "b": "API errors return a JSON body with code and message fields."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Every public function has a Google-style docstring.",
+      "b": "Type hints are required on every function signature."
+    },
+    {
+      "kind": "different",
+      "type": "convention",
+      "a": "Feature flags are named with the team prefix.",
+      "b": "Feature flags are removed within two sprints of full rollout."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The staging database runs on db-staging-03.",
+      "b": "The production database has two read replicas."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The build takes about 7 minutes on CI.",
+      "b": "CI runs on GitHub Actions with Ubuntu runners."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The payments service listens on port 9443.",
+      "b": "The payments service is owned by the checkout team."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The nightly backup job starts at 03:30 UTC.",
+      "b": "Backups are kept for 35 days."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The search index holds about 6.5 million documents.",
+      "b": "The search cluster runs OpenSearch 2.11."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The on-call rotation is weekly.",
+      "b": "Pages go to PagerDuty, then to the incidents channel."
+    },
+    {
+      "kind": "different",
+      "type": "fact",
+      "a": "The API rate limit is 300 requests per minute per key.",
+      "b": "API keys expire after 90 days."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To release: bump the version, tag the commit, push the tag.",
+      "b": "To roll back a release, redeploy the previous image tag."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To rotate the database password, update it in Secrets Manager, then restart the API pods.",
+      "b": "To restore the database, pick a snapshot in RDS and restore it to a new instance."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To reproduce the flaky test, run pytest -k checkout --count=50.",
+      "b": "To run the full test suite locally, start the docker-compose services, then run make test."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To add a migration, run make migration NAME=<name>.",
+      "b": "To seed a local database, run make seed."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To onboard a developer, create their GitHub account and add them to the backend team.",
+      "b": "To offboard a developer, remove them from the GitHub organisation and revoke their VPN certificate."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To clear the CDN cache, create a CloudFront invalidation.",
+      "b": "To add a new domain, request a certificate in ACM and add an alias to the distribution."
+    },
+    {
+      "kind": "different",
+      "type": "procedure",
+      "a": "To restart the worker, run kubectl rollout restart deployment/worker.",
+      "b": "To scale the worker, change the replica count in the Helm values and redeploy."
+    }
+  ]
+}

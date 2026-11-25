@@ -8,13 +8,15 @@ each memory the run received the statuses that apply against the store now (amen
 - ``missing``: no record, or expired. It stands alone.
 - ``superseded`` (with what replaced it) or ``withdrawn`` (with the reason): read from the store.
 - ``changed``: another ``content_hash`` under the same hashing scheme, for a record that still exists (a deleted
-  chunk is judged through its file record). ``rehashed``: the receipt's hash was made with another scheme than this
-  memkernel's, so it is not compared (C2); for code, the source check then only notices a file that is gone.
+  chunk is judged through its file record). ``rehashed``: the receipt's hash was made with another scheme than its
+  record's (each memory is compared in its own scheme, memkernel-0-17 FR-003), so it is not compared (C2); for code,
+  the source check then only notices a file that is gone.
 - ``flagged``: needs review now, and ``live`` in its receipt (the run did not see a flag).
 - ``source changed`` (decisions and code only, as revalidation: another record's ``source`` is a label, such as
   ``capture``; and not for records the wiki import manages, #160): the memory's ``source`` file under the project
   root no longer hashes to the receipt's ``source_hash`` (a decision) or ``content_hash`` (code), through
-  memkernel's own ``compute_content_hash``; a file that is gone counts too. It says nothing about whether the memory is wrong, or about other files its text cites.
+  memkernel's own ``compute_content_hash``; a file that is gone counts too.
+  It says nothing about whether the memory is wrong, or about other files its text cites.
 - ``unknown``: no receipt in the run has the memory's hash (every record that returned it was cut down). It combines
   only with ``superseded`` and ``withdrawn``.
 - ``unchanged``: nothing else applies.
@@ -51,8 +53,12 @@ from chromadb.errors import ChromaError  # noqa: E402
 
 from memkernel import recall_log  # noqa: E402
 from memkernel.config import MemKernelSettings  # noqa: E402
-from memkernel.core.models import MemoryType, has_wiki_identity  # noqa: E402
-from memkernel.memory.dedup import CONTENT_HASH_SCHEME, compute_content_hash  # noqa: E402
+from memkernel.core.models import (  # noqa: E402
+    HASH_SCHEME_RAW,  # noqa: E402
+    MemoryType,
+    has_wiki_identity,
+)
+from memkernel.memory.dedup import compute_content_hash  # noqa: E402
 from memkernel.memory.lifecycle import memory_is_expired  # noqa: E402
 from memkernel.storage.chroma import ChromaVectorStore  # noqa: E402
 
@@ -208,8 +214,9 @@ def _resolve(root: Path, source: str) -> Path | None:
     return resolved if resolved.is_relative_to(root) else None
 
 
-def _source_check(root: Path | None, source: str, expected: str, judged: Judged) -> None:
-    """Add ``source changed`` when the file is gone or hashes differently from ``expected`` (no hash: gone only);
+def _source_check(root: Path | None, source: str, expected: str, scheme: str, judged: Judged) -> None:
+    """Add ``source changed`` when the file is gone or, hashed under ``scheme`` (the record's own, memkernel-0-17
+    FR-003), differs from ``expected`` (no hash: gone only);
     without a root, only a note."""
     if root is None:
         judged.notes.append(NOTE_NO_ROOT)
@@ -228,7 +235,7 @@ def _source_check(root: Path | None, source: str, expected: str, judged: Judged)
     except (OSError, UnicodeDecodeError):
         judged.notes.append(NOTE_UNREADABLE)
         return
-    if compute_content_hash(text) != expected:
+    if compute_content_hash(text, scheme) != expected:
         judged.statuses.append(SOURCE_CHANGED)
 
 
@@ -258,7 +265,10 @@ def judge(
     if entry is None:
         judged.statuses.append(UNKNOWN)
         return judged
-    same_scheme = entry.get("content_hash_scheme", CONTENT_HASH_SCHEME) == CONTENT_HASH_SCHEME
+    # Each memory in its own scheme (memkernel-0-17 FR-003): the receipt's against the record's, the chunk's own when
+    # its record still exists; a receipt or record without one is sha256-raw.
+    record_scheme = memory.hash_scheme if memory is not None else subject.hash_scheme
+    same_scheme = entry.get("content_hash_scheme", HASH_SCHEME_RAW) == record_scheme
     if not same_scheme:
         judged.statuses.append(REHASHED)
     elif memory is not None and memory.content_hash != entry["content_hash"]:
@@ -270,12 +280,12 @@ def judge(
         judged.notes.append(NOTE_WIKI)  # its source is a page path inside the wiki; the import keeps it current (#160)
     elif source and subject.type in SOURCE_CHECKED_TYPES:
         if owner_id:
-            expected = subject.content_hash  # made now, with the current scheme: C2 does not apply
+            expected = subject.content_hash  # the owner's hash, made with the owner's scheme (memkernel-0-17)
         elif subject.type == MemoryType.CODE:
             expected = str(entry["content_hash"]) if same_scheme else ""
         else:
             expected = str(entry.get("source_hash") or "")
-        _source_check(root, source, expected, judged)
+        _source_check(root, source, expected, subject.hash_scheme, judged)
     if not judged.statuses:
         judged.statuses = [UNCHANGED]
     return judged

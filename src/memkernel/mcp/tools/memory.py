@@ -11,7 +11,15 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 — runtime import required by MCPServer introspection
 
 from memkernel import recall_log
-from memkernel.core.models import DEFAULT_ASK_MODE, Caller, MemoryTier, MemoryType, RecallReceipt, check_id
+from memkernel.core.models import (
+    DEFAULT_ASK_MODE,
+    Caller,
+    MemoryTier,
+    MemoryType,
+    RecallReceipt,
+    SupersedeSuggestion,
+    check_id,
+)
 from memkernel.mcp.tools.errors import reported_errors
 
 
@@ -71,9 +79,13 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
         scope: project (default, every caller sees it) | agent | task (only this agent_id / task_id sees it).
         A checkpoint without scope goes to this caller's task, else agent, else project. A private memory
         supersedes only memories in its own scope; a supersedes target you cannot see is ignored.
+        Returns {"ref_id", "supersede_suggestions"}: for a new decision, convention, fact or procedure, up to 3
+        live memories it may replace (ref_id, similarity, preview); pass supersedes=<ref_id> on a later retain if
+        one is now outdated. Nothing is superseded automatically.
         """
         svc = _service(ctx)
         ids = _correlation(svc, run_id, agent_id, task_id)
+        suggestions: list[SupersedeSuggestion] = []
         ref_id = svc.retain(
             content=content,
             type=MemoryType(type),
@@ -86,8 +98,9 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             run_id=ids.run_id,
             scope=scope,
             caller=Caller(ids.agent_id, ids.task_id),
+            suggestions=suggestions,
         )
-        return json.dumps({"ref_id": ref_id})
+        return json.dumps({"ref_id": ref_id, "supersede_suggestions": [s.model_dump(mode="json") for s in suggestions]})
 
     @server.tool()
     @reported_errors
