@@ -61,7 +61,8 @@ Two parts, one PR (one slice of #59):
 - `tests/unit/test_imported_page_collapse.py`: FR-001's conditions one by one (SC-2), the reserved tag (SC-4),
   re-import, frontmatter-only revisions and a removed `memkernel_ref` (SC-5), candidates (SC-6), the selection's cases
   (SC-3: never both, chains, two pages one source, a source ranked above its page, a kept page removed by a later
-  promoted copy with the page's source, reached only through `wiki-source:`, staying hidden),
+  promoted copy with the page's source, reached only through `wiki-source:`, staying hidden, and the same through
+  `promoted_from` only),
   the `collapsed` count, `promote` dropping the tag.
 - The governed loop: in `tests/integration/test_wiki_import_governed.py`, export → approve unchanged → import; the
   approved page's memory is linked and the startup block and `recall` show it, not the source (SC-1).
