@@ -80,6 +80,10 @@ class MemKernelSettings(BaseSettings):
     )
     health_duplicate_limit: int = 500  # most recent long-term memories checked for near-duplicates
     health_report_limit: int = 20  # items listed per health category
+    # Supersede suggestions at retain (memkernel-0-17 D3): cosine similarity from which a live record is suggested.
+    # The default is calibrated for the default embedding model by eval/supersede-threshold/calibrate.py; another
+    # model needs its own calibration.
+    supersede_suggest_threshold: float = Field(default=0.61, ge=0.0, le=1.0)
 
     # Lifecycle / decay (see docs/architecture/memory-tiers.md)
     episode_ttl_days: int = 30  # base TTL for short-term `episode` memories

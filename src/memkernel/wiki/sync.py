@@ -143,6 +143,7 @@ UNGOVERNED_INDEX_REFUSAL = (
 GIT_TIMEOUT_SECONDS = 2.0  # per call; after one timeout the export stops asking git
 SOURCE_SHA_KEY = "sha"
 MEMKERNEL_SHA256_KEY = "memkernel_sha256"
+MEMKERNEL_HASH_SCHEME_KEY = "memkernel_hash_scheme"
 
 
 def _today() -> str:
@@ -402,6 +403,7 @@ class WikiExporter:
                 "memkernel_ref": memory.ref_id,
                 "memory_type": memory.type.value,
                 MEMKERNEL_SHA256_KEY: memory.content_hash,
+                MEMKERNEL_HASH_SCHEME_KEY: memory.hash_scheme,  # memkernel-0-17 FR-003: which scheme made the hash
             },
         )
 

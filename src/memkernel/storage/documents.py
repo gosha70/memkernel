@@ -27,6 +27,7 @@ from memkernel.core.models import (
     DOCUMENT_BODY_TAG,
     DOCUMENT_CHUNK_TAG,
     DOCUMENT_PART_KEY,
+    HASH_SCHEME_RAW,
     MemoryType,
     SearchResult,
     tier_of,
@@ -70,7 +71,9 @@ class LocalDocumentStore:
 
     def put(self, content: str, name: str) -> str:
         """Store the body under a content-addressed id; a second put of the same body is a no-op."""
-        doc_id = _DOC_ID_PREFIX + compute_content_hash(content)
+        doc_id = _DOC_ID_PREFIX + compute_content_hash(
+            content, HASH_SCHEME_RAW
+        )  # an identity: stays raw (memkernel-0-17 D7)
         if self._vector_store.get_by_id(doc_id) is not None:
             return doc_id
         # The body is embedded only so the record is a valid collection entry;
@@ -171,7 +174,7 @@ class LocalDocumentStore:
             "type": memory_type.value,
             "tier": tier_of(memory_type).value,
             "source": name,
-            "hash": compute_content_hash(content),
+            "hash": compute_content_hash(content, HASH_SCHEME_RAW),  # parts keep raw hashes (memkernel-0-17 D7)
             "token_count": max(1, len(content) // 4),
             "checkpoint": False,
             "importance": DEFAULT_IMPORTANCE[memory_type],

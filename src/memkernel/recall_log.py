@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, Any
 
 from memkernel import session_spool
 from memkernel.core.models import SCOPE_PROJECT
-from memkernel.memory.dedup import CONTENT_HASH_SCHEME
 from memkernel.session_spool import locked
 
 if TYPE_CHECKING:
@@ -146,7 +145,7 @@ def receipt_entry(memory: Memory) -> dict[str, str]:
     entry = {
         "ref_id": memory.ref_id,
         "content_hash": memory.content_hash,
-        "content_hash_scheme": CONTENT_HASH_SCHEME,
+        "content_hash_scheme": memory.hash_scheme,  # the record's own scheme (memkernel-0-17 FR-003)
         "state": STATE_FLAGGED if memory.needs_review else STATE_LIVE,
     }
     if memory.source:

@@ -176,14 +176,16 @@ def test_a_receipt_entry_keeps_hashes_and_state_never_content() -> None:
     assert flagged == {
         "ref_id": _memory(1).ref_id,
         "content_hash": "h" * 64,
-        "content_hash_scheme": CONTENT_HASH_SCHEME,
+        "content_hash_scheme": "sha256-raw",  # the record's own scheme: one written without it (memkernel-0-17)
         "source": "src/app.py",
         "source_hash": "abc",
         "state": "flagged",
     }
     plain = recall_log.receipt_entry(_memory(2, source=""))
     assert plain["state"] == "live" and "source" not in plain and "source_hash" not in plain
-    assert CONTENT_HASH_SCHEME == "sha256-raw" and compute_content_hash("a") == compute_content_hash("a")
+    canonical = recall_log.receipt_entry(_memory(3, hash_scheme="sha256-canonical-v1"))
+    assert canonical["content_hash_scheme"] == "sha256-canonical-v1"  # each entry names its record's scheme
+    assert CONTENT_HASH_SCHEME == "sha256-canonical-v1" and compute_content_hash("a") == compute_content_hash("a")
 
 
 # --- the record (FR-002, FR-003, A5) ----------------------------------------------------------------------------
