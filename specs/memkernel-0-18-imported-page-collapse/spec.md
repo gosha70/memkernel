@@ -57,13 +57,15 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   - **Hook blocks:** `_distinct` uses the selection for both promoted and imported links, which also fixes the
     6th–10th case in the table above.
   - **MCP `recall`:** per D2, the selection over `recall`'s filtered fetch window, with `top_k` as the limit; the
-    window widens until the selection, not the filter, has `top_k` results (or the store is exhausted). A page memory
+    window widens until the selection, not the filter, has `top_k` results (or the store is exhausted). Each wider
+    window is filtered and selected from scratch, as the filter is today, and the receipt reports the last window
+    only (H1's A4). A page memory
     outside the window hides nothing. `collapsed` counts each hidden candidate of the window once, however many shown
     memories descend from it; an ancestor that was never in the window is not counted, as `excluded` counts only
     records the window considered.
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
 - **FR-005 The report (D5).** `ImportReport` gains `linked` (`{"page", "ref_id"}`) and `unlinked`
-  (`{"page", "ref_id", "reason"}`), with the first check of FR-001 that fails: condition 2 `has_corrects`; 3
+  (`{"page", "ref_id", "reason"}`), with the first check of FR-001 that fails, in the order listed here: condition 2 `has_corrects`; 3
   `not_in_store` or `wiki_memory`; 4 `retired`; 5 `not_project_scope`; 6 `no_hash`, `unknown_scheme` or
   `hash_mismatch`. The MCP `wiki_import`
   result carries both lists. Two pages may link the same source; each is reported.
