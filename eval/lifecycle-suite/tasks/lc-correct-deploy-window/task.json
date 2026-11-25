@@ -1,0 +1,37 @@
+{
+  "task_id": "lc-correct-deploy-window",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "Monday",
+    "15:00"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the release team for this project: deploys may go out on Fridays after 17:00 UTC. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A change was approved and is ready on Thursday at 16:00 UTC. When is the earliest it may be deployed to production? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "replacement",
+    "headline": "No Friday deploys; the weekly deploy window closes on Thursday at 15:00 UTC",
+    "rule": "After the October incident, deploys are no longer allowed on Fridays. The weekly window closes on Thursday at 15:00 UTC; a change that misses it waits for the window that opens on Monday at 09:00 UTC.",
+    "obsolete_patterns": [
+      "\\bfridays?\\b"
+    ]
+  }
+}

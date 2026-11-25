@@ -46,6 +46,9 @@ NESTED_MODEL_DIAGNOSTIC = "wiki_studio_nested_model_calls"
 SECOND_TREATMENT = "wiki_studio"  # its own comparison, never in memkernel's label (FR-016)
 GROUPS = ("lc-retain", "lc-reval", "lc-wiki", "lc-compact")
 COMPACT_GROUP = "lc-compact"
+CORRECT_GROUP = "lc-correct"  # memkernel-0-16-lifecycle-corrections: its own section, against the negative control
+NEGATIVE_CONTROL = "bare"
+ANSWER_CLASSES = ("informed", "obsolete", "other")
 # api_errors keys of an authentication refusal (FR-015a (c)); any other key is a non-authentication API error
 AUTHENTICATION_KEYS = frozenset({*(str(status) for status in AUTHENTICATION_STATUSES), AUTHENTICATION_ERROR})
 CONFIDENCE = 0.95  # the bootstrap interval's level (FR-016)
@@ -81,6 +84,8 @@ class Trial:
     tokens: dict[str, int]
     diagnostics: dict[str, tuple[int, int]]  # summed over the trial's sessions: (numerator, denominator)
     truncated: bool = False  # excluded by truncation (FR-015a): neither invalid nor scored
+    answer_class: str | None = None  # lc-correct: informed, obsolete or other (memkernel-0-16 FR-001)
+    gate_breaches: int | None = None  # governed arms: pages landed without the gate's records (FR-004)
 
     @property
     def scored(self) -> bool:
@@ -152,6 +157,8 @@ def assemble(receipts: list[dict[str, Any]], truncated: list[dict[str, Any]] | N
                 tokens,
                 diagnostics,
                 (run_id, chain_id) in cut,
+                last.get("answer_class"),
+                len(last["gate"].get("breaches", [])) if isinstance(last.get("gate"), dict) else None,
             )
         )
     return trials
@@ -210,6 +217,66 @@ def _pairs(trials: list[Trial], group: str, comparator: str, treatment: str = TR
         counts["pairs"] += 1
         counts["both" if a and b else "treatment_only" if a else "comparator_only" if b else "neither"] += 1
     return counts
+
+
+def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
+    """lc-correct per arm: informed (passes), obsolete (X, the obsolete-answer rate), other; gate breaches where the
+    arm has a gate (memkernel-0-16 FR-001, FR-004; #90 section 2.3)."""
+    lines = [
+        "| Arm | Trials | Valid | Informed | Obsolete (rate) | Other | Invalid | Gate breaches |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for arm in arms:
+        rows = [t for t in trials if t.group == CORRECT_GROUP and t.arm == arm]
+        if not rows:
+            continue
+        valid = [t for t in rows if t.scored]
+        count = {c: sum(1 for t in valid if t.answer_class == c) for c in ANSWER_CLASSES}
+        other = len(valid) - count["informed"] - count["obsolete"]  # timeouts and no answer count as other
+        breaches = [t.gate_breaches for t in valid if t.gate_breaches is not None]
+        lines.append(
+            f"| {arm} | {len(rows)} | {len(valid)} | {count['informed']} | {_pct(count['obsolete'], len(valid))} "
+            f"| {other} | {len(rows) - len(valid)} | {sum(breaches) if breaches else '-'} |"
+        )
+    return lines
+
+
+def _correct_pairs(trials: list[Trial], arms: list[str]) -> list[str]:
+    """Each arm paired with the negative control on the same chain and run (passed = informed)."""
+    lines = [
+        f"| Arm vs {NEGATIVE_CONTROL} | Valid pairs | Both pass | Arm only | {NEGATIVE_CONTROL} only | Neither "
+        "| Pairs removed |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for arm in arms:
+        if arm == NEGATIVE_CONTROL or not any(t.group == CORRECT_GROUP and t.arm == arm for t in trials):
+            continue
+        c = _pairs(trials, CORRECT_GROUP, NEGATIVE_CONTROL, treatment=arm)
+        lines.append(
+            f"| {arm} | {c['pairs']} | {c['both']} | {c['treatment_only']} | {c['comparator_only']} | {c['neither']} "
+            f"| {c['pairs_removed']} |"
+        )
+    return lines
+
+
+def _tokens_by_group(trials: list[Trial]) -> list[str]:
+    """Token sums per group and arm (memkernel-0-16 FR-005): costs compare within a group, never across groups."""
+    lines = [
+        "### Tokens by group",
+        "",
+        "Compare within a group only: the groups' tasks differ in length and number of sessions.",
+        "",
+        "| Group | Arm | Trials | Input | Cache write | Cache read | Output |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for group, arm in sorted({(t.group, t.arm) for t in trials}):
+        rows = [t for t in trials if t.group == group and t.arm == arm]
+        sums = {k: sum(t.tokens.get(k, 0) for t in rows) for k in TOKEN_CLASSES}
+        lines.append(
+            f"| {group} | {arm} | {len(rows)} | {sums['input']} | {sums['cache_write']} | {sums['cache_read']} "
+            f"| {sums['output']} |"
+        )
+    return lines
 
 
 def _group_mean_effect(trials: list[Trial], group: str, comparator: str, treatment: str = TREATMENT) -> str:
@@ -511,6 +578,8 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
             out += ["", *_second_treatment_table(trials, group, list(primary), params)]
         out += ["", *_diagnostics_table(trials, group, arms)]
         out.append("")
+    if any(t.group == CORRECT_GROUP for t in trials):
+        out += [f"## {CORRECT_GROUP}", "", *_correct_table(trials, arms), "", *_correct_pairs(trials, arms), ""]
     if measured:
         measured_totals = {k: sum(r["tokens"][k] for r in measured) for k in TOKEN_CLASSES}
         out += [
@@ -521,6 +590,9 @@ def render(receipts: list[dict[str, Any]], params: dict[str, Any]) -> str:
             *_compaction_lines(measured),
             "",
             *_budget_by_arm(measured),
+            "",
+            *_tokens_by_group(trials),
+            "",
         ]
         out += _api_error_lines(measured, tail, trials)
     min_tasks = int(params["min_tasks_inferential"])

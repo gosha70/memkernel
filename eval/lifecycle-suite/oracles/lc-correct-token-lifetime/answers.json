@@ -1,0 +1,8 @@
+{
+  "informed": [
+    "\\b15[\\s-]*min"
+  ],
+  "obsolete": [
+    "\\b24[\\s-]*h(ou)?rs?\\b"
+  ]
+}

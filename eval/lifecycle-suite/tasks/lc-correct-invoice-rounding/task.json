@@ -1,0 +1,37 @@
+{
+  "task_id": "lc-correct-invoice-rounding",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "half to even",
+    "banker"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the finance team for this project: invoice amounts are rounded half up to the cent. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "An invoice line comes to 2.345. What amount is billed for it? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "withdrawal",
+    "headline": "Invoice amounts use banker's rounding, half to even, to the cent, with a reconciliation note",
+    "rule": "Finance switched invoices to banker's rounding: amounts are rounded half to even to the nearest cent, and each rounded line carries a reconciliation note.",
+    "obsolete_patterns": [
+      "2\\.35\\b"
+    ]
+  }
+}

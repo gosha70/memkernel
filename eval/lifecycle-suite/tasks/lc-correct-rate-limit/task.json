@@ -1,0 +1,38 @@
+{
+  "task_id": "lc-correct-rate-limit",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "120"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the API team for this project: each tenant may send 600 requests per minute. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A tenant with a single API key sends 300 requests within one minute. How many are accepted before it is throttled? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "replacement",
+    "headline": "The limit is 120 requests per minute per API key, with a burst of 20",
+    "rule": "The per-tenant limit is replaced by a per-key limit: each API key may send 120 requests per minute, with a burst allowance of 20.",
+    "obsolete_patterns": [
+      "\\b600\\b",
+      "\\ball 300\\b",
+      "\\ball of them\\b"
+    ]
+  }
+}

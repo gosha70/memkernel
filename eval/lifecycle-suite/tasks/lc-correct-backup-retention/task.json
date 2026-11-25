@@ -1,0 +1,36 @@
+{
+  "task_id": "lc-correct-backup-retention",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "90 days"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the data platform team for this project: customer database backups are kept for 30 days. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A customer record was deleted by mistake. How far back can it be restored from backups? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "replacement",
+    "headline": "Customer database backups are kept for 90 days; application logs are kept for 30 days",
+    "rule": "To meet the new compliance requirement, customer database backups are retained for 90 days. Application logs keep their 30-day retention.",
+    "obsolete_patterns": [
+      "\\b30[\\s-]*days?\\b"
+    ]
+  }
+}

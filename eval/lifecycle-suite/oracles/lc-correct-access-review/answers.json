@@ -1,0 +1,13 @@
+{
+  "informed": [
+    "\\bmonthly\\b",
+    "\\bnext month\\b",
+    "\\bevery month\\b",
+    "\\bin (about )?(two|2) weeks\\b"
+  ],
+  "obsolete": [
+    "\\bquarter",
+    "\\bthree months\\b",
+    "\\b3 months\\b"
+  ]
+}

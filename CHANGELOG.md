@@ -17,6 +17,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The lifecycle suite's `lc-correct` group and a governed-composition arm** (#90; specs/memkernel-0-16-lifecycle-corrections).
+  Twelve chains in which a project rule changes between sessions (six replacements, six withdrawals). Each fixture
+  wiki carries a competing page with the obsolete rule, and a three-outcome checker grades the answer: the corrected
+  rule passes; the obsolete rule or anything else fails. The correction reaches each arm only through its own
+  workflow (memkernel's supersede or withdraw, a curator's note for `fs_grep`, `CLAUDE.md` for `claude_md`, nothing
+  for `bare`), and the exposure copy never carries it. New arms: `memkernel_governed` (a scripted curator under a
+  hashed policy, through wiki-studio's gate, then memkernel's governed import), `memkernel_governed_oracle` (the
+  upper bound) and `informed` (the calibration's reference). The governed arms' end state is checked against the
+  gate's receipts and approvals. Also: `qualify.py` for the calibration, a per-group token table in the report, and
+  preregistration and budget drafts. Exercised with the stub agent only: no calibration or measured run has been made.
+
 - **Supersede suggestions at retain** (#153; specs/memkernel-0-17-supersede-and-canonical-hash). For a new
   `decision`, `convention`, `fact` or `procedure`, `retain`'s response lists up to 3 live memories of the same type it
   may replace (`supersede_suggestions`: `ref_id`, `similarity`, a preview made as `recall`'s is), only ones the caller

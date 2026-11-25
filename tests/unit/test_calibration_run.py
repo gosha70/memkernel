@@ -225,7 +225,10 @@ def _measure_setup(tmp_path: Path, *, preregistered_limit: float = 150, runs: in
         "sys.exit(0)\n",
         encoding="utf-8",
     )
-    tasks = sorted(p.name for p in (SUITE_DIR / "tasks").iterdir() if p.is_dir())
+    # the 0.5 preregistration's task set: its four groups (lc-correct is memkernel-0-16's, preregistered on its own)
+    tasks = sorted(
+        p.name for p in (SUITE_DIR / "tasks").iterdir() if p.is_dir() and not p.name.startswith("lc-correct-")
+    )
     parameters = {
         "model": "claude-sonnet-5-5",
         "tasks": tasks,

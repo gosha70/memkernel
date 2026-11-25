@@ -32,8 +32,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import corrections
 from diagnostics import WIKI_DIR, read_paths, session_diagnostics
 from records import (
     CONNECTED_STATUSES,
@@ -49,6 +50,9 @@ from records import (
     validate_receipt,
 )
 
+if TYPE_CHECKING:
+    import curator
+
 SUITE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SUITE_DIR.parents[1]
 ARMS_DIR = SUITE_DIR / "arms"
@@ -58,7 +62,22 @@ HOOK_SCRIPTS = {
     "PostCompact": "post-compact.py",
 }
 BASE_TOOLS = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
-ARM_NAMES = ("bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio")
+ARM_NAMES = (
+    "bare",
+    "placebo",
+    "protocol",
+    "claude_md",
+    "fs_grep",
+    "memkernel",
+    "wiki_studio",
+    "memkernel_governed",  # memkernel-0-16-lifecycle-corrections FR-004: the composition arm, scripted curator
+    "memkernel_governed_oracle",  # its upper bound, the oracle curator (decision B6)
+    "informed",  # the calibration's informed reference (decision B3)
+)
+CORRECT_GROUP = "lc-correct"
+CORRECT_CALIBRATION_ARMS = ("bare", "informed")  # FR-003: the only arms an lc-correct calibration runs and grades
+CORRECTION_BRIEF_TOKEN = "{correction_brief}"
+GOVERNED_PROPOSALS_DIR = "doc_internal/proposals"
 COMPACT_PROMPT = "/compact"
 CALIBRATION_PHASE = "calibration"
 MEASURED_PHASE = "measured"
@@ -84,6 +103,9 @@ class Arm:
     config_sha256: str
     groups: tuple[str, ...] = ()  # empty: every group; otherwise the only groups this arm runs on (FR-012)
     cli_pin: tuple[str, str] | None = None  # (command, version) that must be on the session PATH for a paid run
+    carry: tuple[str, ...] = ()  # workspace paths kept from the previous session besides the shared artifact
+    wiki_governed: bool = False  # MEMKERNEL_WIKI_MODE=governed, proposals beside the wiki; gate check at the end
+    phases: tuple[str, ...] = ()  # empty: every phase; otherwise the only phases this arm may run in
 
     def runs_on(self, task: Task) -> bool:
         return not self.groups or task.group in self.groups
@@ -107,6 +129,9 @@ def load_arm(name: str, arms_dir: Path = ARMS_DIR) -> Arm:
         config_sha256=sha256_bytes(raw + b"\0" + instruction),
         groups=tuple(config.get("groups", [])),
         cli_pin=(config["cli_pin"]["command"], config["cli_pin"]["version"]) if config.get("cli_pin") else None,
+        carry=tuple(config.get("carry", [])),
+        wiki_governed=bool(config.get("wiki_governed", False)),
+        phases=tuple(config.get("phases", [])),
     )
 
 
@@ -131,6 +156,13 @@ class Task:
     root: Path
     sessions: tuple[SessionSpec, ...]
     shared_artifact: str | None
+    correction: dict[str, Any] | None = None  # lc-correct: delivered to the session after ``after_session``
+
+    def brief_for(self, position: int) -> str | None:
+        """The correction brief once the correction has happened (sessions after ``after_session``), else None."""
+        if self.correction is None or position <= int(self.correction["after_session"]):
+            return None
+        return corrections.brief_text(self.correction)
 
     @property
     def tree(self) -> Path:
@@ -161,7 +193,10 @@ def load_task(task_dir: Path) -> Task:
         group=spec["group"],
         root=task_dir,
         sessions=tuple(sessions),
-        shared_artifact=spec.get("shared_artifact"),
+        # lc-correct names its shared state ``exposure_artifact`` (FR-002): copied from the session before the
+        # correction, before the correction is delivered, so the copy carries the exposure state only.
+        shared_artifact=spec.get("shared_artifact") or spec.get("exposure_artifact"),
+        correction=spec.get("correction"),
     )
 
 
@@ -203,6 +238,11 @@ def prepare_session(task: Task, arm: Arm, position: int, chain_dir: Path, state:
                 if target.exists():
                     shutil.rmtree(target)
                 shutil.copytree(source, target, symlinks=True)
+        previous = state.workspace
+        for rel in arm.carry if previous is not None else ():  # the governed arms' gate receipts (decision B7)
+            source = previous / rel if previous is not None else Path(rel)
+            if source.exists() and not (workspace / rel).exists():
+                shutil.copytree(source, workspace / rel, symlinks=True)
     for rel in session.remove:
         target = workspace / rel
         if target.is_dir():
@@ -247,12 +287,22 @@ class RunConfig:
     timeout_s: float = 900.0
     hook_command_override: tuple[str, ...] | None = None  # demo: record hooks without running memkernel
     shared_cache: Path | None = None
+    ops_command: tuple[str, ...] | None = None  # memkernel_ops.py's command; default: memkernel_python + the script
+    wiki_studio_cmd: str = "wiki-studio"  # the governed arms' curator CLI (pinned by the arm's cli_pin)
 
 
-def _instruction_file(arm: Arm, dirs: SessionDirs) -> Path | None:
+def _ops_command(cfg: RunConfig) -> tuple[str, ...]:
+    return cfg.ops_command or (cfg.memkernel_python, str(SUITE_DIR / "memkernel_ops.py"))
+
+
+def _instruction_file(arm: Arm, dirs: SessionDirs, brief: str | None = None) -> Path | None:
     if not arm.instruction:
         return None
     text = arm.instruction.decode("utf-8")
+    if CORRECTION_BRIEF_TOKEN in text:  # the informed reference: its instruction exists only once the rule changed
+        if brief is None:
+            return None
+        text = text.replace(CORRECTION_BRIEF_TOKEN, brief)
     if dirs.memory_dir is not None:
         text = text.replace(MEMORY_DIR_TOKEN, str(dirs.memory_dir))
     path = dirs.root / "instruction.md"
@@ -260,7 +310,7 @@ def _instruction_file(arm: Arm, dirs: SessionDirs) -> Path | None:
     return path
 
 
-def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str, str]:
+def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig, governed: bool = False) -> dict[str, str]:
     assert dirs.store is not None
     env = {
         "MEMKERNEL_PROJECT_ID": f"lc_{sha256_text(chain_id + '/' + dirs.namespace)[:16]}",
@@ -272,6 +322,9 @@ def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str
         "MEMKERNEL_WIKI_DIR": str(dirs.workspace / WIKI_DIR),
         "HOME": str(dirs.home),
     }
+    if governed:  # the composition arms (FR-004): exports go through the gate, proposals sit where the curator's do
+        env["MEMKERNEL_WIKI_MODE"] = "governed"
+        env["MEMKERNEL_WIKI_PROPOSALS_DIR"] = str(dirs.workspace / GOVERNED_PROPOSALS_DIR)
     if cfg.shared_cache is not None:
         env["HF_HOME"] = str(cfg.shared_cache / "huggingface")
         # The cache is the model's only source: never contact the Hub, so the embedding model cannot change
@@ -280,14 +333,13 @@ def _memkernel_env(dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str
     return env
 
 
-def _write_wiring(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig, ledger: Path) -> list[str]:
+def _write_wiring(
+    arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig, ledger: Path, brief: str | None = None
+) -> list[str]:
     args: list[str] = []
     if arm.mcp:
-        mcp = {
-            "mcpServers": {
-                "memkernel": {"command": cfg.memkernel_cmd, "args": [], "env": _memkernel_env(dirs, chain_id, cfg)}
-            }
-        }
+        server_env = _memkernel_env(dirs, chain_id, cfg, arm.wiki_governed)
+        mcp = {"mcpServers": {"memkernel": {"command": cfg.memkernel_cmd, "args": [], "env": server_env}}}
         mcp_path = dirs.root / "mcp.json"
         mcp_path.write_text(json.dumps(mcp, indent=2), encoding="utf-8")
         args += ["--mcp-config", str(mcp_path), "--strict-mcp-config"]
@@ -315,7 +367,7 @@ def _write_wiring(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig, le
         settings_path = dirs.root / "settings.json"
         settings_path.write_text(json.dumps({"hooks": hooks}, indent=2), encoding="utf-8")
         args += ["--settings", str(settings_path)]
-    instruction = _instruction_file(arm, dirs)
+    instruction = _instruction_file(arm, dirs, brief)
     if instruction is not None:
         args += ["--append-system-prompt-file", str(instruction)]
     if dirs.memory_dir is not None:
@@ -331,8 +383,58 @@ def _session_env(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> 
     env = {key: os.environ[key] for key in ENV_PASSTHROUGH if key in os.environ}
     env.update({"HOME": str(dirs.home), "CLAUDE_CONFIG_DIR": str(dirs.config)})
     if arm.persist_store:
-        env.update(_memkernel_env(dirs, chain_id, cfg))  # hooks read the same MEMKERNEL_* as the server
+        env.update(_memkernel_env(dirs, chain_id, cfg, arm.wiki_governed))  # hooks read the server's MEMKERNEL_*
     return env
+
+
+def _helper_env(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> dict[str, str]:
+    """The environment the correction's helpers run in: the session's, without the API key (no model is called)."""
+    env = {key: value for key, value in _session_env(arm, dirs, chain_id, cfg).items() if key != "ANTHROPIC_API_KEY"}
+    return env
+
+
+def _ops(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.Ops:
+    env = _helper_env(arm, dirs, chain_id, cfg)
+
+    def call(*args: str) -> dict[str, Any]:
+        completed = subprocess.run(
+            [*_ops_command(cfg), *args], cwd=dirs.workspace, env=env, capture_output=True, text=True, check=False
+        )
+        if completed.returncode != 0:
+            raise corrections.CorrectionError(
+                f"memkernel_ops {args[0]} exited {completed.returncode}: {completed.stderr.strip()[-500:]}"
+            )
+        try:
+            result: dict[str, Any] = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError) as exc:
+            raise corrections.CorrectionError(f"memkernel_ops {args[0]} printed no JSON") from exc
+        return result
+
+    return call
+
+
+def _cli(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.Cli:
+    env = _helper_env(arm, dirs, chain_id, cfg)
+    base = [
+        cfg.wiki_studio_cmd,
+        "--root",
+        str(dirs.workspace),
+        "--wiki-dir",
+        str(dirs.workspace / WIKI_DIR),
+        "--proposals-dir",
+        str(dirs.workspace / GOVERNED_PROPOSALS_DIR),
+    ]
+
+    def call(verb: str, *args: str) -> tuple[int, str]:
+        try:
+            completed = subprocess.run(
+                [base[0], verb, *base[1:], *args], cwd=dirs.workspace, env=env, capture_output=True, text=True
+            )
+        except OSError as exc:
+            raise corrections.CorrectionError(f"{cfg.wiki_studio_cmd} could not run: {exc}") from exc
+        return completed.returncode, completed.stdout + completed.stderr
+
+    return call
 
 
 @dataclass
@@ -451,10 +553,24 @@ def run_session(
         )
         invalid = "fixture_restore_failed"
     if observe is not None and invalid is None:
-        observe(task, arm, position, dirs)
+        observe(task, arm, position, dirs)  # before any correction: what the shared copy alone carries
+    correction: dict[str, Any] | None = None
+    if invalid is None and task.correction is not None and position == int(task.correction["after_session"]) + 1:
+        try:
+            correction = corrections.deliver(
+                arm.name,
+                task.correction,
+                dirs.workspace,
+                dirs.memory_dir,
+                _ops(arm, dirs, chain_id, cfg) if arm.persist_store else None,
+                _cli(arm, dirs, chain_id, cfg) if arm.wiki_governed else None,
+            )
+        except corrections.CorrectionError as exc:
+            correction = {"path": corrections.PATHS[arm.name], "delivered": False, "error": str(exc)}
+            invalid = "correction_failed"
     ledger = dirs.root / "hook-ledger.jsonl"
     if invalid is None:
-        wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger)
+        wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger, task.brief_for(position))
         env = _session_env(arm, dirs, chain_id, cfg)
         session_uuid = str(uuid.uuid4())
         raw = dirs.root / STREAM_FILE
@@ -538,6 +654,9 @@ def run_session(
         "wall_time_ms": int((time.monotonic() - t0) * 1000),
         "stages": {"exposure_at": exposure_at, "evaluation_at": evaluation_at, "compactions": summary.compactions},
         "diagnostics": session_diagnostics(summary, dirs.workspace, earlier_reads, hooks),
+        "answer_class": None,  # lc-correct only: informed, obsolete or other (FR-001), set by grading
+        "correction": correction,  # lc-correct only: what the arm's correction event did (FR-002)
+        "gate": None,  # the governed arms' evaluation session: the end state against the gate's records (FR-004)
         "hashes": {
             "prompt": sha256_text("\n".join(prompts)),
             "response": sha256_text(summary.response),
@@ -579,7 +698,10 @@ def grade(task: Task, arm: Arm, final: SessionOutcome, cfg: RunConfig, earlier_t
         receipt["outcome"] = "timeout"
         return
     try:
-        passed, _detail = _load_checker(task).check(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
+        checker = _load_checker(task)
+        passed, _detail = checker.check(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
+        if hasattr(checker, "classify"):  # lc-correct's three outcomes (FR-001)
+            receipt["answer_class"] = checker.classify(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
     except Exception:  # a crashing checker is a harness failure, never the agent's
         receipt["valid"], receipt["invalid_reason"] = False, "checker_crashed"
         return
@@ -620,15 +742,40 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
         state = ChainState(workspace=outcome.dirs.workspace, transcripts=[*state.transcripts, transcript])
     # Calibration is never graded: nobody sees pass/fail before the preregistration is committed, so its
     # receipts carry usage and stream evidence only. Measured and demo runs are graded exactly as before.
-    gradeable = cfg.phase != CALIBRATION_PHASE
-    if gradeable and outcome is not None and outcome.receipt["valid"] and outcome.receipt["stage"] == "evaluation":
+    # lc-correct is the exception (memkernel-0-16 FR-003, decision B3): its calibration grades bare and the informed
+    # reference only, to qualify each chain; no measured arm runs in it, so nothing about them is seen early.
+    gradeable = cfg.phase != CALIBRATION_PHASE or task.group == CORRECT_GROUP
+    final_ok = outcome is not None and outcome.receipt["valid"] and outcome.receipt["stage"] == "evaluation"
+    if gradeable and final_ok and outcome is not None:
         earlier_timeout = any(r["outcome"] == "timeout" for r in receipts[:-1])
         grade(task, arm, outcome, cfg, earlier_timeout=earlier_timeout)
+    if arm.wiki_governed and final_ok and outcome is not None:
+        check_gate(task, arm, outcome, chain_dir.name, cfg)
     for receipt in receipts:
         errors = validate_receipt(receipt)
         if errors:
             raise ValueError(f"receipt does not match the schema: {errors}")
     return receipts
+
+
+def check_gate(task: Task, arm: Arm, final: SessionOutcome, chain_id: str, cfg: RunConfig) -> None:
+    """#90 section 3.4 on the governed arms' end state: breaches are counted in the receipt, never hidden."""
+    workspace = final.dirs.workspace
+    try:
+        final.receipt["gate"] = _ops(arm, final.dirs, chain_id, cfg)(
+            "gate",
+            "--root",
+            str(workspace),
+            "--wiki",
+            str(workspace / WIKI_DIR),
+            "--proposals",
+            str(workspace / GOVERNED_PROPOSALS_DIR),
+            "--fixture-wiki",
+            str(task.tree / WIKI_DIR),
+        )
+    except corrections.CorrectionError as exc:  # the check could not run: a harness failure, not the arm's
+        final.receipt["gate"] = {"error": str(exc)}
+        final.receipt["valid"], final.receipt["invalid_reason"] = False, "gate_check_failed"
 
 
 def chain_dir_for(task: Task, arm: Arm, run_index: int, cfg: RunConfig) -> Path:
@@ -723,6 +870,21 @@ def check_cli_pin(arm: Arm) -> None:
         raise SystemExit(f"{arm.name}: `{command} --version` reports {found!r}, the arm is frozen at {version}")
 
 
+def refuse_misplaced_arms(phase: str, tasks: list[Task], arms: list[Arm]) -> None:
+    """An arm outside its phases never runs (``informed`` is calibration-only), and an lc-correct calibration runs
+    only bare and the informed reference, so no measured arm is graded before the preregistration (FR-003)."""
+    for arm in arms:
+        if arm.phases and phase not in arm.phases and phase != "demo":
+            raise SystemExit(f"{arm.name} runs only in {', '.join(arm.phases)}, not in a {phase} run")
+    if phase == CALIBRATION_PHASE and any(t.group == CORRECT_GROUP for t in tasks):
+        extra = [a.name for a in arms if a.name not in CORRECT_CALIBRATION_ARMS]
+        if extra:
+            raise SystemExit(
+                f"an {CORRECT_GROUP} calibration runs only {', '.join(CORRECT_CALIBRATION_ARMS)}; "
+                f"remove {', '.join(extra)}"
+            )
+
+
 def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, observe: Any = None) -> Path:
     """Run every chain of ``task_ids`` × ``arm_names`` × ``runs`` and write the receipts under the run root.
 
@@ -738,6 +900,7 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     receipts_path = out / "receipts.jsonl"
     tasks = [load_task(cfg.tasks_root / task_id) for task_id in task_ids]
     arms = [load_arm(name) for name in arm_names]
+    refuse_misplaced_arms(cfg.phase, tasks, arms)
     if cfg.phase in (CALIBRATION_PHASE, MEASURED_PHASE):
         for arm in arms:
             check_cli_pin(arm)
@@ -766,7 +929,11 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
 
 # ── demo (FR-014) ─────────────────────────────────────────────
 
-DEMO_TASKS = ("demo-retain", "demo-wiki", "demo-compact")
+DEMO_TASKS = ("demo-retain", "demo-wiki", "demo-compact", "demo-correct")
+CORRECTION_FILES = {  # where a file-based correction path leaves the brief (memkernel-0-16 FR-002)
+    "claude_md": ("workspace", corrections.CLAUDE_MD_FILE),
+    "fs_grep": ("memory", corrections.GREP_NOTE_FILE),
+}
 
 
 def demo() -> int:
@@ -780,6 +947,15 @@ def demo() -> int:
             "transcripts": bool(dirs.memory_dir and any(dirs.memory_dir.iterdir())),
             "store_marker": any(p.name == "stub-store-marker" for p in store_files),
             "wiki_page": (dirs.workspace / "knowledge" / "wiki" / "decisions" / "demo.md").exists(),
+            # lc-correct: observed before the correction, so this is what the shared copy alone carries (SC-2)
+            "shared_copy_has_y": task.correction is not None
+            and position > 0
+            and any(
+                term.lower() in p.read_text(encoding="utf-8", errors="replace").lower()
+                for p in (dirs.workspace / (task.shared_artifact or "")).rglob("*")
+                if p.is_file()
+                for term in _fact_terms(task)
+            ),
         }
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -797,18 +973,46 @@ def demo() -> int:
             oracles_root=SUITE_DIR / "fixtures" / "demo-oracles",
             timeout_s=60.0,
             hook_command_override=(sys.executable, "-c", "import sys; sys.stdin.read()"),
+            ops_command=(sys.executable, str(SUITE_DIR / "stub_ops.py")),
+            wiki_studio_cmd=_wiki_studio_beside_python(),
         )
         receipts_path = run(cfg, list(DEMO_TASKS), list(ARM_NAMES), runs=1, observe=observe)
         receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
+        delivered = _delivered_files(Path(tmp) / "demo")
 
-    failures = check_demo(seen, receipts)
+    failures = check_demo(seen, receipts, delivered)
     for line in failures:
         print(f"FAIL {line}")
     print(f"demo: {len(receipts)} receipts, {len(seen)} sessions observed, {len(failures)} failure(s)")
     return 1 if failures else 0
 
 
-def check_demo(seen: dict[tuple[str, str, int], dict[str, bool]], receipts: list[dict[str, Any]]) -> list[str]:
+def _fact_terms(task: Task) -> list[str]:
+    terms: list[str] = json.loads((task.root / "task.json").read_text(encoding="utf-8")).get("fact_terms", [])
+    return terms
+
+
+def _wiki_studio_beside_python() -> str:
+    """The wiki-studio installed beside this Python (the dev environment's), else whatever is on PATH."""
+    beside = Path(sys.executable).with_name("wiki-studio")
+    return str(beside) if beside.exists() else "wiki-studio"
+
+
+def _delivered_files(run_dir: Path) -> dict[str, bool]:
+    """For each file-based correction path, whether the evaluation session started with the brief in its file."""
+    found: dict[str, bool] = {}
+    for arm_name, (where, name) in CORRECTION_FILES.items():
+        chain = run_dir / f"demo-correct.{arm_name}.r0"
+        target = chain / "s1" / "workspace" / name if where == "workspace" else chain / "memory" / name
+        found[arm_name] = target.is_file() and "DEMO-Y" in target.read_text(encoding="utf-8")
+    return found
+
+
+def check_demo(
+    seen: dict[tuple[str, str, int], dict[str, bool]],
+    receipts: list[dict[str, Any]],
+    delivered: dict[str, bool] | None = None,
+) -> list[str]:
     failures: list[str] = []
     rules = {arm: load_arm(arm) for arm in ARM_NAMES}
     demo_tasks = {task_id: load_task(SUITE_DIR / "fixtures" / "demo-tasks" / task_id) for task_id in DEMO_TASKS}
@@ -848,7 +1052,34 @@ def check_demo(seen: dict[tuple[str, str, int], dict[str, bool]], receipts: list
                 failures.append(f"memkernel: hook events not recorded around the simulated compaction: {events}")
         if receipt["stage"] == "evaluation" and receipt["valid"] and receipt["outcome"] is None:
             failures.append(f"{receipt['chain_id']}: evaluation session was not graded")
+        if receipt["task_id"] == "demo-correct" and receipt["position"] == 1:
+            failures += _check_demo_correction(receipt)
+    for key, observed in seen.items():
+        if observed.get("shared_copy_has_y"):
+            failures.append(f"{key[1]}: the shared copy carried the correction into session {key[2]}")
+    for arm_name, ok in (delivered or {}).items():
+        if not ok:
+            failures.append(f"{arm_name}: the curator's correction is not in its file at the evaluation session")
     return failures
+
+
+def _check_demo_correction(receipt: dict[str, Any]) -> list[str]:
+    """SC-2: each arm's correction went through its own path, and only there."""
+    arm, record = receipt["arm"], receipt["correction"]
+    if not receipt["valid"]:
+        return [f"{arm}: the corrected session is invalid ({receipt['invalid_reason']})"]
+    if record is None or record["path"] != corrections.PATHS[arm]:
+        return [f"{arm}: correction path {record and record['path']!r}, expected {corrections.PATHS[arm]!r}"]
+    expected = {  # the stub agent exports no draft, so the scripted curator refuses and the oracle lands its page
+        corrections.NONE: False,
+        corrections.SCRIPTED: False,
+        corrections.ORACLE: True,
+    }.get(record["path"], True)
+    if record["delivered"] is not expected:
+        return [f"{arm}: correction delivered={record['delivered']}, expected {expected}"]
+    if record["path"] in (corrections.SCRIPTED, corrections.ORACLE) and receipt["gate"] is None:
+        return [f"{arm}: no gate check on the governed arm's end state"]
+    return []
 
 
 # ── CLI ───────────────────────────────────────────────────────
@@ -875,6 +1106,7 @@ def main(argv: list[str]) -> int:
     p_run.add_argument("--agent-cmd", default="claude")
     p_run.add_argument("--timeout", type=float, default=900.0)
     p_run.add_argument("--shared-cache", type=Path)
+    p_run.add_argument("--wiki-studio-cmd", default="wiki-studio", help="the governed arms' curator CLI")
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo()
@@ -896,6 +1128,7 @@ def main(argv: list[str]) -> int:
         oracles_root=args.oracles_root,
         timeout_s=args.timeout,
         shared_cache=args.shared_cache,
+        wiki_studio_cmd=args.wiki_studio_cmd,
     )
     print(run(cfg, args.task, args.arm, args.runs))
     return 0

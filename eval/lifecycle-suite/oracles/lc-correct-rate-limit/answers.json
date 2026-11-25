@@ -1,0 +1,10 @@
+{
+  "informed": [
+    "\\b120\\b"
+  ],
+  "obsolete": [
+    "\\b600\\b",
+    "\\ball 300\\b",
+    "\\ball of them\\b"
+  ]
+}

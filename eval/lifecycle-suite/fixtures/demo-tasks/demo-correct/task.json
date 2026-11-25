@@ -1,0 +1,8 @@
+{"task_id": "demo-correct", "group": "lc-correct", "kind": "lifecycle", "exposure_artifact": "knowledge/wiki",
+ "fact_terms": ["DEMO-Y"],
+ "sessions": [
+   {"steps": [{"stage": "exposure", "prompt": "Demo exposure: the rule is DEMO-X"}]},
+   {"steps": [{"stage": "evaluation", "prompt": "Demo evaluation after the correction [answer]"}]}
+ ],
+ "correction": {"after_session": 0, "kind": "replacement", "headline": "Demo rule DEMO-Y",
+                "rule": "The demo rule is now DEMO-Y.", "obsolete_patterns": ["DEMO-X"]}}

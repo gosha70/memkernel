@@ -1,0 +1,8 @@
+{
+  "informed": [
+    "\\bmondays?\\b"
+  ],
+  "obsolete": [
+    "\\bfridays?\\b"
+  ]
+}

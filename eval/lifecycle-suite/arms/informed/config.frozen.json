@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "arm": "informed",
+  "note": "The calibration's informed reference (FR-003, decision B3): bare, plus the chain's correction brief in its instruction for the sessions after the correction. Calibration-only; never a measured arm.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": false
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit"
+  ],
+  "mcp": false,
+  "hooks": [],
+  "shared_artifact_rule": "lc-correct tasks: the task's exposure_artifact directory from the exposure session is copied into the next session's workspace before the correction is delivered, so it carries the exposure state only; the correction reaches the arm only through its own path (memkernel-0-16-lifecycle-corrections FR-002).",
+  "groups": [
+    "lc-correct"
+  ],
+  "phases": [
+    "calibration"
+  ]
+}

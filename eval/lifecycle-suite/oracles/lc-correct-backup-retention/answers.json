@@ -1,0 +1,8 @@
+{
+  "informed": [
+    "\\b90[\\s-]*days?\\b"
+  ],
+  "obsolete": [
+    "\\b30[\\s-]*days?\\b"
+  ]
+}

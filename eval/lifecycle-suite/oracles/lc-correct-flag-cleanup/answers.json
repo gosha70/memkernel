@@ -1,0 +1,13 @@
+{
+  "informed": [
+    "\\boverdue\\b",
+    "\\bwithin 30 days\\b",
+    "\\b30-day\\b"
+  ],
+  "obsolete": [
+    "\\ba year\\b",
+    "\\bone year\\b",
+    "\\b12 months\\b",
+    "\\b365\\b"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "informed": [
+    "\\btwo approvals\\b",
+    "\\b2 approvals\\b",
+    "\\bsecond approval\\b",
+    "\\bcode ?owners?\\b"
+  ],
+  "obsolete": [
+    "\\byes\\b",
+    "\\bone approval (from a maintainer )?is enough\\b",
+    "\\bcan be merged now\\b"
+  ]
+}

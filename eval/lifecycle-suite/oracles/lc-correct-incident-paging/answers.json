@@ -1,0 +1,12 @@
+{
+  "informed": [
+    "\\bticket",
+    "\\bqueue\\b",
+    "\\bnext business day\\b"
+  ],
+  "obsolete": [
+    "\\bpaged\\b",
+    "\\bpages?\\b",
+    "\\bwake\\b"
+  ]
+}

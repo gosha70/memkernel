@@ -1,0 +1,11 @@
+{
+  "informed": [
+    "catalog\\.updated",
+    "\\bpurg",
+    "\\bimmediately\\b",
+    "\\bat once\\b"
+  ],
+  "obsolete": [
+    "\\b10[\\s-]*min"
+  ]
+}

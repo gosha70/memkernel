@@ -1,5 +1,5 @@
 {
-  "$comment": "memkernel lifecycle suite receipt, one per session (specs/memkernel-0-5 FR-018). Validated by records.validate_receipt (stdlib subset of JSON Schema: type, required, enum, minimum, properties, items, additionalProperties).",
+  "$comment": "memkernel lifecycle suite receipt, one per session (specs/memkernel-0-5 FR-018). Validated by records.validate_receipt (stdlib subset of JSON Schema: type, required, enum, minimum, properties, items, additionalProperties). memkernel-0-16-lifecycle-corrections added the optional answer_class, correction and gate and widened the arm, group and invalid_reason enums: additive, so version-3 receipts written before it still validate.",
   "title": "LifecycleReceipt",
   "type": "object",
   "additionalProperties": false,
@@ -19,9 +19,10 @@
     "chain_length": {"type": "integer"},
     "stage": {"type": "string", "enum": ["exposure", "intermediate", "evaluation"]},
     "namespace_sha256": {"type": "string"},
-    "arm": {"type": "string", "enum": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio"]},
+    "arm": {"type": "string", "enum": ["bare", "placebo", "protocol", "claude_md", "fs_grep", "memkernel", "wiki_studio",
+                                       "memkernel_governed", "memkernel_governed_oracle", "informed"]},
     "task_id": {"type": "string"},
-    "group": {"type": "string", "enum": ["lc-retain", "lc-reval", "lc-wiki", "lc-compact"]},
+    "group": {"type": "string", "enum": ["lc-retain", "lc-reval", "lc-wiki", "lc-compact", "lc-correct"]},
     "run_index": {"type": "integer"},
     "started_at": {"type": "string"},
     "ended_at": {"type": "string"},
@@ -33,7 +34,8 @@
     "invalid_reason": {
       "type": ["string", "null"],
       "enum": ["session_not_started", "mcp_not_connected", "fixture_restore_failed", "checker_crashed",
-               "no_compaction_before_evaluation", "authentication_failed", null]
+               "no_compaction_before_evaluation", "authentication_failed", "correction_failed",
+               "gate_check_failed", null]
     },
     "outcome": {"type": ["string", "null"], "enum": ["passed", "failed", "timeout", "no_answer", null]},
     "checker_passed": {"type": ["boolean", "null"]},
@@ -94,6 +96,13 @@
         "response": {"type": "string"},
         "tool_payloads": {"type": "string"}
       }
-    }
+    },
+    "answer_class": {"type": ["string", "null"], "enum": ["informed", "obsolete", "other", null]},
+    "correction": {
+      "type": ["object", "null"],
+      "required": ["path", "delivered"],
+      "properties": {"path": {"type": "string"}, "delivered": {"type": "boolean"}}
+    },
+    "gate": {"type": ["object", "null"]}
   }
 }

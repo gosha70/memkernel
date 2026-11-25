@@ -111,3 +111,43 @@ measured run happens without a preregistration and a budget the owner approves (
 - **D7 The chain count: plan on 12 chains.** Eight reach significance only when every chain favours one arm (FR-006's
   arithmetic: 8 of 8 gives p ≈ 0.008, 7 of 8 p ≈ 0.07; with 12, 10 of 12 gives p ≈ 0.04). The four added chains
   follow #90 §2.1 and are written before the calibration; the preregistration states the final count.
+
+## Build decisions (2026-11-25)
+
+B1–B4 are the owner's answers to the questions the build put before writing code. B5–B9 were made in the build and
+are listed for review.
+
+- **B1 claude_md (owner).** A scripted curator appends the chain's correction brief to `CLAUDE.md` in the workspace
+  the arm carries, creating the file if session 0 did not. FR-002 had no path for this arm, which D2 added.
+- **B2 Governed import (owner).** The runner runs memkernel's governed `wiki_import` as the last step of the
+  correction event, after the curator approves. FR-002 lists the import as part of delivery.
+- **B3 Calibration (owner).** A calibration-only arm, `informed`: `bare` plus the correction brief in its instruction,
+  only in the sessions after the correction. An lc-correct calibration runs and grades only `bare` and `informed`.
+  Measured arms never run in it, so nothing about them is seen before the preregistration. The runner refuses any
+  other arm in such a calibration, and `informed` in a measured run.
+- **B4 Correction kinds (owner).** Six replacements and six withdrawals, applied in the `memkernel` arm.
+  - **Replacement:** retain Y with `supersedes` on the first live record carrying X, and supersede the rest by it.
+  - **Withdrawal:** withdraw every record carrying X (`deprecated`), then retain Y unlinked.
+  - **Other arms:** one path each; the governed arms correct through `corrects:`.
+- **B5 The answer.** The evaluation session writes `ANSWER.md`. `correct_checker.py` classifies it by the chain's
+  hidden patterns (`oracles/<task>/answers.json`): Y first, then X, else other. No candidate code runs.
+- **B6 The oracle curator is its own arm,** `memkernel_governed_oracle`, so its receipts carry their own arm name and
+  config hash.
+- **B7 What the governed arms carry.** The store and the exposure wiki, as `memkernel` does, plus
+  `doc_internal/proposals` (the gate's receipts), so the end-state check can find them. Both sessions use one memkernel
+  namespace: the correction happens in the same project.
+- **B8 Gate breaches.**
+  - **A breach** is a landed content page without a committed receipt, or a non-draft page without an approval at
+    its live sha256.
+  - **Drafts:** a draft memkernel exported through the gate that nobody approved is counted separately, as an
+    unreviewed draft. `approve` refuses drafts, and governed import never reads them.
+  - **Lint:** violations on the end state are counted alongside.
+- **B9 The receipt schema stays at version 3.** The change is additive: optional `answer_class`, `correction` and
+  `gate`, and wider `arm`, `group` and `invalid_reason` enums (`correction_failed`, `gate_check_failed`). Receipts
+  written before it, the committed 0.5 ones included, still validate.
+
+**Found in the build:** an obsolete pattern written as `\bfriday\b` missed the competing page's "Fridays". The
+test that every fixture's competing page matches its chain's obsolete patterns caught it, and the patterns now
+accept the plural. Two chains' competing pages stated the old rule but not its answer; they now carry the obsolete
+answer as well.
+

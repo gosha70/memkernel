@@ -1,0 +1,37 @@
+{
+  "task_id": "lc-correct-email-logging",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "user id"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the privacy team for this project: customer email addresses are logged as SHA-1 hashes. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A login handler needs to log which customer signed in. What should it write to the log? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "withdrawal",
+    "headline": "Email addresses are never logged in any form; log the internal user id",
+    "rule": "Privacy review: hashed email addresses still count as personal data, so email addresses are never written to logs in any form, hashed or not. Log the internal user id instead.",
+    "obsolete_patterns": [
+      "\\bsha-?1\\b",
+      "\\bhash"
+    ]
+  }
+}

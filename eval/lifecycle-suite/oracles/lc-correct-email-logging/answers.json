@@ -1,0 +1,10 @@
+{
+  "informed": [
+    "\\buser[ _-]?id\\b",
+    "\\binternal id\\b"
+  ],
+  "obsolete": [
+    "\\bsha-?1\\b",
+    "\\bhash"
+  ]
+}
