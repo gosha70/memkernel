@@ -49,6 +49,7 @@ COMPACT_GROUP = "lc-compact"
 CORRECT_GROUP = "lc-correct"  # memkernel-0-16-lifecycle-corrections: its own section, against the negative control
 NEGATIVE_CONTROL = "bare"
 ANSWER_CLASSES = ("informed", "obsolete", "other")
+GOVERNED_ARMS = ("memkernel_governed", "memkernel_governed_oracle")  # the arms whose end state the gate check reads
 # api_errors keys of an authentication refusal (FR-015a (c)); any other key is a non-authentication API error
 AUTHENTICATION_KEYS = frozenset({*(str(status) for status in AUTHENTICATION_STATUSES), AUTHENTICATION_ERROR})
 CONFIDENCE = 0.95  # the bootstrap interval's level (FR-016)
@@ -220,11 +221,16 @@ def _pairs(trials: list[Trial], group: str, comparator: str, treatment: str = TR
 
 
 def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
-    """lc-correct per arm: informed (passes), obsolete (X, the obsolete-answer rate), other; gate breaches where the
-    arm has a gate (memkernel-0-16 FR-001, FR-004; #90 section 2.3)."""
+    """lc-correct per arm: informed (passes), obsolete (X, the obsolete-answer rate), other; invalid and truncated
+    trials apart; gate breaches where the arm has a gate (memkernel-0-16 FR-001, FR-004; #90 section 2.3).
+
+    Breaches are counted from every trial that ran to its end state, truncated ones included: a breach is evidence
+    about the gate whether or not the trial is scored. A governed trial with no gate record is shown as missing.
+    """
     lines = [
-        "| Arm | Trials | Valid | Informed | Obsolete (rate) | Other | Invalid | Gate breaches |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Arm | Trials | Valid | Informed | Obsolete (rate) | Other | Invalid | Truncated | Gate breaches "
+        "| Gate missing |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for arm in arms:
         rows = [t for t in trials if t.group == CORRECT_GROUP and t.arm == arm]
@@ -233,10 +239,15 @@ def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
         valid = [t for t in rows if t.scored]
         count = {c: sum(1 for t in valid if t.answer_class == c) for c in ANSWER_CLASSES}
         other = len(valid) - count["informed"] - count["obsolete"]  # timeouts and no answer count as other
-        breaches = [t.gate_breaches for t in valid if t.gate_breaches is not None]
+        invalid = sum(1 for t in rows if not t.valid and not t.truncated)
+        truncated = [t for t in rows if t.truncated]
+        evidence = [t for t in (*valid, *truncated) if t.gate_breaches is not None]
+        governed = arm in GOVERNED_ARMS
+        missing = sum(1 for t in (*valid, *truncated) if t.gate_breaches is None) if governed else 0
+        breaches = str(sum(t.gate_breaches or 0 for t in evidence)) if governed else "-"
         lines.append(
             f"| {arm} | {len(rows)} | {len(valid)} | {count['informed']} | {_pct(count['obsolete'], len(valid))} "
-            f"| {other} | {len(rows) - len(valid)} | {sum(breaches) if breaches else '-'} |"
+            f"| {other} | {invalid} | {len(truncated)} | {breaches} | {missing if governed else '-'} |"
         )
     return lines
 
@@ -245,8 +256,8 @@ def _correct_pairs(trials: list[Trial], arms: list[str]) -> list[str]:
     """Each arm paired with the negative control on the same chain and run (passed = informed)."""
     lines = [
         f"| Arm vs {NEGATIVE_CONTROL} | Valid pairs | Both pass | Arm only | {NEGATIVE_CONTROL} only | Neither "
-        "| Pairs removed |",
-        "|---|---|---|---|---|---|---|",
+        "| Pairs removed | Pairs truncated |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for arm in arms:
         if arm == NEGATIVE_CONTROL or not any(t.group == CORRECT_GROUP and t.arm == arm for t in trials):
@@ -254,7 +265,7 @@ def _correct_pairs(trials: list[Trial], arms: list[str]) -> list[str]:
         c = _pairs(trials, CORRECT_GROUP, NEGATIVE_CONTROL, treatment=arm)
         lines.append(
             f"| {arm} | {c['pairs']} | {c['both']} | {c['treatment_only']} | {c['comparator_only']} | {c['neither']} "
-            f"| {c['pairs_removed']} |"
+            f"| {c['pairs_removed']} | {c['pairs_truncated']} |"
         )
     return lines
 

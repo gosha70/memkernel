@@ -30,7 +30,7 @@ import sys
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -78,6 +78,14 @@ CORRECT_GROUP = "lc-correct"
 CORRECT_CALIBRATION_ARMS = ("bare", "informed")  # FR-003: the only arms an lc-correct calibration runs and grades
 CORRECTION_BRIEF_TOKEN = "{correction_brief}"
 GOVERNED_PROPOSALS_DIR = "doc_internal/proposals"
+HELPER_TIMEOUT_S = 300.0  # a correction helper (memkernel_ops.py, the wiki-studio CLI) that runs longer is a failure
+GATE_UNCHECKED: dict[str, Any] = {  # a gate check that could not run: no evidence, and the trial is invalid
+    "landed": [],
+    "approved": [],
+    "unreviewed_drafts": [],
+    "breaches": [],
+    "lint_violations": 0,
+}
 COMPACT_PROMPT = "/compact"
 CALIBRATION_PHASE = "calibration"
 MEASURED_PHASE = "measured"
@@ -116,6 +124,12 @@ def load_arm(name: str, arms_dir: Path = ARMS_DIR) -> Arm:
     raw = config_path.read_bytes()
     config = json.loads(raw)
     instruction = (arms_dir / name / config["instruction"]).read_bytes() if config.get("instruction") else b""
+    hashed = raw + b"\0" + instruction
+    if config.get("curator_policy"):  # the governed arms: the policy is part of the treatment (FR-004, D3)
+        policy = (arms_dir / name / config["curator_policy"]).read_bytes()
+        if sha256_bytes(policy) != config.get("curator_policy_sha256"):
+            raise ValueError(f"{name}: {config['curator_policy']} does not match its pinned curator_policy_sha256")
+        hashed += b"\0" + policy  # arms without a policy keep the hash they always had
     persist = config["persist"]
     return Arm(
         name=name,
@@ -126,7 +140,7 @@ def load_arm(name: str, arms_dir: Path = ARMS_DIR) -> Arm:
         allowed_tools=tuple(config["allowed_tools"]),
         mcp=bool(config.get("mcp", False)),
         hooks=tuple(config.get("hooks", [])),
-        config_sha256=sha256_bytes(raw + b"\0" + instruction),
+        config_sha256=sha256_bytes(hashed),
         groups=tuple(config.get("groups", [])),
         cli_pin=(config["cli_pin"]["command"], config["cli_pin"]["version"]) if config.get("cli_pin") else None,
         carry=tuple(config.get("carry", [])),
@@ -397,9 +411,18 @@ def _ops(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.
     env = _helper_env(arm, dirs, chain_id, cfg)
 
     def call(*args: str) -> dict[str, Any]:
-        completed = subprocess.run(
-            [*_ops_command(cfg), *args], cwd=dirs.workspace, env=env, capture_output=True, text=True, check=False
-        )
+        try:
+            completed = subprocess.run(
+                [*_ops_command(cfg), *args],
+                cwd=dirs.workspace,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=HELPER_TIMEOUT_S,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise corrections.CorrectionError(f"memkernel_ops {args[0]} did not finish: {exc}") from exc
         if completed.returncode != 0:
             raise corrections.CorrectionError(
                 f"memkernel_ops {args[0]} exited {completed.returncode}: {completed.stderr.strip()[-500:]}"
@@ -428,10 +451,15 @@ def _cli(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.
     def call(verb: str, *args: str) -> tuple[int, str]:
         try:
             completed = subprocess.run(
-                [base[0], verb, *base[1:], *args], cwd=dirs.workspace, env=env, capture_output=True, text=True
+                [base[0], verb, *base[1:], *args],
+                cwd=dirs.workspace,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=HELPER_TIMEOUT_S,
             )
-        except OSError as exc:
-            raise corrections.CorrectionError(f"{cfg.wiki_studio_cmd} could not run: {exc}") from exc
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise corrections.CorrectionError(f"{cfg.wiki_studio_cmd} {verb} did not finish: {exc}") from exc
         return completed.returncode, completed.stdout + completed.stderr
 
     return call
@@ -774,7 +802,7 @@ def check_gate(task: Task, arm: Arm, final: SessionOutcome, chain_id: str, cfg: 
             str(task.tree / WIKI_DIR),
         )
     except corrections.CorrectionError as exc:  # the check could not run: a harness failure, not the arm's
-        final.receipt["gate"] = {"error": str(exc)}
+        final.receipt["gate"] = {**GATE_UNCHECKED, "error": str(exc)}
         final.receipt["valid"], final.receipt["invalid_reason"] = False, "gate_check_failed"
 
 
@@ -850,11 +878,13 @@ def _inside_checkout(path: Path) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "true"
 
 
-def check_cli_pin(arm: Arm) -> None:
-    """Refuse a paid run unless ``arm``'s pinned command reports its pinned version on the session PATH."""
+def check_cli_pin(arm: Arm, executable: str | None = None) -> None:
+    """Refuse a paid run unless ``arm``'s pinned command reports its pinned version: the command on the session
+    PATH, or ``executable``, the exact file the runner itself will invoke (the governed arms' curator CLI)."""
     if arm.cli_pin is None:
         return
     command, version = arm.cli_pin
+    command = executable or command
     env = {key: os.environ[key] for key in ENV_PASSTHROUGH if key in os.environ and key != "ANTHROPIC_API_KEY"}
     try:
         completed = subprocess.run(
@@ -868,6 +898,15 @@ def check_cli_pin(arm: Arm) -> None:
     if reported != [version]:
         found = completed.stdout.strip() or completed.stderr.strip() or f"exit {completed.returncode}"
         raise SystemExit(f"{arm.name}: `{command} --version` reports {found!r}, the arm is frozen at {version}")
+
+
+def resolve_curator_cli(command: str) -> str:
+    """The absolute path of the curator CLI: a paid run version-checks this file and invokes only it, so a later
+    PATH lookup can never run another binary than the one the pin was checked against."""
+    found = shutil.which(command)
+    if found is None:
+        raise SystemExit(f"the curator CLI {command!r} is not on PATH")
+    return str(Path(found).resolve())
 
 
 def refuse_misplaced_arms(phase: str, tasks: list[Task], arms: list[Arm]) -> None:
@@ -902,8 +941,13 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     arms = [load_arm(name) for name in arm_names]
     refuse_misplaced_arms(cfg.phase, tasks, arms)
     if cfg.phase in (CALIBRATION_PHASE, MEASURED_PHASE):
-        for arm in arms:
-            check_cli_pin(arm)
+        if any(arm.wiki_governed for arm in arms):
+            cfg = replace(cfg, wiki_studio_cmd=resolve_curator_cli(cfg.wiki_studio_cmd))
+        for arm in arms:  # the governed arms' pin is checked on the curator executable the runner invokes
+            if arm.wiki_governed:
+                check_cli_pin(arm, cfg.wiki_studio_cmd)
+            else:
+                check_cli_pin(arm)
     with receipts_path.open("w", encoding="utf-8") as sink:
         for run_index in range(runs):
             for task in tasks:

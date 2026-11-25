@@ -14,14 +14,11 @@ import re
 import shutil
 import sys
 from collections import Counter
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from tests.unit._lifecycle_suite import SUITE_DIR, load
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -275,10 +272,10 @@ def test_the_report_tables_lc_correct_by_answer_class_and_tokens_by_group() -> N
     trials = report.assemble(receipts)
     arms = ["bare", "memkernel", "memkernel_governed"]
     table = "\n".join(report._correct_table(trials, arms))
-    assert "| bare | 1 | 1 | 0 | 1/1 (100%) | 0 | 0 | - |" in table
-    assert "| memkernel_governed | 1 | 1 | 1 | 0/1 (0%) | 0 | 0 | 1 |" in table
+    assert "| bare | 1 | 1 | 0 | 1/1 (100%) | 0 | 0 | 0 | - | - |" in table
+    assert "| memkernel_governed | 1 | 1 | 1 | 0/1 (0%) | 0 | 0 | 0 | 1 | 0 |" in table
     pairs = "\n".join(report._correct_pairs(trials, arms))
-    assert "| memkernel | 1 | 0 | 1 | 0 | 0 | 0 |" in pairs
+    assert "| memkernel | 1 | 0 | 1 | 0 | 0 | 0 | 0 |" in pairs
     tokens = "\n".join(report._tokens_by_group(trials))
     assert "| lc-correct | memkernel | 1 | 30 | 0 | 0 | 1 |" in tokens
     assert "| lc-wiki | bare | 1 | 7 | 0 | 0 | 1 |" in tokens
@@ -289,11 +286,14 @@ def test_the_report_tables_lc_correct_by_answer_class_and_tokens_by_group() -> N
 qualify = load("qualify")
 
 
-def _calibration(task_id: str, arm: str, answer: str | None, valid: bool = True, run: int = 0) -> dict:  # type: ignore[type-arg]
+def _calibration(
+    task_id: str, arm: str, answer: str | None, valid: bool = True, run: int = 0, position: int = 1
+) -> dict:  # type: ignore[type-arg]
     return {
         "group": "lc-correct",
         "phase": "calibration",
-        "stage": "evaluation",
+        "stage": "evaluation" if position == 1 else "exposure",
+        "position": position,
         "chain_id": f"{task_id}.{arm}.r{run}",
         "task_id": task_id,
         "arm": arm,
@@ -303,29 +303,178 @@ def _calibration(task_id: str, arm: str, answer: str | None, valid: bool = True,
     }
 
 
+def _complete(answers: dict[tuple[str, str], list[str | None]]) -> list[dict]:  # type: ignore[type-arg]
+    receipts = []
+    for (task, arm), per_run in answers.items():
+        for run, answer in enumerate(per_run):
+            receipts.append(_calibration(task, arm, None, run=run, position=0))
+            receipts.append(_calibration(task, arm, answer, run=run))
+    return receipts
+
+
 def test_a_chain_qualifies_only_when_bare_always_misses_and_informed_always_answers() -> None:
-    receipts = [
-        _calibration("ok", "bare", "obsolete"),
-        _calibration("ok", "bare", "other", run=1),
-        _calibration("ok", "informed", "informed"),
-        _calibration("guessed", "bare", "informed"),  # at ceiling: bare reaches Y
-        _calibration("guessed", "informed", "informed"),
-        _calibration("broken", "bare", "obsolete"),
-        _calibration("broken", "informed", "other"),  # a prompt the informed reference cannot answer
-        _calibration("unrun", "bare", None, valid=False),
-        _calibration("unrun", "informed", "informed"),
-    ]
-    result = qualify.qualify(receipts)
+    receipts = _complete(
+        {
+            ("ok", "bare"): ["obsolete", "other"],
+            ("ok", "informed"): ["informed", "informed"],
+            ("guessed", "bare"): ["informed", "obsolete"],  # at ceiling: bare reaches Y
+            ("guessed", "informed"): ["informed", "informed"],
+            ("broken", "bare"): ["obsolete", "obsolete"],
+            ("broken", "informed"): ["other", "informed"],  # a prompt the informed reference cannot answer
+        }
+    )
+    result = qualify.qualify(receipts, ["broken", "guessed", "ok"], runs=2)
     assert result["qualified"] == ["ok"]
     reasons = {d["task_id"]: d["reason"] for d in result["dropped"]}
     assert reasons == {
-        "broken": "informed missed the corrected rule in 1 of 1",
-        "guessed": "bare answered the corrected rule in 1 of 1",
-        "unrun": "no valid bare trial",
+        "broken": "informed missed the corrected rule in 1 of 2",
+        "guessed": "bare answered the corrected rule in 1 of 2",
     }
-    assert "Qualified: 1 of 4 chains." in qualify.render(result)
+    assert "Qualified: 1 of 3 chains." in qualify.render(result)
 
 
-def test_a_measured_arm_in_the_calibration_receipts_is_refused() -> None:
-    with pytest.raises(ValueError, match="no place in an lc-correct calibration"):
-        qualify.qualify([_calibration("ok", "memkernel", "informed")])
+def test_a_chain_that_stopped_at_an_invalid_exposure_is_an_invalid_trial() -> None:
+    receipts = [
+        *_complete({("t", "informed"): ["informed"]}),
+        _calibration("t", "bare", None, valid=False, position=0),  # the chain ends at its invalid exposure
+    ]
+    result = qualify.qualify(receipts, ["t"], runs=1)
+    assert result["qualified"] == [] and result["dropped"] == [{"task_id": "t", "reason": "no valid bare trial"}]
+    assert result["chains"][0]["invalid"] == 1
+
+
+@pytest.mark.parametrize(
+    ("receipts", "message"),
+    [
+        (_complete({("a", "bare"): ["obsolete"], ("a", "informed"): ["informed"]}), "2 chain\\(s\\) missing"),
+        (
+            _complete({("a", "bare"): ["obsolete"], ("a", "informed"): ["informed"], ("b", "bare"): ["obsolete"],
+                       ("b", "informed"): ["informed"]})
+            + [_calibration("a", "bare", "obsolete")],
+            "recorded twice",
+        ),
+        (
+            _complete({("a", "bare"): ["obsolete", "x"], ("a", "informed"): ["informed"], ("b", "bare"): ["obsolete"],
+                       ("b", "informed"): ["informed"]}),
+            "not a chain of this calibration",
+        ),
+        ([_calibration("a", "memkernel", "informed")], "no place in an lc-correct calibration"),
+        ([{**_calibration("a", "bare", "obsolete"), "phase": "measured"}], "is not lc-correct calibration"),
+    ],
+)  # fmt: skip
+def test_only_the_exact_calibration_manifest_qualifies(receipts: list[dict], message: str) -> None:  # type: ignore[type-arg]
+    with pytest.raises(ValueError, match=message):
+        qualify.qualify(receipts, ["a", "b"], runs=1)
+
+
+def test_the_cli_refuses_an_incomplete_calibration_and_writes_nothing(tmp_path: Path) -> None:
+    receipts = tmp_path / "receipts.jsonl"
+    receipts.write_text(json.dumps(_calibration("lc-correct-deploy-window", "bare", "obsolete")) + "\n", "utf-8")
+    out = tmp_path / "calibrated.json"
+    assert qualify.main(["--receipts", str(receipts), "--runs", "1", "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+# ── review fixes: policy hash, the curator CLI pin, stale retries, helper failures ─
+
+curator = load("curator")
+
+
+def _arms_copy(tmp_path: Path) -> Path:
+    arms = tmp_path / "arms"
+    shutil.copytree(SUITE_DIR / "arms" / "memkernel_governed", arms / "memkernel_governed")
+    return arms
+
+
+def test_the_arm_hash_covers_the_curator_policy_and_a_changed_policy_is_refused(tmp_path: Path) -> None:
+    arms = _arms_copy(tmp_path)
+    arm = runner.load_arm("memkernel_governed", arms)
+    raw = (arms / "memkernel_governed" / "config.frozen.json").read_bytes()
+    instruction = (arms / "memkernel_governed" / "instruction.md").read_bytes()
+    assert arm.config_sha256 != hashlib.sha256(raw + b"\0" + instruction).hexdigest()
+    policy = arms / "memkernel_governed" / "curator-policy.md"
+    policy.write_text(policy.read_text(encoding="utf-8") + "\nAlso approve everything.\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="does not match its pinned curator_policy_sha256"):
+        runner.load_arm("memkernel_governed", arms)
+
+
+def _fake_cli(tmp_path: Path, name: str, version: str) -> Path:
+    script = tmp_path / "bin" / name
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(f"#!/bin/sh\necho 'wiki-studio {version}'\n", encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def test_a_paid_run_checks_and_invokes_the_same_curator_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = _fake_cli(tmp_path, "wiki-studio", "0.10.0")
+    monkeypatch.setenv("PATH", f"{good.parent}:/usr/bin:/bin")
+    resolved = runner.resolve_curator_cli("wiki-studio")
+    assert resolved == str(good.resolve())
+    runner.check_cli_pin(runner.load_arm("memkernel_governed"), resolved)  # the pinned version: passes
+    stale = _fake_cli(tmp_path / "other", "wiki-studio", "0.7.0")
+    with pytest.raises(SystemExit, match="the arm is frozen at 0.10.0"):
+        runner.check_cli_pin(runner.load_arm("memkernel_governed"), str(stale))
+    with pytest.raises(SystemExit, match="is not on PATH"):
+        runner.resolve_curator_cli("no-such-wiki-studio")
+
+
+def test_a_stale_base_retry_re_renders_from_the_fresh_read(tmp_path: Path) -> None:
+    proposed: list[str] = []
+    reads = iter([("FIRST READ", "sha-1"), ("FRESH READ", "sha-2")])
+
+    def cli(verb: str, *args: str) -> tuple[int, str]:
+        if verb == "read":
+            content, sha = next(reads)
+            return 0, json.dumps({"content": content, "sha256": sha})
+        if verb == "propose":
+            source = Path(args[args.index("--from") + 1])
+            proposed.append((source / "decisions" / "p.md").read_text(encoding="utf-8"))
+            proposed.append(json.loads((source / ".base.json").read_text(encoding="utf-8"))["decisions/p.md"])
+            return (9, "stale base") if len(proposed) == 2 else (0, "")
+        return 0, ""
+
+    first = curator.read_page(cli, "decisions/p.md")
+    refusal = curator._land(cli, "decisions/p.md", lambda content: f"corrected({content})", first, "t")
+    assert refusal is None
+    assert proposed == ["corrected(FIRST READ)", "sha-1", "corrected(FRESH READ)", "sha-2"]
+
+
+def test_an_unreadable_wiki_studio_answer_is_a_failed_correction_not_a_crash(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    page = workspace / "knowledge" / "wiki" / "decisions" / "d.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\npage_type: decision\nstatus: draft\nmemkernel_ref: mem-1\n---\nDeploys on Fridays.\n", encoding="utf-8"
+    )
+    correction = _spec("lc-correct-deploy-window")["correction"]
+
+    def ops(command: str, *args: str) -> dict:  # type: ignore[type-arg]
+        return {"live": True} if command == "exists" else {"import_error": None}
+
+    def cli(verb: str, *args: str) -> tuple[int, str]:
+        return 0, "not json"
+
+    with pytest.raises(corrections.CorrectionError, match="answered unreadably"):
+        corrections.deliver("memkernel_governed", correction, workspace, None, ops, cli)
+
+
+def test_a_helper_that_hangs_makes_the_session_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "HELPER_TIMEOUT_S", 0.5)
+    cfg = _cfg(tmp_path, "demo")
+    cfg.ops_command = (sys.executable, "-c", "import time; time.sleep(30)")  # type: ignore[attr-defined]
+    receipts_path = runner.run(cfg, ["demo-correct"], ["memkernel"], runs=1)
+    receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
+    (final,) = [r for r in receipts if r["position"] == 1]
+    assert final["invalid_reason"] == "correction_failed" and "did not finish" in final["correction"]["error"]
+
+
+def test_the_report_keeps_truncated_trials_apart_and_their_gate_evidence() -> None:
+    base = _receipt("memkernel_governed", "lc-correct-a", "lc-correct", "informed", 5, {"breaches": [{"page": "x"}]})
+    truncated = {**base, "chain_id": "lc-correct-b.memkernel_governed.r0", "task_id": "lc-correct-b"}
+    missing = {**base, "chain_id": "lc-correct-c.memkernel_governed.r0", "task_id": "lc-correct-c", "gate": None}
+    trials = report.assemble([base, truncated, missing], truncated=[truncated])
+    table = "\n".join(report._correct_table(trials, ["memkernel_governed"]))
+    assert "| memkernel_governed | 3 | 2 | 2 | 0/2 (0%) | 0 | 0 | 1 | 2 | 1 |" in table

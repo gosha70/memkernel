@@ -191,3 +191,25 @@ def test_the_gate_check_counts_a_direct_write_and_an_unapproved_promotion_as_bre
     assert reasons == {"decisions/direct.md": "no_receipt", "concepts/staging.md": "no_approval"}
     assert len(gate["unreviewed_drafts"]) == 1 and len(gate["approved"]) == 1
     assert gate["lint_violations"] > 0  # the direct write also breaks the wiki's structure
+
+
+@pytest.mark.parametrize("tamper", ["delete", "edit-plan"])
+def test_a_landed_page_whose_audit_archive_is_gone_or_altered_is_a_breach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tamper: str
+) -> None:
+    import shutil
+
+    chain = Chain(tmp_path, DEPLOY, "memkernel_governed", monkeypatch)
+    svc = chain.service()
+    svc.retain(X_DEPLOY, MemoryType.DECISION)
+    chain.export(svc)
+    (landed,) = chain.deliver()["landed"]
+    archives = chain.s1.workspace / "knowledge" / "wiki" / ".audit" / "proposals"
+    (archive,) = [a for a in archives.iterdir() if a.name.startswith("curator-")]
+    if tamper == "delete":
+        shutil.rmtree(archive)
+    else:
+        plan = archive / "plan.json"
+        plan.write_text(plan.read_text(encoding="utf-8").replace("curator", "someone"), encoding="utf-8")
+    gate = chain.gate()
+    assert gate["breaches"] == [{"page": landed, "reason": "no_archive"}]

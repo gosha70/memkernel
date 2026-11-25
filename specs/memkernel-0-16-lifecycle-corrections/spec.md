@@ -150,4 +150,3 @@ are listed for review.
 test that every fixture's competing page matches its chain's obsolete patterns caught it, and the patterns now
 accept the plural. Two chains' competing pages stated the old rule but not its answer; they now carry the obsolete
 answer as well.
-

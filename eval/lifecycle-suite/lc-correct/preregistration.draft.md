@@ -86,6 +86,9 @@ whether to run or to extend first.
 
 ## Report
 
-`report.py` adds an lc-correct section with each arm's informed, obsolete and other counts, the obsolete-answer
-rate, gate breaches, and the pairs against `bare`. It also adds the per-group token table (FR-005). The measured run's
-report answers #17's remaining question (D6).
+`report.py` has an lc-correct section with each arm's informed, obsolete and other counts, the obsolete-answer
+rate, invalid and truncated trials, gate breaches, and the pairs against `bare`. It also has the per-group token
+table (FR-005). **The primary endpoint is not implemented yet:** `_primary_endpoint` fixes the treatment as
+`memkernel`. Before the measured run it must be generalized to the four treatments above, each against `bare`, as
+one Holm family, with the chain verdicts defined here. The measured run's report answers #17's remaining question
+(D6).

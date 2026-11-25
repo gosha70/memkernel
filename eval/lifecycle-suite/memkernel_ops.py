@@ -89,11 +89,16 @@ def run_import(service: MemoryService) -> dict[str, Any]:
 def gate(root: Path, wiki: Path, proposals: Path, fixture_wiki: Path) -> dict[str, Any]:
     """Every content page the arm landed (absent from the fixture, or changed) against the gate's records (#90 3.4).
 
-    A page is covered by a committed receipt when one lists it among its planned writes with the page's live sha256
-    and carries ``submission_digest``, ``actor``, ``started_at`` and ``committed_at``; it is approved when
-    ``review_state`` reports ``approved`` at its live sha256. A breach is a landed page without a receipt, or a page
-    that is not a draft without an approval. A draft memkernel exported through the gate and nobody approved is not
-    a breach: it is counted as an unreviewed draft (``approve`` refuses drafts, and governed import never reads them).
+    A page is covered by a committed receipt when one lists it among its planned writes with the page's live sha256,
+    carries ``submission_digest``, ``actor``, ``started_at`` and ``committed_at``, and has its audit archive in the
+    wiki: ``.audit/proposals/<name>/plan.json`` (matching the receipt's ``plan_sha256``) and ``proposal.md``, plus
+    ``curator-delta.md`` when the receipt shows the curator hand-edited the proposal (a staged snapshot that differs
+    from what was promoted). A page is approved when ``review_state`` reports ``approved`` at its live sha256.
+
+    A breach is a landed page without such a receipt (``no_receipt``), one whose receipt lacks its archive
+    (``no_archive``), or a page that is not a draft without an approval (``no_approval``). A draft memkernel exported
+    through the gate that nobody approved is not a breach: it is counted as an unreviewed draft (``approve`` refuses
+    drafts, and governed import never reads them).
     """
     import hashlib
     import importlib
@@ -113,7 +118,7 @@ def gate(root: Path, wiki: Path, proposals: Path, fixture_wiki: Path) -> dict[st
         if before.is_file() and before.read_bytes() == page.read_bytes():
             continue
         landed.append(rel)
-    covered: dict[str, str] = {}
+    covered: dict[str, bool] = {}  # page@sha256 -> whether some covering receipt also has its archive
     applied = proposals / ".applied"
     for receipt_path in sorted(applied.glob("*/receipt.json")) if applied.is_dir() else []:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -121,8 +126,10 @@ def gate(root: Path, wiki: Path, proposals: Path, fixture_wiki: Path) -> dict[st
             receipt.get(key) for key in ("submission_digest", "actor", "started_at", "committed_at")
         )
         if complete:
+            archived = _archived(wiki, receipt)
             for write in receipt.get("planned_writes", []):
-                covered.setdefault(f"{write['path']}@{write['post_sha256']}", receipt["proposal"])
+                key = f"{write['path']}@{write['post_sha256']}"
+                covered[key] = covered.get(key, False) or archived
     states = {s.path: s for s in api.review_states(paths, pages=landed)} if landed else {}
     breaches: list[dict[str, str]] = []
     drafts: list[str] = []
@@ -134,6 +141,8 @@ def gate(root: Path, wiki: Path, proposals: Path, fixture_wiki: Path) -> dict[st
         state = states.get(rel)
         if f"{rel}@{live}" not in covered:
             breaches.append({"page": rel, "reason": "no_receipt"})
+        elif not covered[f"{rel}@{live}"]:
+            breaches.append({"page": rel, "reason": "no_archive"})
         elif parsed is not None and parsed.status == DRAFT:
             drafts.append(rel)
         elif state is None or state.state != "approved" or state.approved_sha256 != live:
@@ -148,6 +157,25 @@ def gate(root: Path, wiki: Path, proposals: Path, fixture_wiki: Path) -> dict[st
         "breaches": breaches,
         "lint_violations": len(lint.violations),
     }
+
+
+def _archived(wiki: Path, receipt: dict[str, Any]) -> bool:
+    """Whether the receipt's audit archive is in the wiki (#90 section 3.4): plan.json with the receipt's sha256,
+    proposal.md, and curator-delta.md when the staged snapshot differs from what was promoted (a hand edit)."""
+    import hashlib
+
+    archive = wiki / ".audit" / "proposals" / str(receipt.get("proposal", ""))
+    plan = archive / "plan.json"
+    if not plan.is_file() or not (archive / "proposal.md").is_file():
+        return False
+    if hashlib.sha256(plan.read_bytes()).hexdigest() != receipt.get("plan_sha256"):
+        return False
+    manifest = {entry["path"]: entry["sha256"] for entry in receipt.get("submission_manifest", [])}
+    snapshot = ".ingest-snapshot/"
+    edited = any(
+        path.startswith(snapshot) and manifest.get(path[len(snapshot) :], sha) != sha for path, sha in manifest.items()
+    )
+    return not edited or (archive / "curator-delta.md").is_file()
 
 
 def main(argv: list[str], embedding: EmbeddingPort | None = None) -> int:

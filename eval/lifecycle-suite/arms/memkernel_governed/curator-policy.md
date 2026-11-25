@@ -14,8 +14,10 @@ For each exported draft whose text matches an obsolete pattern:
 3. Write the corrected page: the title and heading become the brief's headline; the first section's text becomes
    the brief's rule; the other sections' text becomes a fixed line; `status: stable`; `corrects: <memkernel_ref>`;
    every other frontmatter key is kept.
-4. `wiki-studio propose --from <draft dir> --promote --by curator`. If it is refused, read the page again and retry
-   once with the new sha256; a second refusal refuses the draft, with the reason.
+4. `wiki-studio propose --from <draft dir> --promote --by curator`. If it is refused, read the page again and
+   retry once: the corrected page is rendered again from that fresh read (step 3), with its sha256 in `.base.json`,
+   so a concurrent change is corrected rather than overwritten. A second refusal refuses the draft, with the
+   reason.
 5. `wiki-studio approve <page> --by curator`; a refusal refuses the draft, with the reason.
 
 Drafts that carry no obsolete pattern are left as they are. With no matching draft the curator refuses, with the

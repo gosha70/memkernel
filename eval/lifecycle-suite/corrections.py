@@ -69,7 +69,25 @@ def deliver(
     ops: curator.Ops | None,
     cli: curator.Cli | None,
 ) -> dict[str, Any]:
-    """Deliver ``correction`` along ``arm``'s path and return what was done, for the session's receipt."""
+    """Deliver ``correction`` along ``arm``'s path and return what was done, for the session's receipt.
+
+    Any helper answer the delivery cannot read (malformed JSON, a missing key, an unreadable page) is a harness
+    failure, raised as :class:`CorrectionError` so the session is invalid (``correction_failed``), never a crash.
+    """
+    try:
+        return _deliver(arm, correction, workspace, memory_dir, ops, cli)
+    except (curator.CuratorError, KeyError, TypeError, ValueError) as exc:
+        raise CorrectionError(f"{arm}: the correction's helpers answered unreadably: {exc}") from exc
+
+
+def _deliver(
+    arm: str,
+    correction: dict[str, Any],
+    workspace: Path,
+    memory_dir: Path | None,
+    ops: curator.Ops | None,
+    cli: curator.Cli | None,
+) -> dict[str, Any]:
     path = PATHS[arm]
     if path in (NONE, BRIEF):
         return {"path": path, "delivered": path == BRIEF}

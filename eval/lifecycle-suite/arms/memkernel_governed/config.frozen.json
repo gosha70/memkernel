@@ -41,7 +41,7 @@
   "wiki_governed": true,
   "curator": "scripted",
   "curator_policy": "curator-policy.md",
-  "curator_policy_sha256": "b5d79ca8d232b19f7bf5a81a8608c18ff5e5a802246d17af6969612222249e23",
+  "curator_policy_sha256": "870769bf519422873dd6dc7d7bf52d14e9cb5e7ad5f009391012de722df3a403",
   "cli_pin": {
     "command": "wiki-studio",
     "version": "0.10.0"

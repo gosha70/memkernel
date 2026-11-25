@@ -90,17 +90,46 @@ def drafts(workspace: Path) -> list[tuple[str, str, str]]:
     return found
 
 
-def _land(cli: Cli, rel: str, text: str, base: str | None, name: str, index_line: str | None = None) -> str | None:
-    """Propose and promote one page (an update guarded by ``base``, or a create), then approve it; None on success,
-    else the refusal. A refused propose is retried once from a fresh ``read`` (the policy's stale-base retry)."""
+class CuratorError(RuntimeError):
+    """wiki-studio or the memkernel helper answered with something the curator cannot read: a harness failure."""
+
+
+def read_page(cli: Cli, rel: str) -> tuple[str, str] | None:
+    """(content, sha256) from ``read --json``, or None when wiki-studio refuses the read."""
+    code, out = cli("read", "--json", rel)
+    if code != 0:
+        return None
+    try:
+        parsed = json.loads(out)
+        return str(parsed["content"]), str(parsed["sha256"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise CuratorError(f"wiki-studio read --json {rel} printed no page: {exc}") from exc
+
+
+def _land(
+    cli: Cli,
+    rel: str,
+    render: Callable[[str], str],
+    read: tuple[str, str] | None,
+    name: str,
+    index_line: str | None = None,
+) -> str | None:
+    """Propose and promote one page, then approve it; None on success, else the refusal.
+
+    An update starts from ``read`` (content, sha256) and is guarded by its sha256; ``render`` turns the page's
+    content into the corrected page. A refused propose is retried once from a fresh ``read``, re-rendered from that
+    read, so a concurrent change is corrected rather than overwritten (the policy's stale-base retry). A create
+    (``read`` None) renders from nothing and is not retried.
+    """
     for attempt in (1, 2):
+        text = render(read[0] if read is not None else "")
         with tempfile.TemporaryDirectory() as tmp:
             draft = Path(tmp) / "draft"
             target = draft / rel
             target.parent.mkdir(parents=True)
             target.write_text(text, encoding="utf-8")
-            if base is not None:
-                (draft / ".base.json").write_text(json.dumps({rel: base}), encoding="utf-8")
+            if read is not None:
+                (draft / ".base.json").write_text(json.dumps({rel: read[1]}), encoding="utf-8")
             if index_line is not None:
                 (draft / "index.md").write_text(index_line + "\n", encoding="utf-8")
             code, out = cli(
@@ -108,12 +137,11 @@ def _land(cli: Cli, rel: str, text: str, base: str | None, name: str, index_line
             )
         if code == 0:
             break
-        if base is None or attempt == 2:
+        if read is None or attempt == 2:
             return f"propose refused (exit {code}): {out.strip()[:300]}"
-        code, out = cli("read", "--json", rel)
-        if code != 0:
-            return f"read failed (exit {code})"
-        base = json.loads(out)["sha256"]
+        read = read_page(cli, rel)
+        if read is None:
+            return "read failed before the retry"
     code, out = cli("approve", rel, "--by", CURATOR)
     return None if code == 0 else f"approve refused (exit {code}): {out.strip()[:300]}"
 
@@ -130,13 +158,16 @@ def curate(mode: str, brief: dict[str, Any], workspace: Path, ops: Ops, cli: Cli
         if not ops("exists", ref)["live"]:
             refusals.append({"page": rel, "reason": f"corrects target {ref} is not a live memory"})
             continue
-        code, out = cli("read", "--json", rel)
-        if code != 0:
-            refusals.append({"page": rel, "reason": f"read failed (exit {code})"})
+        read = read_page(cli, rel)
+        if read is None:
+            refusals.append({"page": rel, "reason": "read failed"})
             continue
-        read = json.loads(out)
         names = list(dict.fromkeys([ref, *extra]))
-        refusal = _land(cli, rel, corrected(read["content"], brief, names), read["sha256"], f"curator-{number}")
+
+        def render(content: str, names: list[str] = names) -> str:
+            return corrected(content, brief, names)
+
+        refusal = _land(cli, rel, render, read, f"curator-{number}")
         if refusal is None:
             landed.append(rel)
         else:
@@ -147,7 +178,7 @@ def curate(mode: str, brief: dict[str, Any], workspace: Path, ops: Ops, cli: Cli
         rel = oracle_page_path(brief, workspace)
         text = oracle_page(brief, extra, Path(rel).stem)
         index_line = f"- [{brief['headline']}]({rel}) — the current rule."
-        refusal = _land(cli, rel, text, None, "curator-oracle", index_line)
+        refusal = _land(cli, rel, lambda _: text, None, "curator-oracle", index_line)
         if refusal is None:
             landed.append(rel)
         else:

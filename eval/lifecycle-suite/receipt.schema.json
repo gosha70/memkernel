@@ -103,6 +103,27 @@
       "required": ["path", "delivered"],
       "properties": {"path": {"type": "string"}, "delivered": {"type": "boolean"}}
     },
-    "gate": {"type": ["object", "null"]}
+    "gate": {
+      "type": ["object", "null"],
+      "required": ["landed", "approved", "unreviewed_drafts", "breaches", "lint_violations"],
+      "properties": {
+        "landed": {"type": "array", "items": {"type": "string"}},
+        "approved": {"type": "array", "items": {"type": "string"}},
+        "unreviewed_drafts": {"type": "array", "items": {"type": "string"}},
+        "breaches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["page", "reason"],
+            "properties": {
+              "page": {"type": "string"},
+              "reason": {"type": "string", "enum": ["no_receipt", "no_archive", "no_approval"]}
+            }
+          }
+        },
+        "lint_violations": {"type": "integer", "minimum": 0},
+        "error": {"type": "string"}
+      }
+    }
   }
 }
