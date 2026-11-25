@@ -10,8 +10,9 @@ and a `collapsed` list in receipts naming, for each hidden candidate, the shown 
 between them.
 
 Mismatches:
-  - none. FR-003 states both invariants verbatim and how the selection meets them. One reading is left to the owner
-    (Q1: whether a chain's representative keeps its own rank or takes its ancestor's).
+  - one open reading, Q1: "highest-ranking eligible representative" may mean the shown descendant keeps its own
+    rank (as written) or takes its ancestor's. Left to the owner in review; the build waits for the spec's merge.
+    Otherwise none: FR-003 states both invariants verbatim and how the selection meets them.
 
 Verdict: aligned
 Confidence: medium

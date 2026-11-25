@@ -65,6 +65,8 @@ Two parts, one PR (one slice of #59):
   promoted copy with the page's source, reached only through `wiki-source:`, staying hidden, and the same through
   `promoted_from` only),
   the `collapsed` count, `promote` dropping the tag.
+- `tests/unit/test_harness_receipts.py`: the `collapsed` list (`ref_id`, `by`, `path` with both ends) on a `recall`
+  receipt, on `RecallReceipt`, and on a hook block's log record; absent from a log record when nothing collapsed.
 - The governed loop: in `tests/integration/test_wiki_import_governed.py`, export → approve unchanged → import; the
   approved page's memory is linked and the startup block and `recall` show it, not the source (SC-1).
 - `tests/e2e`: `wiki_import`'s result carries `linked` and `unlinked`.

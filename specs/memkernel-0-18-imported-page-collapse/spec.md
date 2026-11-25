@@ -65,9 +65,9 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     memories descend from it; an ancestor that was never in the window is not counted, as `excluded` counts only
     records the window considered.
   - **Receipts.** `recall`'s receipt and a hook block's log record list each collapsed candidate as
-    `{"ref_id", "by", "path"}`: the hidden record, the shown memory that hid it, and the ref_ids from `by` to the
-    hidden record along the links followed. The list is written only when it is not empty. `RecallReceipt` gains the
-    same list.
+    `{"ref_id", "by", "path"}`: the hidden record, the shown memory that hid it, and the ref_ids along the links followed, from `by` to the
+    hidden record, both included. A log record carries the list only when it is not empty; `RecallReceipt.collapsed`
+    is always present, empty when nothing collapsed, as `memories` is.
   - **The owner's invariants (2026-11-25, verbatim).** "For D2, collapse must operate on the actual final displayed
     selection, not on the larger candidate pool. If a descendant is ranked sixth and only five results are shown, it
     must not suppress an otherwise visible ancestor. The same principle applies when widening the recall search
@@ -75,7 +75,8 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     specified selection rules, without displaying both an ancestor and its descendant. Keep enough provenance to
     explain a `collapsed` result in receipts."
   - **How the selection meets them.** The selection keeps each item at its own rank. A descendant hides its ancestors
-    only once it is kept within the limit, and a wider window is selected from scratch. Of a chain, the item shown is
+    only once it is kept within the limit, and each wider window must be selected again from its first candidate, so a
+    descendant that only a wider window brings in can hide an ancestor the narrower one showed. Of a chain, the item shown is
     the highest-ranked descendant that makes the limit; an ancestor ranked above it gives way to it, and the next
     candidate fills the freed slot (Q1).
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
