@@ -48,9 +48,10 @@ Two parts, one PR (one slice of #59):
 
 | File | Change | Requirement |
 |---|---|---|
-| `src/memkernel/core/models.py` | `WIKI_SOURCE_TAG = "wiki-source:"`, added to `WIKI_IMPORT_TAG_PREFIXES` so `promote` drops it; `Memory.wiki_source` (property: the tag's ref_id or None); `EXCLUDED_COLLAPSED` in `EXCLUSION_REASONS` | FR-002, D2 |
+| `src/memkernel/core/models.py` | `WIKI_SOURCE_TAG = "wiki-source:"`, added to `WIKI_IMPORT_TAG_PREFIXES` so `promote` drops it; `Memory.wiki_source` (property: the tag's ref_id or None); `EXCLUDED_COLLAPSED` in `EXCLUSION_REASONS`; `RecallReceipt.collapsed` | FR-002, FR-003, D2 |
 | `src/memkernel/core/services.py` | `retain` refuses the reserved prefix; `set_wiki_source(ref_id, source_ref or None)` (import-only, as `set_wiki_identity`); recall's collapse; candidates | FR-002–FR-004 |
 | `src/memkernel/wiki/sync.py` | `_link_source`, called in `_import_reviewed` after `_reconcile` (`sync.py:697`); `ImportReport.linked` / `unlinked`; the reason constants | FR-001, FR-005 |
+| `src/memkernel/recall_log.py` | the `collapsed` list on recall and hook records, written when not empty | FR-003 |
 | `src/memkernel/mcp/tools/wiki.py` | the two lists in `wiki_import`'s result | FR-005 |
 | `src/memkernel/lifecycle.py` | `_distinct` collapses after the limit, both links | FR-003 |
 | `README.md`, `CHANGELOG.md` | the wiki section; `[Unreleased]` | FR-006 |

@@ -1,6 +1,7 @@
 # Spec: hide a wiki page's source memory while the page's memory is shown (#164, #59 S5)
 
-Status: draft, for the owner's review. The owner's decisions of 2026-11-25 are fixed (O1–O7); D1–D6 are proposed.
+Status: in review on PR #165. The owner's decisions of 2026-11-25 are fixed (O1–O7), and the owner approved D1–D6
+the same day, D2 as option (c); their invariants are in FR-003.
 S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's build, then S5's build.
 
 ## What memkernel does today (`main` at `3ba5c72`)
@@ -63,6 +64,20 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     outside the window hides nothing. `collapsed` counts each hidden candidate of the window once, however many shown
     memories descend from it; an ancestor that was never in the window is not counted, as `excluded` counts only
     records the window considered.
+  - **Receipts.** `recall`'s receipt and a hook block's log record list each collapsed candidate as
+    `{"ref_id", "by", "path"}`: the hidden record, the shown memory that hid it, and the ref_ids from `by` to the
+    hidden record along the links followed. The list is written only when it is not empty. `RecallReceipt` gains the
+    same list.
+  - **The owner's invariants (2026-11-25, verbatim).** "For D2, collapse must operate on the actual final displayed
+    selection, not on the larger candidate pool. If a descendant is ranked sixth and only five results are shown, it
+    must not suppress an otherwise visible ancestor. The same principle applies when widening the recall search
+    window." "For chains, the visible result should be the highest-ranking eligible representative under the
+    specified selection rules, without displaying both an ancestor and its descendant. Keep enough provenance to
+    explain a `collapsed` result in receipts."
+  - **How the selection meets them.** The selection keeps each item at its own rank. A descendant hides its ancestors
+    only once it is kept within the limit, and a wider window is selected from scratch. Of a chain, the item shown is
+    the highest-ranked descendant that makes the limit; an ancestor ranked above it gives way to it, and the next
+    candidate fills the freed slot (Q1).
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
 - **FR-005 The report (D5).** `ImportReport` gains `linked` (`{"page", "ref_id"}`) and `unlinked`
   (`{"page", "ref_id", "reason"}`), with the first check that fails, in FR-001's numbered order and, within a condition, in the order listed: condition 2 `has_corrects`; 3
@@ -93,12 +108,12 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
 - **O6** Hook latency goes to Phase 4.
 - **O7** Order: S5's spec PR, then #90's build, then S5's build.
 
-## Decisions (proposed)
+## Decisions D1–D6 (approved by the owner, 2026-11-25)
 
 - **D1 A reserved tag.** Recommended: `wiki-source:<ref_id>`. Tags are already how the import marks its records, they
   load with a default on older stores (no tag, no link), and the import already updates its own records' tags in
   place through `set_wiki_identity`. A new metadata field would need its own update path for the frontmatter-only
-  revisions that `retain` deduplicates.
+  revisions that `retain` deduplicates. **Approved:** ordinary `retain` and `promote` must not forge it.
 - **D2 Where `recall` hides.** Options:
   (a) hook blocks only, as promotion works today;
   (b) hook blocks and `recall`, imported links only;
@@ -107,23 +122,30 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   `recall` already applies its supersede link fallback (`services.py:1150`, `1202`). A source hidden this way is
   counted in the receipt's `excluded` under a new reason, `collapsed`. (c) changes `recall` for promoted chains too,
   which no earlier slice did; (b) keeps that out of S5, and differs in the build only in following `wiki-source:`
-  links alone inside `recall`.
+  links alone inside `recall`. **Approved: (c)**, with `collapsed` as the new receipt reason.
 - **D3 Promotion candidates.** Recommended: **not a candidate**, as with a promoted source (`services.py:1558-1563`).
   The page is reviewed knowledge already, and promoting the source would put a long-term copy beside the page. In
   practice this changes little: `wiki_export` drafts only long-term memories (`sync.py:258`), which are never
   candidates (`services.py:1562`). It matters only for a library caller that passes short-term memories to
-  `WikiExporter.export(memories=...)`.
+  `WikiExporter.export(memories=...)`. **Approved:** not a candidate.
 - **D4 wiki-studio's ADR-0002.** Recommended: **yes**, register `memkernel_ref`, `memkernel_sha256` and
   `memkernel_hash_scheme` as memkernel-owned keys kept byte for byte and not interpreted, as `corrects` is. After S5
   memkernel reads all three at import, and today they survive only because `api.propose` writes a caller's bytes
   unchanged; a later wiki-studio change could drop or rewrite them and silently turn the link off. The ADR is
   wiki-studio's file (it says memkernel does not write it), so this is a wiki-studio issue, filed on the owner's go.
-  S5's build does not wait for it.
+  S5's build does not wait for it. **Approved;** filed as gosha70/wiki-studio#142.
 - **D5 Report the link.** Recommended: `linked` and `unlinked` as in FR-005, so a curator can see why a page's source
-  is still shown. A page without `memkernel_ref` reports nothing (O3).
+  is still shown. A page without `memkernel_ref` reports nothing (O3). **Approved.**
 - **D6 Which imports link.** Recommended: **only the governed path** (approved revisions through wiki-studio). The
   ungoverned path imports drafts too, and an exported draft is the exporter's own copy with placeholder sections
-  (`sync.py:383-388`): hiding the source behind it would show the agent less.
+  (`sync.py:383-388`): hiding the source behind it would show the agent less. **Approved.**
+
+## Open question
+
+- **Q1 Where a chain's representative sits.** As written, the shown descendant keeps its own rank: with a source at
+  rank 2 and its page at rank 4, the page shows at rank 3 once the source is removed. The other reading of
+  "highest-ranking eligible representative" is that the page takes the source's place, at rank 2. The spec keeps its
+  own rank unless the owner chooses the other.
 
 ## Success Criteria
 
@@ -141,5 +163,6 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
 - **SC-4 Reserved tag.** `retain` with a `wiki-source:` tag raises `ValueError`.
 - **SC-5 Re-import.** A page imported before S5 gains the link on the next import; a frontmatter-only revision that
   adds `corrects`, or one that removes `memkernel_ref`, drops it.
-- **SC-6 Candidates (D3)** and the receipt's `collapsed` count (D2).
+- **SC-6 Candidates (D3)**, the receipt's `collapsed` count (D2), and the `collapsed` list naming `by` and `path` for
+  `recall` and a hook block.
 - **SC-7** The fast suite, ruff, `mypy --strict` and coverage gates pass; README and CHANGELOG updated.
