@@ -38,8 +38,9 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   revision that changed only frontmatter, which `retain` deduplicates) through an import-only service method, as
   `set_wiki_identity` does for the identity tags. Each import sets the tag to what FR-001 decides now: it adds it,
   replaces a stale one, or removes it. `retain` raises `ValueError` for a caller-supplied tag with this prefix, as it
-  does for `wiki-path:` and `wiki-id:`, so no caller can hide another memory. `promote` drops it from the copy, as it
-  drops the other import tags (`services.py:1502`). A page memory that is later superseded or withdrawn keeps its tag
+  does for `wiki-path:` and `wiki-id:`, so no caller can hide another memory. `promote` leaves it off the promoted copy, as it
+  does the other import tags (`services.py:1502`); the page memory keeps its own, so a promoted copy of a page still
+  reaches the source through the page. A page memory that is later superseded or withdrawn keeps its tag
   but hides nothing, since it is never shown.
 - **FR-003 Hiding (O1, D2).** A memory's **ancestors** are the memories reached from it by following `promoted_from`
   and `wiki-source:` links, repeatedly (a promoted copy of a page reaches the page and the page's source). A memory is
@@ -47,20 +48,24 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   dropped (flagged, expired, out of scope, outside the window, cut by the limit), the source can appear. Nothing is
   superseded, withdrawn or edited in the source; `get`, `list_memories`, health and the context diff see it as before.
   - **The selection.** One pass over the candidates in rank order: skip a candidate that is already hidden; otherwise
-    keep it, hide its ancestors, and remove any of them already kept; stop at the limit. The pass visits each
-    candidate once, so it ends, and the rank order fixes the result. Because hiding follows ancestors transitively, a
-    kept item removed later is an ancestor of a later kept item, so everything it hid stays hidden by a shown item.
+    keep it, hide its ancestors (the whole transitive set), and remove any of them already kept; stop at the limit.
+    The pass visits each candidate once, so it ends, and the rank order fixes the result. Removal needs no re-hiding
+    step: a kept item removed later is an ancestor of the later kept item, so its own ancestors are in that item's
+    set too and stay hidden by a shown item.
     Ancestors are followed through the store, with a visited set, so a link to a record outside the candidates still
     counts.
   - **Hook blocks:** `_distinct` uses the selection for both promoted and imported links, which also fixes the
     6th–10th case in the table above.
-  - **MCP `recall`:** per D2, the selection over `recall`'s filtered fetch window (which widens until it has `top_k`
-    live results), with `top_k` as the limit. A page memory outside the window hides nothing. Each hidden source counts
-    once under `collapsed`, however many shown memories descend from it.
+  - **MCP `recall`:** per D2, the selection over `recall`'s filtered fetch window, with `top_k` as the limit; the
+    window widens until the selection, not the filter, has `top_k` results (or the store is exhausted). A page memory
+    outside the window hides nothing. `collapsed` counts each hidden candidate of the window once, however many shown
+    memories descend from it; an ancestor that was never in the window is not counted, as `excluded` counts only
+    records the window considered.
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
 - **FR-005 The report (D5).** `ImportReport` gains `linked` (`{"page", "ref_id"}`) and `unlinked`
-  (`{"page", "ref_id", "reason"}`). The reasons, one per refused condition of FR-001: `has_corrects`, `not_in_store`,
-  `wiki_memory`, `retired`, `not_project_scope`, `no_hash`, `unknown_scheme`, `hash_mismatch`. The MCP `wiki_import`
+  (`{"page", "ref_id", "reason"}`), with the first check of FR-001 that fails: condition 2 `has_corrects`; 3
+  `not_in_store` or `wiki_memory`; 4 `retired`; 5 `not_project_scope`; 6 `no_hash`, `unknown_scheme` or
+  `hash_mismatch`. The MCP `wiki_import`
   result carries both lists. Two pages may link the same source; each is reported.
 - **FR-006 Docs.** README (the wiki section: what the link does and when it is refused) and CHANGELOG under
   `[Unreleased]`.

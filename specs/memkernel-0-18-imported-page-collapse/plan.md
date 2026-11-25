@@ -32,8 +32,9 @@ Two parts, one PR (one slice of #59):
    come back with a ref_id.
 2. **Hide when shown** (FR-003, FR-004).
    - One helper for FR-003's selection, `collapse(candidates, limit, ancestors)`, in `core/` (no adapter), used by both
-     callers; `ancestors` is a function over the store that follows `promoted_from` and `wiki-source:` with a visited
-     set.
+     callers; `ancestors(memory) -> set[str]` returns the full transitive set of ref_ids, following `promoted_from`
+     and `wiki-source:` through the store with a visited set. D2's (b) or (c) is only which links the caller's
+     `ancestors` follows, so the choice is cheap to reverse.
    - `src/memkernel/lifecycle.py`, `_distinct`: the checkpoint and duplicate filter as today, then the selection. A
      page memory ranked below the limit no longer hides anything.
    - `src/memkernel/core/services.py`, `recall` (D2 (c)): the selection over `_filter_live`'s result in place of the
@@ -58,7 +59,8 @@ Two parts, one PR (one slice of #59):
 
 - `tests/unit/test_imported_page_collapse.py`: FR-001's conditions one by one (SC-2), the reserved tag (SC-4),
   re-import, frontmatter-only revisions and a removed `memkernel_ref` (SC-5), candidates (SC-6), the selection's cases
-  (SC-3: never both, chains, two pages one source, a source ranked above its page, determinism under the same input),
+  (SC-3: never both, chains, two pages one source, a source ranked above its page, a kept page removed by a later
+  promoted copy with the page's source staying hidden),
   the `collapsed` count, `promote` dropping the tag.
 - The governed loop: in `tests/integration/test_wiki_import_governed.py`, export → approve unchanged → import; the
   approved page's memory is linked and the startup block and `recall` show it, not the source (SC-1).
