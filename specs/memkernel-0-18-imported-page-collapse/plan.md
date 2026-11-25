@@ -31,20 +31,24 @@ Two parts, one PR (one slice of #59):
    the "already current" early return, and frontmatter-only revisions that `retain` deduplicates, since all three
    come back with a ref_id.
 2. **Hide when shown** (FR-003, FR-004).
-   - `src/memkernel/lifecycle.py`, `_distinct`: take the first `limit` distinct items, then drop the sources (promoted
-     and imported) of the items kept and refill from the remaining candidates; repeat until nothing changes. A page
-     memory ranked below the limit no longer hides anything.
-   - `src/memkernel/core/services.py`, `recall` (D2 (c)): after `_filter_live` and before the slice to `top_k`, the
-     same loop over the filtered list; each hidden source counts once under `collapsed` in `excluded`.
+   - One helper for FR-003's selection, `collapse(candidates, limit, ancestors)`, in `core/` (no adapter), used by both
+     callers; `ancestors` is a function over the store that follows `promoted_from` and `wiki-source:` with a visited
+     set.
+   - `src/memkernel/lifecycle.py`, `_distinct`: the checkpoint and duplicate filter as today, then the selection. A
+     page memory ranked below the limit no longer hides anything.
+   - `src/memkernel/core/services.py`, `recall` (D2 (c)): the selection over `_filter_live`'s result in place of the
+     slice to `top_k`; each hidden source counts once under `collapsed` in `excluded`. The window-widening loop
+     counts results after the selection, so a collapse that leaves fewer than `top_k` widens the window as a filtered
+     record does. Under (b) the `ancestors` function follows `wiki-source:` only.
    - `consolidate`: a source linked from a live page memory joins `promoted_sources` (D3).
 
 ## Files
 
 | File | Change | Requirement |
 |---|---|---|
-| `src/memkernel/core/models.py` | `WIKI_SOURCE_TAG = "wiki-source:"`; `Memory.wiki_source` (property: the tag's ref_id or None); `EXCLUDED_COLLAPSED` in `EXCLUSION_REASONS` | FR-002, D2 |
+| `src/memkernel/core/models.py` | `WIKI_SOURCE_TAG = "wiki-source:"`, added to `WIKI_IMPORT_TAG_PREFIXES` so `promote` drops it; `Memory.wiki_source` (property: the tag's ref_id or None); `EXCLUDED_COLLAPSED` in `EXCLUSION_REASONS` | FR-002, D2 |
 | `src/memkernel/core/services.py` | `retain` refuses the reserved prefix; `set_wiki_source(ref_id, source_ref or None)` (import-only, as `set_wiki_identity`); recall's collapse; candidates | FR-002–FR-004 |
-| `src/memkernel/wiki/sync.py` | `_link_source`; `ImportReport.linked` / `unlinked`; reason constants | FR-001, FR-005 |
+| `src/memkernel/wiki/sync.py` | `_link_source`, called in `_import_reviewed` after `_reconcile` (`sync.py:697`); `ImportReport.linked` / `unlinked`; the reason constants | FR-001, FR-005 |
 | `src/memkernel/mcp/tools/wiki.py` | the two lists in `wiki_import`'s result | FR-005 |
 | `src/memkernel/lifecycle.py` | `_distinct` collapses after the limit, both links | FR-003 |
 | `README.md`, `CHANGELOG.md` | the wiki section; `[Unreleased]` | FR-006 |
@@ -53,8 +57,9 @@ Two parts, one PR (one slice of #59):
 ## Tests
 
 - `tests/unit/test_imported_page_collapse.py`: FR-001's conditions one by one (SC-2), the reserved tag (SC-4),
-  re-import and frontmatter-only revisions (SC-5), candidates (SC-6), `_distinct` and `recall` never hiding both
-  (SC-3), the `collapsed` count.
+  re-import, frontmatter-only revisions and a removed `memkernel_ref` (SC-5), candidates (SC-6), the selection's cases
+  (SC-3: never both, chains, two pages one source, a source ranked above its page, determinism under the same input),
+  the `collapsed` count, `promote` dropping the tag.
 - The governed loop: in `tests/integration/test_wiki_import_governed.py`, export → approve unchanged → import; the
   approved page's memory is linked and the startup block and `recall` show it, not the source (SC-1).
 - `tests/e2e`: `wiki_import`'s result carries `linked` and `unlinked`.

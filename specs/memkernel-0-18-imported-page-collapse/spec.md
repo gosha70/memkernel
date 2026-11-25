@@ -38,18 +38,30 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   revision that changed only frontmatter, which `retain` deduplicates) through an import-only service method, as
   `set_wiki_identity` does for the identity tags. Each import sets the tag to what FR-001 decides now: it adds it,
   replaces a stale one, or removes it. `retain` raises `ValueError` for a caller-supplied tag with this prefix, as it
-  does for `wiki-path:` and `wiki-id:`, so no caller can hide another memory.
-- **FR-003 Hiding (O1, D2).** A live source is hidden only by a linked page memory that is itself shown in the same
-  block or result. Never both: if the page's memory is dropped (flagged, expired, out of scope, cut by the limit), the
-  source can appear. Nothing is superseded, withdrawn or edited in the source; `get`, `list_memories`, health and the
-  context diff see it as before.
-  - **Hook blocks:** `_distinct` hides the sources of the items it keeps, after the limit, for both promoted and
-    imported links (this also fixes the 6th–10th case in the table above).
-  - **MCP `recall`:** per D2.
+  does for `wiki-path:` and `wiki-id:`, so no caller can hide another memory. `promote` drops it from the copy, as it
+  drops the other import tags (`services.py:1502`). A page memory that is later superseded or withdrawn keeps its tag
+  but hides nothing, since it is never shown.
+- **FR-003 Hiding (O1, D2).** A memory's **ancestors** are the memories reached from it by following `promoted_from`
+  and `wiki-source:` links, repeatedly (a promoted copy of a page reaches the page and the page's source). A memory is
+  hidden only when one of its descendants is shown in the same block or result. Never both: if the page's memory is
+  dropped (flagged, expired, out of scope, outside the window, cut by the limit), the source can appear. Nothing is
+  superseded, withdrawn or edited in the source; `get`, `list_memories`, health and the context diff see it as before.
+  - **The selection.** One pass over the candidates in rank order: skip a candidate that is already hidden; otherwise
+    keep it, hide its ancestors, and remove any of them already kept; stop at the limit. The pass visits each
+    candidate once, so it ends, and the rank order fixes the result. Because hiding follows ancestors transitively, a
+    kept item removed later is an ancestor of a later kept item, so everything it hid stays hidden by a shown item.
+    Ancestors are followed through the store, with a visited set, so a link to a record outside the candidates still
+    counts.
+  - **Hook blocks:** `_distinct` uses the selection for both promoted and imported links, which also fixes the
+    6th–10th case in the table above.
+  - **MCP `recall`:** per D2, the selection over `recall`'s filtered fetch window (which widens until it has `top_k`
+    live results), with `top_k` as the limit. A page memory outside the window hides nothing. Each hidden source counts
+    once under `collapsed`, however many shown memories descend from it.
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
 - **FR-005 The report (D5).** `ImportReport` gains `linked` (`{"page", "ref_id"}`) and `unlinked`
-  (`{"page", "ref_id", "reason"}`, one reason per refused FR-001 condition 2–6). The MCP `wiki_import` result carries
-  both.
+  (`{"page", "ref_id", "reason"}`). The reasons, one per refused condition of FR-001: `has_corrects`, `not_in_store`,
+  `wiki_memory`, `retired`, `not_project_scope`, `no_hash`, `unknown_scheme`, `hash_mismatch`. The MCP `wiki_import`
+  result carries both lists. Two pages may link the same source; each is reported.
 - **FR-006 Docs.** README (the wiki section: what the link does and when it is refused) and CHANGELOG under
   `[Unreleased]`.
 
@@ -87,7 +99,8 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   Recommended: **(c)**. #59's item is "recall collapses promoted and imported chains", and both checks sit where
   `recall` already applies its supersede link fallback (`services.py:1150`, `1202`). A source hidden this way is
   counted in the receipt's `excluded` under a new reason, `collapsed`. (c) changes `recall` for promoted chains too,
-  which no earlier slice did; (b) keeps that out of S5.
+  which no earlier slice did; (b) keeps that out of S5, and differs in the build only in following `wiki-source:`
+  links alone inside `recall`.
 - **D3 Promotion candidates.** Recommended: **not a candidate**, as with a promoted source (`services.py:1558-1563`).
   The page is reviewed knowledge already, and promoting the source would put a long-term copy beside the page. In
   practice this changes little: `wiki_export` drafts only long-term memories (`sync.py:258`), which are never
@@ -114,10 +127,12 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   invalid), not in the store, a `wiki` memory, superseded, withdrawn, agent or task scope, hash mismatch, no
   `memkernel_sha256`, an unknown scheme. A page without `memkernel_ref` gets no link and no report entry. A page
   exported before 0.17 (no `memkernel_hash_scheme`) links under `sha256-raw`.
-- **SC-3 Never both.** With the page's memory flagged, expired, or ranked past the limit, the source is shown. The
-  promoted-copy case past the hook limit is covered too.
+- **SC-3 Never both.** With the page's memory flagged, expired, outside the window or ranked past the limit, the
+  source is shown. Also covered: the promoted-copy case past the hook limit; a chain (a promoted copy of a page hides
+  the page and its source); two pages linking one source (counted once); a source ranked above its page (removed when
+  the page is kept, and the slot refilled).
 - **SC-4 Reserved tag.** `retain` with a `wiki-source:` tag raises `ValueError`.
 - **SC-5 Re-import.** A page imported before S5 gains the link on the next import; a frontmatter-only revision that
-  adds `corrects` drops it.
+  adds `corrects`, or one that removes `memkernel_ref`, drops it.
 - **SC-6 Candidates (D3)** and the receipt's `collapsed` count (D2).
 - **SC-7** The fast suite, ruff, `mypy --strict` and coverage gates pass; README and CHANGELOG updated.
