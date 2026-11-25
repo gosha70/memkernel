@@ -65,9 +65,10 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     memories descend from it; an ancestor that was never in the window is not counted, as `excluded` counts only
     records the window considered.
   - **Receipts.** `recall`'s receipt and a hook block's log record list each collapsed candidate as
-    `{"ref_id", "by", "path"}`: the hidden record, the shown memory that hid it, and the ref_ids along the links followed, from `by` to the
-    hidden record, both included. A log record carries the list only when it is not empty; `RecallReceipt.collapsed`
-    is always present, empty when nothing collapsed, as `memories` is.
+    `{"ref_id", "by", "path"}`, in the order the selection hid them. `ref_id` is the hidden record; `by` is the shown
+    memory that hid it; `path` is the list of ref_ids along the links followed, starting with `by` and ending with
+    `ref_id`. A log record carries the list only when it is not empty. `RecallReceipt.collapsed` is always present,
+    empty when nothing collapsed, as `memories` is.
   - **The owner's invariants (2026-11-25, verbatim).** "For D2, collapse must operate on the actual final displayed
     selection, not on the larger candidate pool. If a descendant is ranked sixth and only five results are shown, it
     must not suppress an otherwise visible ancestor. The same principle applies when widening the recall search
