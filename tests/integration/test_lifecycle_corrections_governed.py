@@ -112,7 +112,7 @@ def test_the_scripted_curator_corrects_the_exported_draft_through_the_gate(
     result = chain.deliver()
     assert result["delivered"] and result["refusals"] == []
     landed = result["landed"]
-    assert landed == [draft.removeprefix("knowledge/wiki/")] or landed == [draft]
+    assert landed == [draft]  # both wiki-relative, as the gate check reads them
     assert result["imported"]["corrections"] == [{"page": landed[0], "ref_id": x_ref}]
     after = chain.service()
     assert after.get(x_ref, touch=False).superseded_by is not None

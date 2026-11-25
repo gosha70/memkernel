@@ -54,7 +54,8 @@ no LLM judge.
 - **A chain's verdict against `bare`:** the arm wins the chain when it passes more of its R trials than `bare`
   passes of its own, loses it when it passes fewer, and ties otherwise. Ties are left out of the test.
 - **The test:** an exact two-sided sign test over the non-tied chains (`report.sign_test`), with Holm's correction
-  across the four primary comparisons at α = 0.05. The smallest p-value must therefore be at most 0.0125.
+  across the four primary comparisons at α = 0.05. The smallest p-value must therefore be at most 0.0125. The
+  oracle arm is descriptive and is not one of the four, so it does not enter the correction.
 
 Exact two-sided p-values when every chain is non-tied:
 

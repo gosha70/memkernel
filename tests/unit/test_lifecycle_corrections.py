@@ -136,6 +136,7 @@ def test_the_exposure_copy_carries_session_zero_and_never_the_correction(
     text = "\n".join(p.read_text(encoding="utf-8") for p in dirs.workspace.rglob("*") if p.is_file()).lower()
     for term in _spec(task_id)["fact_terms"]:  # type: ignore[attr-defined]
         assert term.lower() not in text
+    assert _spec(task_id)["correction"]["headline"].lower() not in text  # type: ignore[index]
 
 
 # ── phases and calibration (FR-003, decision B3) ──────────────
@@ -194,7 +195,8 @@ def test_a_failed_correction_makes_the_session_invalid_not_a_failure_of_the_arm(
     cfg = _cfg(tmp_path, "demo")
     cfg.ops_command = (sys.executable, "-c", "import sys; sys.exit(3)")  # type: ignore[attr-defined]
     receipts_path = runner.run(cfg, ["demo-correct"], ["memkernel"], runs=1)
-    final = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()][-1]
+    receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
+    (final,) = [r for r in receipts if r["position"] == 1]
     assert final["valid"] is False and final["invalid_reason"] == "correction_failed"
     assert final["correction"]["delivered"] is False and "exited 3" in final["correction"]["error"]
 

@@ -19,6 +19,7 @@ correction) and before the agent starts. Each arm gets the correction only throu
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import curator
@@ -99,7 +100,5 @@ def deliver(
 
 
 def _brief_json(correction: dict[str, Any]) -> str:
-    import json
-
     keys = ("kind", "headline", "rule", "obsolete_patterns")
     return json.dumps({key: correction[key] for key in keys})

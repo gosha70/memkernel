@@ -238,11 +238,11 @@ def prepare_session(task: Task, arm: Arm, position: int, chain_dir: Path, state:
                 if target.exists():
                     shutil.rmtree(target)
                 shutil.copytree(source, target, symlinks=True)
-        previous = state.workspace
-        for rel in arm.carry if previous is not None else ():  # the governed arms' gate receipts (decision B7)
-            source = previous / rel if previous is not None else Path(rel)
-            if source.exists() and not (workspace / rel).exists():
-                shutil.copytree(source, workspace / rel, symlinks=True)
+        if state.workspace is not None:
+            for rel in arm.carry:  # the governed arms' gate receipts (decision B7)
+                source = state.workspace / rel
+                if source.exists() and not (workspace / rel).exists():
+                    shutil.copytree(source, workspace / rel, symlinks=True)
     for rel in session.remove:
         target = workspace / rel
         if target.is_dir():
@@ -746,11 +746,11 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
     # reference only, to qualify each chain; no measured arm runs in it, so nothing about them is seen early.
     gradeable = cfg.phase != CALIBRATION_PHASE or task.group == CORRECT_GROUP
     final_ok = outcome is not None and outcome.receipt["valid"] and outcome.receipt["stage"] == "evaluation"
-    if gradeable and final_ok and outcome is not None:
+    if arm.wiki_governed and final_ok and outcome is not None:  # first: a check that cannot run voids the trial
+        check_gate(task, arm, outcome, chain_dir.name, cfg)
+    if gradeable and final_ok and outcome is not None and outcome.receipt["valid"]:
         earlier_timeout = any(r["outcome"] == "timeout" for r in receipts[:-1])
         grade(task, arm, outcome, cfg, earlier_timeout=earlier_timeout)
-    if arm.wiki_governed and final_ok and outcome is not None:
-        check_gate(task, arm, outcome, chain_dir.name, cfg)
     for receipt in receipts:
         errors = validate_receipt(receipt)
         if errors:

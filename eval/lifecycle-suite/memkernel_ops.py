@@ -39,11 +39,9 @@ def _service(embedding: EmbeddingPort | None) -> MemoryService:
 
 
 def _carrying(service: MemoryService, patterns: list[str]) -> list[Any]:
-    """Live records whose content matches any pattern, oldest first (every scope: the correction is the owner's)."""
-    from memkernel.core.models import EVERYONE
-
+    """Live records the sessions' caller can see whose content matches any pattern, oldest first."""
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
-    found = [m for m in service.list_memories(caller=EVERYONE) if any(p.search(m.content) for p in compiled)]
+    found = [m for m in service.list_memories() if any(p.search(m.content) for p in compiled)]
     return sorted(found, key=lambda m: (m.timestamp, m.ref_id))
 
 
