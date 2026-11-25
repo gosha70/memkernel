@@ -1,7 +1,7 @@
 # Spec: hide a wiki page's source memory while the page's memory is shown (#164, #59 S5)
 
 Status: in review on PR #165. The owner's decisions of 2026-11-25 are fixed (O1–O7), and the owner approved D1–D6
-the same day, D2 as option (c); their invariants are in FR-003.
+the same day, D2 as option (c), and settled Q1; their invariants are in FR-003.
 S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's build, then S5's build.
 
 ## What memkernel does today (`main` at `3ba5c72`)
@@ -79,7 +79,7 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     only once it is kept within the limit, and each wider window must be selected again from its first candidate, so a
     descendant that only a wider window brings in can hide an ancestor the narrower one showed. Of a chain, the item shown is
     the highest-ranked descendant that makes the limit; an ancestor ranked above it gives way to it, and the next
-    candidate fills the freed slot (Q1).
+    candidate fills the freed slot. The displayed items keep the order of their original ranks; nothing is re-ranked (Q1).
 - **FR-004 Promotion candidates (D3).** A source linked from a live page memory is not a promotion candidate.
 - **FR-005 The report (D5).** `ImportReport` gains `linked` (`{"page", "ref_id"}`) and `unlinked`
   (`{"page", "ref_id", "reason"}`), with the first check that fails, in FR-001's numbered order and, within a condition, in the order listed: condition 2 `has_corrects`; 3
@@ -142,12 +142,11 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   ungoverned path imports drafts too, and an exported draft is the exporter's own copy with placeholder sections
   (`sync.py:383-388`): hiding the source behind it would show the agent less. **Approved.**
 
-## Open question
+## Settled question
 
-- **Q1 Where a chain's representative sits.** As written, the shown descendant keeps its own rank: with a source at
-  rank 2 and its page at rank 4, the page shows at rank 3 once the source is removed. The other reading of
-  "highest-ranking eligible representative" is that the page takes the source's place, at rank 2. The spec keeps its
-  own rank unless the owner chooses the other.
+- **Q1 Where a chain's representative sits (the owner, 2026-11-25).** Original ranking is preserved: with a source at
+  rank 2 and its page at rank 4, hiding the source moves the page to 3rd in the displayed results. The page does not
+  inherit the source's original rank or score.
 
 ## Success Criteria
 
@@ -161,7 +160,8 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
 - **SC-3 Never both.** With the page's memory flagged, expired, outside the window or ranked past the limit, the
   source is shown. Also covered: the promoted-copy case past the hook limit; a chain (a promoted copy of a page hides
   the page and its source); two pages linking one source (counted once); a source ranked above its page (removed when
-  the page is kept, and the slot refilled).
+  the page is kept, and the slot refilled; with the source at rank 2 and the page at rank 4, the page shows 3rd with
+  its own score, Q1).
 - **SC-4 Reserved tag.** `retain` with a `wiki-source:` tag raises `ValueError`.
 - **SC-5 Re-import.** A page imported before S5 gains the link on the next import; a frontmatter-only revision that
   adds `corrects`, or one that removes `memkernel_ref`, drops it.

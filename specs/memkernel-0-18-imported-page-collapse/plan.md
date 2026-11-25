@@ -70,8 +70,9 @@ Two parts, one PR (one slice of #59):
   hidden; `RecallReceipt.collapsed` an empty list when nothing collapsed, while the log record leaves the key out.
 - The widening case: a descendant that only a wider `recall` window brings in hides an ancestor the narrower window
   showed (fails if the selection were extended rather than redone).
-- Q1: the build assumes the spec's reading (each item keeps its own rank). If the owner chooses the other in review,
-  the selection and its rank tests change before the build starts.
+- Q1 (settled): displayed results keep their original relative order; a page that hides a source ranked above it
+  shows at its own place among the rest and carries its own score, never the source's. Test: source at rank 2, page
+  at rank 4, limit 5: the displayed order is ranks 1, 3, 4 (the page), 5, 6, and the page's score is its own.
 - The governed loop: in `tests/integration/test_wiki_import_governed.py`, export → approve unchanged → import; the
   approved page's memory is linked and the startup block and `recall` show it, not the source (SC-1).
 - `tests/e2e`: `wiki_import`'s result carries `linked` and `unlinked`.
