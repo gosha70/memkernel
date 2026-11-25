@@ -126,14 +126,19 @@ it and files #59's Phase 3 separately.
   hash equality under the record's own scheme, nothing looser. A `sha256-raw` record matches only a byte-identical
   text; a canonical record matches any text with the same canonical form. So an old record written with Windows
   line endings and the same text retained now without them stay two records: a raw hash cannot be compared with a
-  canonical form without re-reading every record. The health report's near-duplicate list shows such pairs. **When
-  two records confirm** (an old byte-identical `sha256-raw` one and a newer canonical one), the canonical record wins:
-  the raw match counts only when no canonical record matches. The raw record is left live, a duplicate the health
-  report's near-duplicate list shows; nothing supersedes it. The tie-break applies first and the wiki import's owner
-  check after it, to the matches the tie-break kept; several matches in one scheme are handled as today (the first
-  match, or `AmbiguousDedupError` when two pass the owner check). (The alternative, rehashing every record in
-  place once, under the store lock, makes every record canonical but rewrites the whole store and changes hashes
-  that existing receipts recorded.)
+  canonical form without re-reading every record. The health report's near-duplicate list shows such pairs.
+  **Which match wins (the owner's order):** every eligibility check comes **first**, exactly as dedup applies them
+  today: the type, the scope (H2: the same scope),
+  the source where the path requires it (`dedup_source`, a code file's `source`), live (not superseded or withdrawn,
+  not a chunk), and the wiki import's owner check (`dedup_owner`; without it, no record carrying a wiki identity tag
+  is a match). **Then**, among the matches that remain, a
+  canonical record is preferred to a `sha256-raw` one; the raw match counts only when no canonical one remains.
+  Several matches still remaining in the preferred scheme are handled as today: the first in the store's order, or
+  `AmbiguousDedupError` when the owner check passed two. So a raw and a canonical record of one wiki page resolve to
+  the canonical one, not an ambiguity. A raw record that loses is left live, a duplicate the health report's
+  near-duplicate list shows; nothing supersedes it. (The alternative to D6, rehashing every record in place once,
+  under the store lock, makes every record canonical but rewrites the whole store and changes hashes that existing
+  receipts recorded.)
 - **D7 What is not rehashed:** as "What NOT to Build".
 
 ## Success Criteria
@@ -145,7 +150,8 @@ it and files #59's Phase 3 separately.
 - **SC-3** Two texts differing only by D5's form (a byte-order mark, line endings, trailing spaces or tabs, blank
   lines at the ends, Unicode form) are one record; two that differ in content (case, inner spaces, indentation) are
   two; a whitespace-only edit to a file does not flag a code memory or a decision written under the new scheme; when
-  a raw and a canonical record both match, the canonical one is the dedup hit.
+  a raw and a canonical record both pass every eligibility check (type, scope, source, live, the wiki owner check),
+  the canonical one is the dedup hit, and an ineligible canonical record never wins over an eligible raw one.
 - **SC-4** A store written before the change: an identical text dedups into its old record; revalidation flags no old
   code memory or decision as `changed` because of the scheme; receipts name each record's scheme; the context diff
   reports a receipt whose scheme differs from its record's as `rehashed`, never `changed`.
