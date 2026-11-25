@@ -55,6 +55,14 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
     set too and stay hidden by a shown item.
     Ancestors are followed through the store, with a visited set, so a link to a record outside the candidates still
     counts.
+  - **Visibility (the owner, before merge).** Links are followed only through records the caller can see
+    (`Caller.can_see`): `recall`'s caller, or for a hook block the process's caller from the settings, resolved for
+    each block as `recall` resolves it by default (`services.py:464-466`); with no agent or task id set, that caller
+    sees project records only. A record the caller can't see ends the walk there: it is neither in the
+    ancestor set nor a step towards one, so what lies beyond it is not hidden through it. A receipt's `path` therefore never
+    names a record the caller can't see. Example: agent A's private note promoted with `scope="project"` gives a
+    published copy whose `promoted_from` names the private note; for agent B the copy has no ancestors, and B's
+    receipts never name the note; for agent A, showing the copy hides the note, with `path` = [copy, note].
   - **Hook blocks:** `_distinct` uses the selection for both promoted and imported links, which also fixes the
     6th–10th case in the table above.
   - **MCP `recall`:** per D2, the selection over `recall`'s filtered fetch window, with `top_k` as the limit; the
@@ -161,7 +169,9 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
   source is shown. Also covered: the promoted-copy case past the hook limit; a chain (a promoted copy of a page hides
   the page and its source); two pages linking one source (counted once); a source ranked above its page (removed when
   the page is kept, and the slot refilled; with the source at rank 2 and the page at rank 4, the page shows 3rd with
-  its own score, Q1).
+  its own score, Q1). Visibility: a published copy of another agent's private note hides nothing for the other
+  agent, and that agent's `collapsed` entries and `path`s never name the note; the note's own agent sees the note
+  collapsed under the copy.
 - **SC-4 Reserved tag.** `retain` with a `wiki-source:` tag raises `ValueError`.
 - **SC-5 Re-import.** A page imported before S5 gains the link on the next import; a frontmatter-only revision that
   adds `corrects`, or one that removes `memkernel_ref`, drops it.

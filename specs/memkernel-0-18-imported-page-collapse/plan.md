@@ -33,7 +33,10 @@ Two parts, one PR (one slice of #59):
 2. **Hide when shown** (FR-003, FR-004).
    - One helper for FR-003's selection, `collapse(candidates, limit, ancestors)`, in `core/` (no adapter), used by both
      callers; `ancestors(memory) -> set[str]` returns the full transitive set of ref_ids, following `promoted_from`
-     and `wiki-source:` through the store with a visited set. D2's (b) or (c) is only which links the caller's
+     and `wiki-source:` through the store with a visited set, and only through records the caller can see; ref_ids
+     the caller can't see are never in the returned set. The signature stays `ancestors(memory)`: the caller is
+     captured when the function is built for one selection (`recall`'s caller, or the settings' caller resolved for
+     each hook block). D2's (b) or (c) is only which links the caller's
      `ancestors` follows, so the code is cheap to change; the behaviour differs as D2 says (under (b), `recall` shows a
      promoted chain whole while the hook blocks collapse it).
    - `src/memkernel/lifecycle.py`, `_distinct`: the checkpoint and duplicate filter as today, then the selection. A
@@ -68,6 +71,11 @@ Two parts, one PR (one slice of #59):
 - `tests/unit/test_harness_receipts.py`: the `collapsed` list on a `recall` receipt, on `RecallReceipt`, and on a hook
   block's log record, with `path` pinned exactly (`by` first, the hidden record last) and the entries in the order
   hidden; `RecallReceipt.collapsed` an empty list when nothing collapsed, while the log record leaves the key out.
+- Visibility: agent A retains a private note and promotes it with `scope="project"`; agent B's `recall` and hook
+  block show the copy, hide nothing through it, and no `collapsed` entry or `path` names the note; agent A's show the
+  copy with the note collapsed, `path` = [copy, note]. Agent B's `RecallReceipt.collapsed` is `[]` and B's hook log
+  record has no `collapsed` key. A mid-chain case (visible copy C, private record X, visible record Y, with C → X → Y):
+  for the caller who can't see X, Y is shown, nothing names X, and no `path` contains X or Y through it.
 - The widening case: a descendant that only a wider `recall` window brings in hides an ancestor the narrower window
   showed (fails if the selection were extended rather than redone).
 - Q1 (settled): displayed results keep their original relative order; a page that hides a source ranked above it
