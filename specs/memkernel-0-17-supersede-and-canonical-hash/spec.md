@@ -25,7 +25,12 @@ it and files #59's Phase 3 separately.
 
 - **FR-001 Supersede suggestions (#153).** When `retain` creates a new record of a suggested type (D2), it looks for
   live records of the same type whose embedding is close to the new one (cosine ≥ the threshold, D3), and returns
-  them as suggestions, best first, at most 3: `ref_id`, similarity, a preview. Delivery as D1.
+  them as suggestions, best first, at most 3: `ref_id`, similarity, and a **preview made as `recall`'s is** (the first
+  `MEMKERNEL_PREVIEW_LENGTH` characters of the content, `_artifact_ref`). Delivery as D1.
+  - **Filter, then take 3:** the search asks the store for the 20 nearest records of that type (a named constant),
+    drops every one that fails a rule below or the threshold, and only then takes the best 3; asking for 3 and
+    filtering afterwards would return fewer than exist. A store with more than 20 closer candidates that all fail
+    can still return fewer than 3; that is the accepted cost of one bounded query per retain.
   - **Only suggestions:** memkernel never supersedes on its own (#153; records are never replaced implicitly).
   - **Only what the new record could supersede:** a record is suggested when the caller can see it (H2, B5) **and**
     the new record would be allowed to supersede it (H2, B9). So for a new private record (`agent:` or `task:`) a
@@ -45,17 +50,21 @@ it and files #59's Phase 3 separately.
   hashed with the record's scheme), **receipts** (each entry's `content_hash_scheme` is its record's `hash_scheme`,
   no longer the constant), and **the context diff** (it compares a receipt's hash with the record's only when the
   receipt's scheme is the record's, reports `rehashed` otherwise, and hashes a source file with the record's
-  scheme). H3's C2 said the diff would read the scheme from the record once records carry it; this is that change.
+  scheme; a **code chunk's** source check, which H3 makes against its owner's `content_hash`, hashes the file with
+  the **owner's** scheme). H3's C2 said the diff would read the scheme from the record once records carry it; this
+  is that change.
   Under D6 a record's scheme never changes after it is created, so a receipt and its record always share a scheme
   and `rehashed` arises only if a later change rehashes records; until then, each memory is compared in its own
   scheme, and new canonical records are never reported `rehashed` against the old constant. `wiki_export` writes a memory's hash into
   each page as `memkernel_sha256` (provenance; nothing compares it): the page also gets a **new frontmatter key,
   `memkernel_hash_scheme`**, so a reader can tell which scheme made it. **wiki-studio needs no change for it:** it
   does not validate page frontmatter keys beyond its reserved approval keys (`approved`, `approved_by`, `approval`,
-  `review_state`). Its consumer guide (`docs/consumers.md`) lists memkernel's extra keys as `memkernel_ref` and
+  `review_state`), checked in wiki-studio 0.7.0 (memkernel's locked version) and on wiki-studio's `main` at
+  `824572b`; the build's wiki tests, which run against the newest wiki-studio in CI, confirm it. Its consumer guide (`docs/consumers.md`) lists memkernel's extra keys as `memkernel_ref` and
   `memory_type`, and already omits `memkernel_sha256`; listing both keys there is a wiki-studio docs change, proposed
   separately, not part of this build.
-- **FR-004 Docs.** README (retain's suggestions; the canonical form; older records), CHANGELOG.
+- **FR-004 Docs.** README (retain's suggestions; the canonical form; older records; the limit on older memkernel
+  versions sharing a store), CHANGELOG.
 
 ## Constraints / What NOT to Build
 
@@ -66,6 +75,11 @@ it and files #59's Phase 3 separately.
   bodies. Hashes computed elsewhere are untouched as well: wiki page hashes (`page_sha:` tags) and the recall log's
   `query_sha256` use their own hashing, and capture keys records by session, call and extractor, not by hash.
 - Older stores keep working with no migration step (D6).
+- **Limit: older memkernel versions on the same store.** A process running a memkernel from before this change (a
+  server, a hook, another tool's server, #107) does not read `hash_scheme`: it dedups only by raw hash, so it stores
+  a second record of a text that a newer process stored canonically, and its revalidation hashes files raw, so it
+  flags code memories and decisions written under the new scheme as `changed`. Every process that shares a store
+  should run the same memkernel; the README says so beside the upgrade note.
 
 ## Decisions (owner)
 
@@ -99,9 +113,11 @@ it and files #59's Phase 3 separately.
   `\r\n` and `\r` to `\n`; trailing spaces and tabs removed from every line; leading and trailing blank lines
   removed. Nothing else: case, inner spaces and
   indentation are kept (indentation is meaningful in code), so two texts that read differently never share a hash.
-  The same form for every type.
+  The same form for every type. **Only the hash uses the normalised form:** the stored text is kept as given, byte
+  for byte, so `get` returns what was retained and code keeps its exact file content.
 - **D6 Older records (owner: yes).** No migration. A record stores its scheme in a new metadata key, `hash_scheme`;
-  absent means `sha256-raw` (every record written so far). New records use `sha256-canonical-v1`. A record's scheme
+  absent means `sha256-raw` (every record written so far), **wherever a scheme is read**: dedup, revalidation,
+  receipts, the context diff, and a chunk's owner. New records use `sha256-canonical-v1`. A record's scheme
   covers every hash made when it was created: its `content_hash` and, for a decision, its `source_hash`. Dedup
   computes a new text's hash under both schemes, asks the store for records with either hash (one `$in` query on
   the existing `hash` key: no index or schema change), and keeps a match only when the stored hash equals the new
@@ -112,8 +128,10 @@ it and files #59's Phase 3 separately.
   line endings and the same text retained now without them stay two records: a raw hash cannot be compared with a
   canonical form without re-reading every record. The health report's near-duplicate list shows such pairs. **When
   two records confirm** (an old byte-identical `sha256-raw` one and a newer canonical one), the canonical record wins:
-  the raw match counts only when no canonical record matches. With the wiki import's owner check, two owned matches
-  still raise `AmbiguousDedupError`, as now. (The alternative, rehashing every record in
+  the raw match counts only when no canonical record matches. The raw record is left live, a duplicate the health
+  report's near-duplicate list shows; nothing supersedes it. The tie-break applies first and the wiki import's owner
+  check after it, to the matches the tie-break kept; several matches in one scheme are handled as today (the first
+  match, or `AmbiguousDedupError` when two pass the owner check). (The alternative, rehashing every record in
   place once, under the store lock, makes every record canonical but rewrites the whole store and changes hashes
   that existing receipts recorded.)
 - **D7 What is not rehashed:** as "What NOT to Build".
