@@ -723,8 +723,7 @@ def run_session(
     # No agent process (a detached child, a daemon) outlives its session; one that does voids the session, whatever
     # else went wrong in it: a survivor is the harness's failure and the most serious one.
     agent_uid = cfg.agent_uid
-    separate = agent_uid is not None and agent_uid != os.geteuid() and invalid != "fixture_restore_failed"
-    if separate and agent_uid is not None and kill_user_processes(agent_uid, cfg.agent_gid):
+    if agent_uid is not None and agent_uid != os.geteuid() and kill_user_processes(agent_uid, cfg.agent_gid):
         invalid = "agent_processes_survived"
     ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
     if dirs is not home:
@@ -1023,7 +1022,10 @@ def require_isolated_image(cfg: RunConfig) -> None:
             f"{GRADER_UID_ENV} is {os.environ.get(GRADER_UID_ENV)!r}, not the grader user's {grader.pw_uid}"
         )
     if agent is not None and os.geteuid() == 0:
-        oracle_file = next(iter(sorted(cfg.oracles_root.glob("*/*"))), cfg.oracles_root / "missing")
+        oracle_file = next(iter(sorted(p for p in cfg.oracles_root.glob("*/*") if p.is_file())), None)
+        if oracle_file is None:  # nothing to try reading: the check could not show the oracles are out of reach
+            problems.append(f"there is no oracle file under {cfg.oracles_root} to try reading as the agent user")
+            oracle_file = cfg.oracles_root
         attempts = [  # what an agent would try: list the directories, read a file in each
             ("ls", REPO_ROOT),
             ("ls", cfg.tasks_root),

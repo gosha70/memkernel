@@ -45,7 +45,8 @@ into the chain's folder, which is root's alone, as are the run folder's listing 
 in `/opt/memkernel`, with every task's prompts, corrections, oracles and references, is root's alone too. The hook
 scripts, the hook ledger and the demo's stub agent come from the world-readable `/opt/agent-tools`. The image
 build fails if `agent` can list `/opt/memkernel`. When a session ends, every process of the `agent` user is killed with
-`setpriv --reuid=<agent> -- kill -KILL -1`, and the session is invalid if any survives. Grading
+`setpriv --reuid=<agent> -- kill -KILL -1`, and the session is invalid if any survives. That kills everything the
+user owns, so the runner runs one session at a time, as it always has. Grading
 runs the agent's code as a second unprivileged user, `grader`, never as root, and kills its processes afterwards.
 `run.sh demo` checks all of this:
 - the stub agent probes the run folder, the other sessions, `../../s0` and the oracles, and the demo fails on any
