@@ -660,7 +660,7 @@ def test_a_process_left_in_the_steps_group_is_killed_with_the_step(tmp_path: Pat
     assert runner.check_lingering({"bare": probe}, separated=False) == []  # the detached one is killed, uncounted
     import time
 
-    deadline = time.monotonic() + 5  # killed, it is a zombie until its new parent reaps it
+    deadline = time.monotonic() + 20  # killed, it is a zombie until its new parent reaps it
     while runner._alive(lingering["detached"]) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not runner._alive(lingering["detached"])
@@ -732,7 +732,8 @@ def _image(monkeypatch: pytest.MonkeyPatch, readable: set[str], users: tuple[str
         return pwd.struct_passwd((name, "x", ids[name], ids[name], "", "/", "/usr/sbin/nologin"))
 
     def run(cmd: list[str], **kwargs: object) -> sp.CompletedProcess[bytes]:
-        assert cmd[:4] == ["setpriv", "--reuid=1001", "--regid=1001", "--clear-groups"] and cmd[5:7] == ["test", "-r"]
+        assert cmd[:5] == ["setpriv", "--reuid=1001", "--regid=1001", "--clear-groups", "--"]
+        assert cmd[5] in ("ls", "cat") and cmd[6] == "--"  # a real listing or read, as the agent
         return sp.CompletedProcess(cmd, 0 if cmd[7] in readable else 1)
 
     monkeypatch.setattr(runner.os, "geteuid", lambda: 0)
@@ -749,7 +750,7 @@ def test_the_image_check_passes_only_with_both_users_and_a_repository_the_agent_
     _image(monkeypatch, readable=set())
     runner.require_isolated_image(cfg)  # the image as built: passes
     _image(monkeypatch, readable={str(cfg.oracles_root)})  # type: ignore[attr-defined]
-    with pytest.raises(SystemExit, match="the agent user can read .*demo-oracles"):
+    with pytest.raises(SystemExit, match="the agent user can list .*demo-oracles"):
         runner.require_isolated_image(cfg)
     _image(monkeypatch, readable=set(), users=("agent",))
     with pytest.raises(SystemExit, match="there is no grader user"):

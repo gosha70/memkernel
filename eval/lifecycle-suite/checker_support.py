@@ -63,7 +63,8 @@ def kill_user_processes(uid: int, gid: int | None = None, rounds: int = 5) -> li
 
     The harness calls it as root after an agent session and after grading, so nothing the agent or the candidate's
     code started (a daemon, a detached child) outlives its turn. ``kill -1`` as that user signals every process the
-    user owns. It refuses the harness's own uid.
+    user owns, so it assumes one session (or one grading) at a time per user, as the runner runs them. It refuses
+    the harness's own uid.
     """
     import os
     import time
@@ -152,6 +153,7 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
         env = {key: value for key, value in _base_env().items()}
         env.update({"HOME": str(home), "TMPDIR": temp, RESULT_PATH_ENV: str(result), RESULT_NONCE_ENV: nonce})
         grader = grader_ids()
+        survivors: list[int] = []
         command = [sys.executable, str(driver), str(stage)]
         if grader is not None:  # the candidate's code never runs as root (the #90 review)
             import os
@@ -179,7 +181,8 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
         except subprocess.TimeoutExpired:
             exit_code = None
         finally:
-            survivors = kill_user_processes(*grader) if grader is not None else []
+            if grader is not None:
+                survivors = kill_user_processes(*grader)
         if survivors:  # the grader's processes outlived grading: the result cannot be trusted
             raise CheckerInfrastructureError(f"the grader's processes {survivors} survived grading")
         records = []

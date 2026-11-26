@@ -598,7 +598,9 @@ def _run_step(cmd: list[str], cwd: Path, env: dict[str, str], timeout_s: float, 
     if timed_out:
         proc.kill()
         proc.wait()
-    with contextlib.suppress(ProcessLookupError, PermissionError):  # whatever the step left in its group ends with it
+    # Whatever the step left in its process group ends with it. While any member lives, its pgid cannot be given to
+    # a new process; in the image the kill of every agent process after the session is the authoritative step.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGKILL)
     return StepResult(lines, started, timed_out=timed_out, spawn_failed=False)
 
@@ -718,11 +720,12 @@ def run_session(
                 timed_out = True
                 break
         hooks = _read_ledger(ledger)
-    if cfg.agent_uid not in (None, os.geteuid()) and invalid != "fixture_restore_failed":
-        # no agent process (a detached child, a daemon) outlives its session; one that does voids the session
-        survivors = kill_user_processes(int(cfg.agent_uid or 0), cfg.agent_gid)
-        if survivors and invalid is None:
-            invalid = "agent_processes_survived"
+    # No agent process (a detached child, a daemon) outlives its session; one that does voids the session, whatever
+    # else went wrong in it: a survivor is the harness's failure and the most serious one.
+    agent_uid = cfg.agent_uid
+    separate = agent_uid is not None and agent_uid != os.geteuid() and invalid != "fixture_restore_failed"
+    if separate and agent_uid is not None and kill_user_processes(agent_uid, cfg.agent_gid):
+        invalid = "agent_processes_survived"
     ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
     if dirs is not home:
         if cfg.agent_uid is not None:
@@ -1020,15 +1023,23 @@ def require_isolated_image(cfg: RunConfig) -> None:
             f"{GRADER_UID_ENV} is {os.environ.get(GRADER_UID_ENV)!r}, not the grader user's {grader.pw_uid}"
         )
     if agent is not None and os.geteuid() == 0:
-        for path in dict.fromkeys((REPO_ROOT, cfg.tasks_root, cfg.oracles_root)):
-            readable = subprocess.run(
-                ["setpriv", f"--reuid={agent.pw_uid}", f"--regid={agent.pw_gid}", "--clear-groups", "--", "test",
-                 "-r", str(path)],
+        oracle_file = next(iter(sorted(cfg.oracles_root.glob("*/*"))), cfg.oracles_root / "missing")
+        attempts = [  # what an agent would try: list the directories, read a file in each
+            ("ls", REPO_ROOT),
+            ("ls", cfg.tasks_root),
+            ("ls", cfg.oracles_root),
+            ("cat", SUITE_DIR / "runner.py"),
+            ("cat", oracle_file),
+        ]
+        for verb, path in attempts:
+            done = subprocess.run(
+                ["setpriv", f"--reuid={agent.pw_uid}", f"--regid={agent.pw_gid}", "--clear-groups", "--", verb, "--",
+                 str(path)],
                 capture_output=True,
                 check=False,
             )  # fmt: skip
-            if readable.returncode == 0:
-                problems.append(f"the agent user can read {path}")
+            if done.returncode == 0:
+                problems.append(f"the agent user can {'list' if verb == 'ls' else 'read'} {path}")
     if problems:
         raise SystemExit(f"a {cfg.phase} run starts only in the isolated image: {'; '.join(problems)}")
 
