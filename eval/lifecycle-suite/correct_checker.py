@@ -81,12 +81,18 @@ def parse_part(kind: str, part: str) -> Any:
     if kind == "weekday":
         return _one([w for w in WEEKDAYS if re.search(rf"\b{w}s?\b", text)], "weekday")
     if kind == "time":
-        return _one([f"{int(h):02d}:{m}" for h, m in re.findall(r"\b(\d{1,2}):(\d{2})\b", text)], "time")
+        times = re.findall(r"\b(\d{1,2}):(\d{2})\b", text)
+        if any(int(h) > 23 or int(m) > 59 for h, m in times):
+            raise UnparsableError("not a time of day")
+        return _one([f"{int(h):02d}:{m}" for h, m in times], "time")
     if kind == "duration":
         if re.fullmatch(r"0+(\.0+)?", text):
             return 0.0
-        found = [float(n) * MINUTES[u] for n, u in _DURATION.findall(text) if u in MINUTES]
-        return _one(found, "duration")
+        pairs = _DURATION.findall(text)
+        # every number must carry a known unit: "2 fortnights, 15 minutes" is not 15 minutes
+        if len(pairs) != len(_NUMBER.findall(text)) or any(u not in MINUTES for _, u in pairs):
+            raise UnparsableError("a number without a known unit")
+        return _one([float(n) * MINUTES[u] for n, u in pairs], "duration")
     if kind == "number":
         return _one([float(n) for n in _NUMBER.findall(text.replace(",", ""))], "number")
     if kind == "yesno":
@@ -105,7 +111,7 @@ def _holds(condition: dict[str, Any] | None, value: Any) -> bool:
     if "equals" in condition:
         expected = condition["equals"]
         if isinstance(expected, int | float):
-            return isinstance(value, int | float) and abs(value - expected) < 1e-9
+            return isinstance(value, int | float) and abs(value - expected) < 1e-6  # units convert in floats
         return bool(value == expected)
     if "in" in condition:
         return any(_holds({"equals": option}, value) for option in condition["in"])

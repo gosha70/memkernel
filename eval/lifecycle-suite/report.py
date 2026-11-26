@@ -751,6 +751,11 @@ def preregistered_params(
     if differ:
         raise ValueError(f"--params disagrees with the preregistration on: {', '.join(differ)}")
     _check_bindings(measured, block, str(params["code_sha"]))
+    if any(r["group"] == CORRECT_GROUP for r in measured):  # spec amendment A3: no headline from the 0.5 endpoint
+        raise ValueError(
+            f"measured {CORRECT_GROUP} receipts need the generalized primary endpoint (four treatments against bare, "
+            "one Holm family), which is not implemented yet"
+        )
     missing = missing_chains(measured, block)
     if missing:
         raise ValueError(

@@ -1006,6 +1006,8 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     The CLI refuses a calibration or measured phase without ``--shared-cache``; callers outside the CLI must pass
     a shared cache for those phases themselves, or the memkernel server goes online for its embedding model.
     """
+    if cfg.agent_uid is not None and os.geteuid() not in (0, cfg.agent_uid):
+        raise SystemExit("--agent-uid needs the harness to run as root: it hands each session to that user and back")
     if _inside_checkout(cfg.run_root):
         raise SystemExit(f"refusing to run inside a git checkout: {cfg.run_root}")
     out = cfg.run_root / cfg.run_id
@@ -1160,6 +1162,10 @@ def _probes(run_dir: Path, arms: list[str]) -> dict[str, dict[str, Any] | None]:
     return found
 
 
+def _unreadable(value: object) -> bool:
+    return isinstance(value, str) and value.startswith("unreadable")
+
+
 def check_probes(probes: dict[str, dict[str, Any] | None], separated: bool) -> list[str]:
     """The blinding checks of the #90 review, from what the stub agent could reach in its evaluation session.
 
@@ -1179,10 +1185,10 @@ def check_probes(probes: dict[str, dict[str, Any] | None], separated: bool) -> l
             failures.append(f"{arm}: the sessions folder shows {found['sessions']!r}, not only its own session")
         if found["s0_reachable"]:
             failures.append(f"{arm}: session 0 of the chain is reachable at ../../s0")
-        if separated and isinstance(found["run_dir"], list):
+        if separated and not _unreadable(found["run_dir"]):
             failures.append(f"{arm}: the agent can list the run directory: {found['run_dir']!r}")
-        if separated and isinstance(found["oracles"], list):
-            failures.append(f"{arm}: the agent can read the image's oracles")
+        if separated and not _unreadable(found["oracles"]):
+            failures.append(f"{arm}: the agent can read the image's oracles: {found['oracles']!r}")
     return failures
 
 

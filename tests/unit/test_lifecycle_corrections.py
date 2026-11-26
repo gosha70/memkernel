@@ -571,3 +571,67 @@ def test_a_run_with_an_agent_user_keeps_the_run_chains_and_receipts_the_harnesss
     assert list((run_dir / "sessions").iterdir()) == []  # every session moved back into its chain
     probe = json.loads((run_dir / "demo-correct.bare.r0" / "s1" / "workspace" / "PROBE.json").read_text())
     assert runner.check_probes({"bare": probe}, separated=False) == []
+
+
+# ── second DeepSeek round on the review fixes ─────────────────
+
+
+@pytest.mark.parametrize(
+    ("task_id", "text"),
+    [
+        ("lc-correct-token-lifetime", "Answer: 2 fortnights, 15 minutes; 8 hours"),  # an unknown unit is not skipped
+        ("lc-correct-token-lifetime", "Answer: 15 minuets; 8 hours"),
+        ("lc-correct-token-lifetime", "Answer: 15; 8 hours"),  # a number without a unit
+        ("lc-correct-deploy-window", "Answer: Monday; 25:99 UTC"),  # not a time of day
+    ],
+)
+def test_a_part_with_a_number_the_checker_cannot_read_is_other(tmp_path: Path, task_id: str, text: str) -> None:
+    assert correct_checker.classify(_answer(tmp_path, text), ORACLES_ROOT / task_id) == "other"
+
+
+memkernel_ops = load("memkernel_ops")
+
+
+def test_a_hand_edited_proposal_needs_its_curator_delta(tmp_path: Path) -> None:
+    archive = tmp_path / ".audit" / "proposals" / "p"
+    archive.mkdir(parents=True)
+    (archive / "plan.json").write_text("{}", encoding="utf-8")
+    (archive / "proposal.md").write_text("p", encoding="utf-8")
+    receipt = {
+        "proposal": "p",
+        "plan_sha256": hashlib.sha256(b"{}").hexdigest(),
+        "submission_manifest": [
+            {"path": ".ingest-snapshot/preview/decisions/d.md", "sha256": "a" * 64},
+            {"path": "preview/decisions/d.md", "sha256": "a" * 64},
+        ],
+    }
+    assert memkernel_ops._archived(tmp_path, receipt)  # promoted as staged: no delta needed
+    receipt["submission_manifest"][1]["sha256"] = "b" * 64  # the curator edited the staged page
+    assert not memkernel_ops._archived(tmp_path, receipt)
+    (archive / "curator-delta.md").write_text("delta", encoding="utf-8")
+    assert memkernel_ops._archived(tmp_path, receipt)
+    (archive / "plan.json").write_text('{"x": 1}', encoding="utf-8")  # no longer the plan the receipt names
+    assert not memkernel_ops._archived(tmp_path, receipt)
+
+
+def test_in_the_image_only_an_explicit_unreadable_passes_the_probe() -> None:
+    probe = {
+        "cwd": "/runs/r/sessions/abc/workspace",
+        "sessions": ["abc"],
+        "run_dir": None,
+        "s0_reachable": False,
+        "oracles": "permission check skipped",
+    }
+    failures = runner.check_probes({"bare": probe}, separated=True)
+    assert len(failures) == 2 and runner.check_probes({"bare": probe}, separated=False) == []
+
+
+def test_an_agent_user_without_root_is_refused_before_the_run(tmp_path: Path) -> None:
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("as root the harness can hand sessions to any user")
+    cfg = _cfg(tmp_path, "demo")
+    cfg.agent_uid = os.geteuid() + 1  # type: ignore[attr-defined]
+    with pytest.raises(SystemExit, match="needs the harness to run as root"):
+        runner.run(cfg, ["demo-correct"], ["bare"], runs=1)

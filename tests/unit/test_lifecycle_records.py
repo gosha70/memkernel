@@ -1624,3 +1624,15 @@ def test_the_report_refuses_an_arm_the_preregistration_omits(
     receipts = [_trial("fs_grep", "t1", 0, preregistration_sha256=digest)]
     status, _, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
     assert status == 1 and "arm fs_grep" in err
+
+
+def test_the_report_refuses_measured_lc_correct_receipts_until_its_endpoint_exists(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec amendment A3: the 0.5 endpoint fixes the treatment as memkernel, so it must not headline lc-correct."""
+    prereg = _preregistration(tmp_path)
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = _completed([_trial("memkernel", "t1", 0, preregistration_sha256=digest)], digest)
+    receipts[0] = {**receipts[0], "group": "lc-correct"}
+    status, out, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "need the generalized primary endpoint" in err and out == ""
