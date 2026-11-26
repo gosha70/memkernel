@@ -178,7 +178,11 @@ between the options put to them; the rest are fixes within the spec.
       the grep directory come with it.
     - With `--agent-uid`, the session's files are the agent's only while it runs; then they return to the chain.
     - Chain folders are mode 0700, the run folder 0711 and the receipts 0600, all the harness's.
-    - `run.sh` hands the finished run to the VM user (`RUNS_OWNER`) so `vm.sh` can copy it off.
+    - On a rootful Docker host, `RUNS_OWNER` makes `run.sh` hand the finished run to whoever copies it off. Lima's
+      rootless Docker needs none: the container's root is the VM user.
+    - A calibration or measured run refuses to start outside the isolated image, before it creates anything. It
+      requires root, the `agent` and `grader` users named by the run, and a read attempt as `agent` that fails on
+      the repository, the tasks and the oracles.
   - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
     the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
     user, it also fails unless the run folder and the oracles are unreadable.

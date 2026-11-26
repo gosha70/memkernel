@@ -421,6 +421,7 @@ def _stub_run(
         hook_command_override=(_sys.executable, "-c", "import sys; sys.stdin.read()"),
     )
     monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    monkeypatch.setattr(runner, "require_isolated_image", lambda cfg: None)  # the stub agent needs no image
     path = runner.run(cfg, list(tasks), arms, runs=1)
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
@@ -1007,6 +1008,7 @@ def test_a_session_whose_key_is_refused_is_invalid_not_a_failure_of_the_arm(
         timeout_s=60.0,
     )
     monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    monkeypatch.setattr(runner, "require_isolated_image", lambda cfg: None)  # the stub agent needs no image
     path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
     receipts = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(receipts) == 1  # the chain stops at the invalid session
@@ -1058,6 +1060,7 @@ def test_a_key_refused_after_the_agent_has_acted_still_makes_the_session_invalid
         timeout_s=60.0,
     )
     monkeypatch.setattr(runner, "_inside_checkout", lambda path: False)
+    monkeypatch.setattr(runner, "require_isolated_image", lambda cfg: None)  # the stub agent needs no image
     path = runner.run(cfg, ["demo-retain"], ["bare"], runs=1)
     first, second = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
     assert first["valid"] is True and first["position"] == 0

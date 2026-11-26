@@ -103,7 +103,9 @@ finish() {  # $1 = the runner's exit status; scans the run (partial output after
     if [ "$scan" -ne 0 ]; then  # loud whichever exit status wins below
       echo "SECRET SCAN FOUND HITS in $runs/$run_id (exit $scan): do not commit anything from this run" >&2
     fi
-    if [ -n "${RUNS_OWNER:-}" ]; then  # the run is root's while it runs; hand it to the VM user who copies it off
+    # On a rootful Docker host the run is the host's root's; RUNS_OWNER (uid:gid) hands it to whoever copies it off.
+    # Lima's rootless Docker needs none: the container's root is the VM user, and vm.sh fetch reads with sudo.
+    if [ -n "${RUNS_OWNER:-}" ]; then
       chown -R "$RUNS_OWNER" "$runs/$run_id" && chmod -R u+rwX "$runs/$run_id" || copy=$?
     fi
     echo "$( [ "$mode" = measure ] && echo measured || echo calibration ) output: $runs/$run_id" \

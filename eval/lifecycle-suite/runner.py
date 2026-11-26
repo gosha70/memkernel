@@ -35,6 +35,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -985,6 +986,50 @@ def check_cli_pin(arm: Arm, executable: str | None = None) -> None:
         raise SystemExit(f"{arm.name}: `{command} --version` reports {found!r}, the arm is frozen at {version}")
 
 
+AGENT_USER, GRADER_USER = "agent", "grader"  # the image's unprivileged users (calibration/Dockerfile)
+
+
+def require_isolated_image(cfg: RunConfig) -> None:
+    """Refuse a calibration or measured run outside the isolated image (the #90 review).
+
+    It starts only as root, with the image's ``agent`` and ``grader`` users present and named by the run
+    (``--agent-uid``, ``LC_GRADER_UID``), and with the repository, the tasks and the oracles unreadable to ``agent``:
+    checked by a read attempt made as that user, not inferred from file modes.
+    """
+    import pwd
+
+    from checker_support import GRADER_UID_ENV
+
+    problems: list[str] = []
+    if os.geteuid() != 0:
+        problems.append("the harness is not root")
+    users = {}
+    for name in (AGENT_USER, GRADER_USER):
+        try:
+            users[name] = pwd.getpwnam(name)
+        except KeyError:
+            problems.append(f"there is no {name} user")
+    agent, grader = users.get(AGENT_USER), users.get(GRADER_USER)
+    if agent is not None and cfg.agent_uid != agent.pw_uid:
+        problems.append(f"--agent-uid is {cfg.agent_uid}, not the agent user's {agent.pw_uid}")
+    if grader is not None and os.environ.get(GRADER_UID_ENV) != str(grader.pw_uid):
+        problems.append(
+            f"{GRADER_UID_ENV} is {os.environ.get(GRADER_UID_ENV)!r}, not the grader user's {grader.pw_uid}"
+        )
+    if agent is not None and os.geteuid() == 0:
+        for path in dict.fromkeys((REPO_ROOT, cfg.tasks_root, cfg.oracles_root)):
+            readable = subprocess.run(
+                ["setpriv", f"--reuid={agent.pw_uid}", f"--regid={agent.pw_gid}", "--clear-groups", "--", "test",
+                 "-r", str(path)],
+                capture_output=True,
+                check=False,
+            )  # fmt: skip
+            if readable.returncode == 0:
+                problems.append(f"the agent user can read {path}")
+    if problems:
+        raise SystemExit(f"a {cfg.phase} run starts only in the isolated image: {'; '.join(problems)}")
+
+
 def resolve_curator_cli(command: str) -> str:
     """The absolute path of the curator CLI: a paid run version-checks this file and invokes only it, so a later
     PATH lookup can never run another binary than the one the pin was checked against."""
@@ -1022,14 +1067,11 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     out = cfg.run_root / cfg.run_id
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"run directory is not empty: {out}")
-    out.mkdir(parents=True, exist_ok=True)
-    if cfg.agent_uid is not None:  # the agent may pass through to its session, never list the run (chain names)
-        os.chmod(out, 0o711)
-    receipts_path = out / "receipts.jsonl"
     tasks = [load_task(cfg.tasks_root / task_id) for task_id in task_ids]
     arms = [load_arm(name) for name in arm_names]
     refuse_misplaced_arms(cfg.phase, tasks, arms)
-    if cfg.phase in (CALIBRATION_PHASE, MEASURED_PHASE):
+    if cfg.phase in (CALIBRATION_PHASE, MEASURED_PHASE):  # every check before anything is created or spent
+        require_isolated_image(cfg)
         if any(arm.wiki_governed for arm in arms):
             cfg = replace(cfg, wiki_studio_cmd=resolve_curator_cli(cfg.wiki_studio_cmd))
         for arm in arms:  # the governed arms' pin is checked on the curator executable the runner invokes
@@ -1037,6 +1079,10 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
                 check_cli_pin(arm, cfg.wiki_studio_cmd)
             else:
                 check_cli_pin(arm)
+    out.mkdir(parents=True, exist_ok=True)
+    if cfg.agent_uid is not None:  # the agent may pass through to its session, never list the run (chain names)
+        os.chmod(out, 0o711)
+    receipts_path = out / "receipts.jsonl"
     receipts_fd = os.open(receipts_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # never the agent's to read
     with open(receipts_fd, "w", encoding="utf-8") as sink:
         for run_index in range(runs):
@@ -1141,11 +1187,15 @@ def demo() -> int:
         probes = _probes(Path(tmp) / "demo", arms)
         grading = _grading_probe(Path(tmp))
 
-    failures = check_demo(seen, receipts, delivered) + check_probes(probes, separated=uid is not None)
+    # the evidence first: check_lingering kills what survived, which would hide it
+    seen_lines = evidence(probes, grading, receipts, separated=uid is not None, real_hooks=bool(hooks_python))
+    failures = check_demo(seen, receipts, delivered, arms) + check_probes(probes, separated=uid is not None)
     failures += check_lingering(probes, separated=uid is not None)
     failures += check_grading(grading, separated=uid is not None)
     if hooks_python:
         failures += check_real_hooks(receipts)
+    for line in seen_lines:
+        print(line)
     for line in failures:
         print(f"FAIL {line}")
     print(f"demo: {len(receipts)} receipts, {len(seen)} sessions observed, {len(failures)} failure(s)")
@@ -1202,7 +1252,8 @@ def check_probes(probes: dict[str, dict[str, Any] | None], separated: bool) -> l
         cwd = Path(str(found["cwd"]))
         if "demo-correct" in str(cwd) or f".{arm}." in str(cwd) or arm in cwd.parts:
             failures.append(f"{arm}: the working directory {cwd} names the task or the arm")
-        if found["sessions"] != [cwd.parent.name]:
+        # its own session only; in the image the agent cannot list the sessions folder at all, which is stronger
+        if found["sessions"] != [cwd.parent.name] and not (separated and _unreadable(found["sessions"])):
             failures.append(f"{arm}: the sessions folder shows {found['sessions']!r}, not only its own session")
         if found["s0_reachable"]:
             failures.append(f"{arm}: session 0 of the chain is reachable at ../../s0")
@@ -1270,6 +1321,35 @@ def check_grading(result: tuple[bool, str], separated: bool) -> list[str]:
     return failures
 
 
+def evidence(
+    probes: dict[str, dict[str, Any] | None],
+    grading: tuple[bool, str],
+    receipts: list[dict[str, Any]],
+    separated: bool,
+    real_hooks: bool,
+) -> list[str]:
+    """What the blinding, process, grading and hook checks saw, printed whether they pass or fail."""
+    found = [p for p in probes.values() if p is not None]
+
+    def values(key: str) -> str:
+        return ", ".join(sorted({str(p[key]) if not isinstance(p[key], list) else "listed" for p in found}))
+
+    hooks = [h for r in receipts for h in r["hooks"]]
+    return [
+        f"evidence: agent user {'separate' if separated else 'the harness itself'}; probes from {len(found)} arms",
+        f"evidence: sessions folder: {values('sessions')}; run folder: {values('run_dir')}; "
+        f"oracles: {values('oracles')}",
+        f"evidence: ../../s0 reachable: {values('s0_reachable')}; working directories: "
+        + ", ".join(sorted({str(Path(str(p["cwd"])).parent.parent.name) for p in found})),
+        f"evidence: lingering processes alive after their sessions: "
+        f"{sum(_alive(int(pid)) for p in found for pid in (p.get('lingering') or {}).values())} of "
+        f"{sum(len(p.get('lingering') or {}) for p in found)}",
+        f"evidence: grading probe: {grading[1]}",
+        f"evidence: hooks ({'real scripts' if real_hooks else 'stub'}): {len(hooks)} runs, exit statuses "
+        + ", ".join(f"{s}: {n}" for s, n in sorted(Counter(h["exit_status"] for h in hooks).items())),
+    ]
+
+
 def check_real_hooks(receipts: list[dict[str, Any]]) -> list[str]:
     """With the real hook scripts, every hook the agent user ran exited 0, and the memkernel arm ran them all."""
     failures = [
@@ -1298,9 +1378,10 @@ def check_demo(
     seen: dict[tuple[str, str, int], dict[str, bool]],
     receipts: list[dict[str, Any]],
     delivered: dict[str, bool] | None = None,
+    arms: list[str] | None = None,
 ) -> list[str]:
     failures: list[str] = []
-    rules = {arm: load_arm(arm) for arm in ARM_NAMES}
+    rules = {arm: load_arm(arm) for arm in (arms if arms is not None else ARM_NAMES)}  # the arms the demo ran
     demo_tasks = {task_id: load_task(SUITE_DIR / "fixtures" / "demo-tasks" / task_id) for task_id in DEMO_TASKS}
     for arm_name, arm in rules.items():
         for task_id, task in demo_tasks.items():

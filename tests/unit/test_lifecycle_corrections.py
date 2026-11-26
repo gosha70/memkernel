@@ -211,7 +211,10 @@ def test_the_informed_reference_never_runs_in_a_measured_run(tmp_path: Path) -> 
         runner.run(_cfg(tmp_path, "measured"), ["demo-correct"], ["informed"], runs=1)
 
 
-def test_an_lc_correct_calibration_is_graded_with_three_outcomes(tmp_path: Path) -> None:
+def test_an_lc_correct_calibration_is_graded_with_three_outcomes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "require_isolated_image", lambda cfg: None)  # the stub agent needs no image
     receipts_path = runner.run(_cfg(tmp_path, "calibration"), ["demo-correct"], ["bare", "informed"], runs=1)
     receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
     final = [r for r in receipts if r["stage"] == "evaluation"]
@@ -697,3 +700,61 @@ def test_a_failed_real_hook_or_a_missing_event_fails_the_demo() -> None:
     ]
     failures = runner.check_real_hooks(receipts)
     assert "c s0: hook SessionStart exited 1" in failures and any("ran only" in f for f in failures)
+
+
+# ── paid runs start only in the isolated image ─────────────────
+
+
+def test_a_paid_run_outside_the_image_is_refused_before_anything_starts(tmp_path: Path) -> None:
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("the refusal of a non-root harness needs a non-root test")
+    for phase in ("calibration", "measured"):
+        cfg = _cfg(tmp_path / phase, phase)
+        with pytest.raises(
+            SystemExit, match=f"a {phase} run starts only in the isolated image: the harness is not root"
+        ):
+            runner.run(cfg, ["demo-correct"], ["bare"], runs=1)
+        assert not (tmp_path / phase / "runs" / "t").exists()  # nothing created, nothing spent
+
+
+def _image(monkeypatch: pytest.MonkeyPatch, readable: set[str], users: tuple[str, ...] = ("agent", "grader")) -> None:
+    """Fake the image: root, the given users (agent 1001, grader 1002), and ``readable``: what agent's read gets."""
+    import pwd
+    import subprocess as sp
+
+    ids = {"agent": 1001, "grader": 1002}
+
+    def getpwnam(name: str) -> object:
+        if name not in users:
+            raise KeyError(name)
+        return pwd.struct_passwd((name, "x", ids[name], ids[name], "", "/", "/usr/sbin/nologin"))
+
+    def run(cmd: list[str], **kwargs: object) -> sp.CompletedProcess[bytes]:
+        assert cmd[:4] == ["setpriv", "--reuid=1001", "--regid=1001", "--clear-groups"] and cmd[5:7] == ["test", "-r"]
+        return sp.CompletedProcess(cmd, 0 if cmd[7] in readable else 1)
+
+    monkeypatch.setattr(runner.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(pwd, "getpwnam", getpwnam)
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setenv("LC_GRADER_UID", "1002")
+
+
+def test_the_image_check_passes_only_with_both_users_and_a_repository_the_agent_cannot_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _cfg(tmp_path, "calibration")
+    cfg.agent_uid = 1001  # type: ignore[attr-defined]
+    _image(monkeypatch, readable=set())
+    runner.require_isolated_image(cfg)  # the image as built: passes
+    _image(monkeypatch, readable={str(cfg.oracles_root)})  # type: ignore[attr-defined]
+    with pytest.raises(SystemExit, match="the agent user can read .*demo-oracles"):
+        runner.require_isolated_image(cfg)
+    _image(monkeypatch, readable=set(), users=("agent",))
+    with pytest.raises(SystemExit, match="there is no grader user"):
+        runner.require_isolated_image(cfg)
+    _image(monkeypatch, readable=set())
+    cfg.agent_uid = None  # type: ignore[attr-defined]
+    with pytest.raises(SystemExit, match="--agent-uid is None, not the agent user's 1001"):
+        runner.require_isolated_image(cfg)
