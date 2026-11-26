@@ -18,7 +18,10 @@
 # alone; memkernel itself is installed in /opt/mk-venv. Each agent session runs as the
 # unprivileged `agent` user through setpriv, with the hook scripts, the hook ledger and
 # the demo's stub agent taken from the world-readable /opt/agent-tools. The runner gives
-# a session's files to `agent` only while that session runs.
+# a session's files to `agent` only while that session runs, and kills every `agent`
+# process when it ends. Grading runs the candidate's code as the separate `grader` user.
+# `run.sh demo` checks all of it: the probe, the real memkernel hooks as `agent`, the
+# grader's uid, and that no process the probe left behind survives its session.
 ARG PYTHON_IMAGE=python:3.11-slim@sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce
 
 FROM ${PYTHON_IMAGE} AS lock
@@ -83,6 +86,7 @@ RUN python -m venv /opt/mk-venv \
       /opt/ws-venv/bin/pip freeze --all; } > /opt/environment.txt
 
 RUN useradd --system --no-create-home --uid 1001 --user-group --shell /usr/sbin/nologin agent \
+ && useradd --system --no-create-home --uid 1002 --user-group --shell /usr/sbin/nologin grader \
  && command -v setpriv \
  && mkdir -p /opt/agent-tools /runs \
  && cp /opt/memkernel/templates/hooks/*.py /opt/memkernel/eval/lifecycle-suite/hook_ledger.py \
@@ -98,7 +102,11 @@ ENV CODE_SHA=${CODE_SHA} \
     EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION} \
     LC_AGENT_UID=1001 \
     LC_AGENT_GID=1001 \
-    LC_AGENT_TOOLS=/opt/agent-tools
+    LC_AGENT_TOOLS=/opt/agent-tools \
+    LC_GRADER_UID=1002 \
+    LC_GRADER_GID=1002 \
+    LC_DEMO_HOOKS_PYTHON=/opt/mk-venv/bin/python \
+    LC_SHARED_CACHE=/opt/cache
 USER root
 WORKDIR /root
 ENTRYPOINT ["/opt/memkernel/eval/lifecycle-suite/calibration/run.sh"]

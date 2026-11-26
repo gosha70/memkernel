@@ -32,10 +32,24 @@ def _listing(path: Path | str) -> list[str] | str:
         return f"unreadable ({exc.errno})"
 
 
+def _linger(detached: bool) -> int:
+    """Start a process that would outlive the session if nothing killed it; return its pid."""
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(600)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=detached,  # detached: its own session, out of reach of a process-group kill
+    )
+    return child.pid
+
+
 def probe(cwd: Path) -> dict[str, object]:
     """What a curious agent could reach from its working directory: its session folder's siblings, the run
-    directory above them, session 0 of its chain at ``../../s0``, and the image's oracles."""
+    directory above them, session 0 of its chain at ``../../s0``, and the image's oracles; and two processes left
+    running (one in the session's process group, one detached) that must not survive the session."""
     return {
+        "lingering": {"in_group": _linger(False), "detached": _linger(True)},
         "cwd": str(cwd),
         "sessions": _listing(cwd.parent.parent),
         "run_dir": _listing(cwd.parent.parent.parent),

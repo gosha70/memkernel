@@ -44,8 +44,14 @@ arm, with its home folder inside it. The session's files belong to `agent` only 
 into the chain's folder, which is root's alone, as are the run folder's listing and the receipts. The repository
 in `/opt/memkernel`, with every task's prompts, corrections, oracles and references, is root's alone too. The hook
 scripts, the hook ledger and the demo's stub agent come from the world-readable `/opt/agent-tools`. The image
-build fails if `agent` can list `/opt/memkernel`, and `run.sh demo` has the stub agent probe the run folder, the
-other sessions, `../../s0` and the oracles, and fails on any it reaches.
+build fails if `agent` can list `/opt/memkernel`. When a session ends, every `agent` process is killed. Grading
+runs the agent's code as a second unprivileged user, `grader`, never as root, and kills its processes afterwards.
+`run.sh demo` checks all of this:
+- the stub agent probes the run folder, the other sessions, `../../s0` and the oracles, and the demo fails on any
+  it reaches;
+- the probe leaves two processes running (one detached), and the demo fails if either survives the session;
+- the memkernel arm's real hooks run as `agent` and must all exit 0;
+- a grading probe must report the `grader` uid.
 Inside the container, the agent sees only `/runs`. The API key arrives when the
 container starts and is never built into the image.
 

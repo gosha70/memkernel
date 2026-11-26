@@ -22,12 +22,14 @@ computes no statistics; ``report.py`` does the counting from receipts.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import secrets
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import corrections
+from checker_support import kill_user_processes
 from diagnostics import WIKI_DIR, read_paths, session_diagnostics
 from records import (
     CONNECTED_STATUSES,
@@ -545,7 +548,9 @@ def _run_step(cmd: list[str], cwd: Path, env: dict[str, str], timeout_s: float, 
     started = utc_now()
     lines: list[dict[str, Any]] = []
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(  # its own process group, killed whole once the step is over
+            cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True
+        )
     except OSError:
         return StepResult(lines, started, timed_out=False, spawn_failed=True)
     assert proc.stdout is not None
@@ -592,6 +597,8 @@ def _run_step(cmd: list[str], cwd: Path, env: dict[str, str], timeout_s: float, 
     if timed_out:
         proc.kill()
         proc.wait()
+    with contextlib.suppress(ProcessLookupError, PermissionError):  # whatever the step left in its group ends with it
+        os.killpg(proc.pid, signal.SIGKILL)
     return StepResult(lines, started, timed_out=timed_out, spawn_failed=False)
 
 
@@ -710,6 +717,8 @@ def run_session(
                 timed_out = True
                 break
         hooks = _read_ledger(ledger)
+    if cfg.agent_uid not in (None, os.geteuid()) and invalid != "fixture_restore_failed":
+        kill_user_processes(cfg.agent_uid)  # no agent process (a detached child, a daemon) outlives its session
     ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
     if dirs is not home:
         if cfg.agent_uid is not None:
@@ -1091,6 +1100,11 @@ def demo() -> int:
     agent: tuple[str, ...] = (sys.executable, str(tools / "stub_agent.py"))
     if uid is not None:
         agent = ("setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups", "--", *agent)
+    # In the image, run.sh also sets these: the memkernel arm's real hooks then run, as the agent, from the agent
+    # tools, against the image's pinned model cache (the #90 review: hooks work as the agent user).
+    hooks_python = os.environ.get("LC_DEMO_HOOKS_PYTHON")
+    shared_cache = Path(os.environ["LC_SHARED_CACHE"]) if os.environ.get("LC_SHARED_CACHE") else None
+    hooks_dir = tools if (tools / HOOK_SCRIPTS["SessionStart"]).is_file() else REPO_ROOT / "templates" / "hooks"
     curator_cli = _wiki_studio_beside_python()
     arms = list(ARM_NAMES)
     if not _curator_cli_usable(curator_cli):
@@ -1111,11 +1125,13 @@ def demo() -> int:
             agent_uid=uid,
             agent_gid=gid,
             memkernel_cmd="stub-memkernel",
-            memkernel_python=sys.executable,
+            memkernel_python=hooks_python or sys.executable,
             tasks_root=SUITE_DIR / "fixtures" / "demo-tasks",
             oracles_root=SUITE_DIR / "fixtures" / "demo-oracles",
-            timeout_s=60.0,
-            hook_command_override=(sys.executable, "-c", "import sys; sys.stdin.read()"),
+            timeout_s=300.0 if hooks_python else 60.0,
+            hook_command_override=None if hooks_python else (sys.executable, "-c", "import sys; sys.stdin.read()"),
+            hooks_dir=hooks_dir,
+            shared_cache=shared_cache,
             ops_command=(sys.executable, str(SUITE_DIR / "stub_ops.py")),
             wiki_studio_cmd=_wiki_studio_beside_python(),
         )
@@ -1123,8 +1139,13 @@ def demo() -> int:
         receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
         delivered = _delivered_files(Path(tmp) / "demo")
         probes = _probes(Path(tmp) / "demo", arms)
+        grading = _grading_probe(Path(tmp))
 
     failures = check_demo(seen, receipts, delivered) + check_probes(probes, separated=uid is not None)
+    failures += check_lingering(probes, separated=uid is not None)
+    failures += check_grading(grading, separated=uid is not None)
+    if hooks_python:
+        failures += check_real_hooks(receipts)
     for line in failures:
         print(f"FAIL {line}")
     print(f"demo: {len(receipts)} receipts, {len(seen)} sessions observed, {len(failures)} failure(s)")
@@ -1189,6 +1210,77 @@ def check_probes(probes: dict[str, dict[str, Any] | None], separated: bool) -> l
             failures.append(f"{arm}: the agent can list the run directory: {found['run_dir']!r}")
         if separated and not _unreadable(found["oracles"]):
             failures.append(f"{arm}: the agent can read the image's oracles: {found['oracles']!r}")
+    return failures
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` is a running process (a zombie, killed but not yet reaped, is not)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True
+
+
+def check_lingering(probes: dict[str, dict[str, Any] | None], separated: bool) -> list[str]:
+    """No agent process survives its session (the #90 review). The probe left one process in the session's process
+    group and one detached from it: the runner kills the group after each step, and in the image every process of
+    the agent user after each session. Outside the image (no agent user) a detached process can escape, so it is
+    killed here and not counted."""
+    failures: list[str] = []
+    for arm, found in probes.items():
+        lingering = (found or {}).get("lingering") or {}
+        for kind, pid in lingering.items():
+            if _alive(int(pid)):
+                if separated or kind == "in_group":
+                    failures.append(f"{arm}: the probe's {kind} process {pid} survived the session")
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.kill(int(pid), signal.SIGKILL)
+    return failures
+
+
+GRADING_PROBE = SUITE_DIR / "fixtures" / "demo-oracles" / "grading-probe"
+
+
+def _grading_probe(tmp: Path) -> tuple[bool, str]:
+    """Grade an empty workspace with a driver that reports the uid the candidate's code runs as."""
+    from checker_support import run_driver
+
+    workspace = tmp / "grading-probe"
+    workspace.mkdir()
+    return run_driver(workspace, GRADING_PROBE)
+
+
+def check_grading(result: tuple[bool, str], separated: bool) -> list[str]:
+    """Grading runs the candidate's code as an unprivileged user, never as root (the #90 review)."""
+    from checker_support import grader_ids
+
+    _, verdict = result
+    expected = grader_ids() if separated else None
+    want = f"uid {expected[0]}" if expected is not None else f"uid {os.geteuid()}"
+    failures = [] if verdict == want else [f"grading ran the candidate's code as {verdict!r}, expected {want!r}"]
+    if separated and verdict == "uid 0":
+        failures.append("grading ran the candidate's code as root")
+    return failures
+
+
+def check_real_hooks(receipts: list[dict[str, Any]]) -> list[str]:
+    """With the real hook scripts, every hook the agent user ran exited 0, and the memkernel arm ran them all."""
+    failures = [
+        f"{r['chain_id']} s{r['position']}: hook {h['event']} exited {h['exit_status']}"
+        for r in receipts
+        for h in r["hooks"]
+        if h["exit_status"] != 0
+    ]
+    events = {h["event"] for r in receipts if r["arm"] == "memkernel" for h in r["hooks"]}
+    if not {"SessionStart", "PreCompact", "PostCompact"} <= events:
+        failures.append(f"memkernel: the real hooks ran only {sorted(events)}")
     return failures
 
 

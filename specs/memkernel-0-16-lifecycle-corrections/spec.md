@@ -182,6 +182,15 @@ between the options put to them; the rest are fixes within the spec.
   - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
     the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
     user, it also fails unless the run folder and the oracles are unreadable.
+  - **Processes:** each step runs in its own process group, killed when the step ends. In the image every process of
+    the agent user is killed when the session ends. The probe leaves one process in the group and one detached from
+    it, and the demo fails if either survives (outside the image the detached one can escape, and is only cleaned
+    up).
+  - **Grading:** in the image the candidate's code runs as a second unprivileged user, `grader`, from a copy of the
+    oracle driver, and its processes are killed afterwards. The demo's grading probe must report that uid.
+  - **Hooks:** in the image the demo runs the memkernel arm's real hook scripts as the agent user, against the
+    pinned model cache, and fails unless every hook exits 0 and all three ran. This is the owner's ready gate for
+    PR #166, with the probe.
 - **A3 The rest of the review.**
   - **Gate check:** also requires each covering receipt's audit archive (`plan.json` matching the receipt's
     `plan_sha256`, `proposal.md`, and `curator-delta.md` when the receipt shows a hand edit). The `gate` field has

@@ -28,6 +28,52 @@ def run_bounded(cmd: Sequence[str], *, cwd: Path, timeout_s: float = 60.0) -> su
         return subprocess.CompletedProcess(list(cmd), 124, out, err + "\n[timeout]")
 
 
+GRADER_UID_ENV, GRADER_GID_ENV = "LC_GRADER_UID", "LC_GRADER_GID"  # set in the image: the unprivileged grader
+
+
+def grader_ids() -> tuple[int, int] | None:
+    """(uid, gid) the candidate's code runs as, when the harness is root and the image names a grader user."""
+    import os
+
+    uid = os.environ.get(GRADER_UID_ENV)
+    if not uid or os.geteuid() != 0:
+        return None
+    return int(uid), int(os.environ.get(GRADER_GID_ENV) or uid)
+
+
+def kill_user_processes(uid: int, rounds: int = 5) -> int:
+    """SIGKILL every process owned by ``uid`` (Linux, from /proc), repeating until none is left; return how many.
+
+    The harness calls it as root after an agent session and after grading, so nothing the agent or the candidate's
+    code started (a daemon, a detached child) outlives its turn. It refuses the harness's own uid.
+    """
+    import os
+    import signal
+    from pathlib import Path as _Path
+
+    if uid == os.geteuid():
+        raise ValueError("refusing to kill the harness's own processes")
+    killed = 0
+    for _ in range(rounds):
+        found = []
+        for status in _Path("/proc").glob("[0-9]*/status"):
+            try:
+                uids = next(line for line in status.read_text().splitlines() if line.startswith("Uid:")).split()[1:]
+            except (OSError, StopIteration):
+                continue
+            if str(uid) in uids[:2]:
+                found.append(int(status.parent.name))
+        if not found:
+            return killed
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed += 1
+            except ProcessLookupError:
+                pass
+    return killed
+
+
 RESULT_PATH_ENV = "LC_ORACLE_RESULT"
 RESULT_NONCE_ENV = "LC_ORACLE_NONCE"
 STARTED = "started"
@@ -66,7 +112,10 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
     module globals, and on Linux through /proc/self/environ). Candidate code
     runs with a minimal environment (no operator credentials, ``HOME`` and
     ``TMPDIR`` inside a temporary directory) and a workspace that may not link
-    outside itself, but it is not otherwise sandboxed.
+    outside itself. In the image (the harness is root and ``LC_GRADER_UID`` names
+    the grader user) it runs as that unprivileged user, from a copy of the driver
+    in the temporary directory, and every process of that user is killed after
+    grading; elsewhere it runs as the caller.
     """
     import json
     import secrets
@@ -90,9 +139,23 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
         shutil.copytree(workdir, stage, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))
         env = {key: value for key, value in _base_env().items()}
         env.update({"HOME": str(home), "TMPDIR": temp, RESULT_PATH_ENV: str(result), RESULT_NONCE_ENV: nonce})
+        grader = grader_ids()
+        command = [sys.executable, str(driver), str(stage)]
+        if grader is not None:  # the candidate's code never runs as root (the #90 review)
+            import os
+
+            copied = _Path(temp) / "driver.py"
+            shutil.copyfile(driver, copied)
+            for current, dirnames, filenames in os.walk(temp):
+                for name in [*dirnames, *filenames]:
+                    os.chown(os.path.join(current, name), *grader, follow_symlinks=False)
+            os.chown(temp, *grader)
+            uid, gid = grader
+            command = ["setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups", "--", sys.executable,
+                       str(copied), str(stage)]  # fmt: skip
         try:
             completed = subprocess.run(
-                [sys.executable, str(driver), str(stage)],
+                command,
                 cwd=stage,
                 env=env,
                 capture_output=True,
@@ -103,6 +166,9 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
             exit_code: int | None = completed.returncode
         except subprocess.TimeoutExpired:
             exit_code = None
+        finally:
+            if grader is not None:
+                kill_user_processes(grader[0])
         records = []
         if result.exists():
             for line in result.read_text(encoding="utf-8").splitlines():

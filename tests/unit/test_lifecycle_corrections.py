@@ -635,3 +635,65 @@ def test_an_agent_user_without_root_is_refused_before_the_run(tmp_path: Path) ->
     cfg.agent_uid = os.geteuid() + 1  # type: ignore[attr-defined]
     with pytest.raises(SystemExit, match="needs the harness to run as root"):
         runner.run(cfg, ["demo-correct"], ["bare"], runs=1)
+
+
+# ── in-image checks (the PR's ready gate): processes, grading user, real hooks ─
+
+checker_support = load("checker_support")
+
+
+def test_a_process_left_in_the_steps_group_is_killed_with_the_step(tmp_path: Path) -> None:
+    probe = json.loads(
+        (
+            Path(runner.run(_cfg(tmp_path, "demo"), ["demo-correct"], ["bare"], runs=1)).parent
+            / "demo-correct.bare.r0"
+            / "s1"
+            / "workspace"
+            / "PROBE.json"
+        ).read_text()
+    )
+    lingering = probe["lingering"]
+    assert not runner._alive(lingering["in_group"])
+    assert runner.check_lingering({"bare": probe}, separated=False) == []  # the detached one is killed, uncounted
+    import time
+
+    deadline = time.monotonic() + 5  # killed, it is a zombie until its new parent reaps it
+    while runner._alive(lingering["detached"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not runner._alive(lingering["detached"])
+
+
+def test_in_the_image_a_detached_survivor_is_a_failure() -> None:
+    import subprocess as sp
+
+    survivor = sp.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    try:
+        failures = runner.check_lingering({"bare": {"lingering": {"detached": survivor.pid}}}, separated=True)
+        assert failures == [f"bare: the probe's detached process {survivor.pid} survived the session"]
+    finally:
+        survivor.kill()
+        survivor.wait()
+
+
+def test_grading_reports_the_uid_its_candidate_runs_as(tmp_path: Path) -> None:
+    import os
+
+    result = runner._grading_probe(tmp_path)
+    assert result == (False, f"uid {os.geteuid()}")  # outside the image: the caller
+    assert runner.check_grading(result, separated=False) == []
+    assert runner.check_grading((False, "uid 0"), separated=True)  # root is never acceptable in the image
+
+
+def test_the_harness_never_kills_its_own_processes() -> None:
+    import os
+
+    with pytest.raises(ValueError, match="own processes"):
+        checker_support.kill_user_processes(os.geteuid())
+
+
+def test_a_failed_real_hook_or_a_missing_event_fails_the_demo() -> None:
+    receipts = [
+        {"chain_id": "c", "position": 0, "arm": "memkernel", "hooks": [{"event": "SessionStart", "exit_status": 1}]}
+    ]
+    failures = runner.check_real_hooks(receipts)
+    assert "c s0: hook SessionStart exited 1" in failures and any("ran only" in f for f in failures)
