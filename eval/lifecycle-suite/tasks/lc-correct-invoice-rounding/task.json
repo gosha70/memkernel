@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "An invoice line comes to 2.345. What amount is billed for it? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "An invoice line comes to 2.345. What amount is billed for it? Write your answer to ANSWER.md in the repository root: first the line `Answer: <amount billed>`, then a sentence on why."
         }
       ]
     }

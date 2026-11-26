@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "It is not served after the update: the catalog.updated event purges the cached price immediately."
+ANSWER = "Answer: 0 seconds\n\nIt is not served after the update: the catalog.updated event purges the cached price immediately."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

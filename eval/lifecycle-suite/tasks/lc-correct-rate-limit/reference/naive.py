@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "All 300, since the limit is 600 requests per minute."
+ANSWER = "Answer: 300\n\nAll 300, since the limit is 600 requests per minute."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

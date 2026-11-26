@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Each access token is valid for 15 minutes, and it must re-authenticate 8 hours after login."
+ANSWER = "Answer: 15 minutes; 8 hours\n\nEach access token is valid for 15 minutes, and it must re-authenticate 8 hours after login."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

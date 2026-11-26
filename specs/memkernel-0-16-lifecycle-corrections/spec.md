@@ -150,3 +150,55 @@ are listed for review.
 test that every fixture's competing page matches its chain's obsolete patterns caught it, and the patterns now
 accept the plural. Two chains' competing pages stated the old rule but not its answer; they now carry the obsolete
 answer as well.
+
+## Review amendments (2026-11-25)
+
+Two reviews of the unpushed build, which the owner pasted, found what follows. A1 and A2 are the owner's choices
+between the options put to them; the rest are fixes within the spec.
+
+- **A1 The answer line (owner; replaces B5 and amends FR-001).**
+  - **What failed:** the free-text checker passed wrong answers that merely contained Y ("Monday is explicitly not
+    allowed"; "The limit is not 120; all 300 requests are accepted"), and multi-part answers could omit a part.
+  - **The answer:** the evaluation prompt asks for an `Answer:` line in a neutral form per chain that reveals
+    nothing of Y (for example `<weekday>; <HH:MM> UTC`), parts separated by `;`.
+  - **Grading:** each part is parsed and compared with the hidden conditions. All of them meet Y's: `informed`.
+    The parts meet X's: `obsolete`. Anything else is `other`, including a missing, unparsable or incomplete line.
+  - **Both values:** the explanation below the line may name both values; the line decides. FR-001's stated limit
+    (both values without saying which holds) no longer exists.
+  - **Fixtures:** every chain has three adversarial references, each pinned to its class: Y only in prose (other),
+    X on the line with Y in prose (obsolete), and the line with extra parts (other).
+- **A2 Blinding (owner: separate users).**
+  - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
+    root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user
+    through `setpriv`, with the hook scripts, the ledger and the stub agent from the world-readable
+    `/opt/agent-tools`. The image build fails if `agent` can list `/opt/memkernel`.
+  - **The runner:**
+    - Each session is prepared in its chain's folder, then run in `sessions/<random>/`, which names neither the
+      task nor the arm and has nothing of the chain beside it (no `../../s0`). Its store, the store's state and
+      the grep directory come with it.
+    - With `--agent-uid`, the session's files are the agent's only while it runs; then they return to the chain.
+    - Chain folders are mode 0700, the run folder 0711 and the receipts 0600, all the harness's.
+    - `run.sh` hands the finished run to the VM user (`RUNS_OWNER`) so `vm.sh` can copy it off.
+  - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
+    the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
+    user, it also fails unless the run folder and the oracles are unreadable.
+- **A3 The rest of the review.**
+  - **Gate check:** also requires each covering receipt's audit archive (`plan.json` matching the receipt's
+    `plan_sha256`, `proposal.md`, and `curator-delta.md` when the receipt shows a hand edit). The `gate` field has
+    a fixed shape.
+  - **Curator CLI:** a paid run resolves it to one absolute path, checks that file's version against the pin, and
+    invokes only it.
+  - **`qualify.py`:** requires the exact `12 × 2 × R_cal` manifest; a missing, unexpected or duplicated chain is
+    refused.
+  - **Stale-base retry:** re-renders the corrected page from the fresh read; the scripted policy says so and its
+    hash is re-pinned.
+  - **Helper failures:** helpers have a timeout, and unreadable helper output is `correction_failed`, never a crash.
+  - **Report:** separates invalid from truncated trials and counts truncated pairs. It keeps gate evidence from
+    truncated trials and shows a governed trial without gate evidence as missing. It refuses a receipts file that
+    lacks any preregistered chain.
+  - **Arm hash:** a governed arm's hash covers its curator policy, and `load_arm` refuses a policy that does not
+    match its pin.
+  - **Not done here, and tracked for the paid runs:** the image carries wiki-studio 0.4.1 only, so the governed
+    arms cannot run in it until it gains wiki-studio 0.10.0 for memkernel's governed mode and the curator.
+    Meanwhile the image's demo leaves them out and says so. The report's primary endpoint still fixes the
+    treatment as `memkernel`.

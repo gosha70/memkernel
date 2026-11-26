@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Not this week: the window closed on Thursday at 15:00 UTC, so the earliest is Monday at 09:00 UTC."
+ANSWER = "Answer: Monday; 09:00 UTC\n\nNot this week: the window closed on Thursday at 15:00 UTC, so the earliest is Monday at 09:00 UTC."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

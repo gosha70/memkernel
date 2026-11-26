@@ -1,10 +1,19 @@
 {
+  "form": "<number of requests accepted in that minute>",
+  "parts": [
+    "number"
+  ],
   "informed": [
-    "\\b120\\b"
+    {
+      "range": [
+        120,
+        140
+      ]
+    }
   ],
   "obsolete": [
-    "\\b600\\b",
-    "\\ball 300\\b",
-    "\\ball of them\\b"
+    {
+      "equals": 300
+    }
   ]
 }

@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "The client's call that creates a payment receives HTTP 503. What should the client do? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "The client's call that creates a payment receives HTTP 503. What should the client do? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of automatic retries>`, then a sentence on why."
         }
       ]
     }

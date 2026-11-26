@@ -1,13 +1,22 @@
 {
+  "form": "<time from today until the next production access review, such as 3 days>",
+  "parts": [
+    "duration"
+  ],
   "informed": [
-    "\\bmonthly\\b",
-    "\\bnext month\\b",
-    "\\bevery month\\b",
-    "\\bin (about )?(two|2) weeks\\b"
+    {
+      "range": [
+        10080,
+        30240
+      ]
+    }
   ],
   "obsolete": [
-    "\\bquarter",
-    "\\bthree months\\b",
-    "\\b3 months\\b"
+    {
+      "range": [
+        86400,
+        136800
+      ]
+    }
   ]
 }

@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "It can go out on Friday after 17:00 UTC."
+ANSWER = "Answer: Friday; 17:00 UTC\n\nIt can go out on Friday after 17:00 UTC."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

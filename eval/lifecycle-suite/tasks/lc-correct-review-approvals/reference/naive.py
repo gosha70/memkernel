@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Yes, one approval from a maintainer is enough to merge."
+ANSWER = "Answer: yes; 1\n\nYes, one approval from a maintainer is enough to merge."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

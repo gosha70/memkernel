@@ -1,11 +1,16 @@
 {
+  "form": "<number of automatic retries>",
+  "parts": [
+    "number"
+  ],
   "informed": [
-    "\\b(do not|don't|never|must not|should not|shouldn't)\\b[^.]*\\bretr",
-    "\\bnot idempotent\\b",
-    "\\bnon-idempotent\\b"
+    {
+      "equals": 0
+    }
   ],
   "obsolete": [
-    "\\bthree\\b",
-    "\\b3\\s+(immediate\\s+)?(retries|times)\\b"
+    {
+      "equals": 3
+    }
   ]
 }

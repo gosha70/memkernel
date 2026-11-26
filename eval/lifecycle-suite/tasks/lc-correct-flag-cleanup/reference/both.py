@@ -1,6 +1,6 @@
 # Copyright (c) 2026 EGOGE
 # SPDX-License-Identifier: Apache-2.0
-"""Names both rules and says which holds now: passes (FR-001)."""
+"""Names both rules and says which holds now: passes (FR-001, A1)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "The old rule kept flags for a year, but now they must go within 30 days, so this one is overdue and should be removed."
+ANSWER = "Answer: 0\n\nThe old rule kept flags for a year, but now they must go within 30 days, so this one is overdue and should be removed."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

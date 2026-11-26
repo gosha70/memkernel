@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A partner integration refreshes its credentials once an hour. For how long is each access token it receives valid, and when must it log in again? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "A partner integration refreshes its credentials once an hour. For how long is each access token it receives valid, and when must it log in again? Write your answer to ANSWER.md in the repository root: first the line `Answer: <how long each access token is valid>; <how long after login it must log in again>`, then a sentence on why."
         }
       ]
     }

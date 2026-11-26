@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Nothing yet: it can stay in the code until a year after rollout."
+ANSWER = "Answer: 320\n\nNothing yet: it can stay in the code until a year after rollout."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

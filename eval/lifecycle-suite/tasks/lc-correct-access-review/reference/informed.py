@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "In about two weeks: production access is reviewed monthly."
+ANSWER = "Answer: 2 weeks\n\nIn about two weeks: production access is reviewed monthly."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

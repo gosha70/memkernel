@@ -1,13 +1,21 @@
 {
+  "form": "<yes or no>; <total number of approvals the pull request needs>",
+  "parts": [
+    "yesno",
+    "number"
+  ],
   "informed": [
-    "\\btwo approvals\\b",
-    "\\b2 approvals\\b",
-    "\\bsecond approval\\b",
-    "\\bcode ?owners?\\b"
+    {
+      "equals": "no"
+    },
+    {
+      "equals": 2
+    }
   ],
   "obsolete": [
-    "\\byes\\b",
-    "\\bone approval (from a maintainer )?is enough\\b",
-    "\\bcan be merged now\\b"
+    {
+      "equals": "yes"
+    },
+    null
   ]
 }

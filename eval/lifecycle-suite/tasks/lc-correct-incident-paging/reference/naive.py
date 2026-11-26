@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "The on-call engineer is paged right away."
+ANSWER = "Answer: yes; Saturday\n\nThe on-call engineer is paged right away."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

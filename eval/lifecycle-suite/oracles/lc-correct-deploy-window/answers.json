@@ -1,8 +1,24 @@
 {
+  "form": "<weekday>; <HH:MM> UTC",
+  "parts": [
+    "weekday",
+    "time"
+  ],
   "informed": [
-    "\\bmondays?\\b"
+    {
+      "equals": "monday"
+    },
+    {
+      "equals": "09:00"
+    }
   ],
   "obsolete": [
-    "\\bfridays?\\b"
+    {
+      "in": [
+        "thursday",
+        "friday"
+      ]
+    },
+    null
   ]
 }

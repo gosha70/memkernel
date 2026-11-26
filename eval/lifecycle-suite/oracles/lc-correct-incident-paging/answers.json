@@ -1,12 +1,21 @@
 {
+  "form": "<yes or no: is anyone paged>; <weekday the incident is first worked on>",
+  "parts": [
+    "yesno",
+    "weekday"
+  ],
   "informed": [
-    "\\bticket",
-    "\\bqueue\\b",
-    "\\bnext business day\\b"
+    {
+      "equals": "no"
+    },
+    {
+      "equals": "monday"
+    }
   ],
   "obsolete": [
-    "\\bpaged\\b",
-    "\\bpages?\\b",
-    "\\bwake\\b"
+    {
+      "equals": "yes"
+    },
+    null
   ]
 }

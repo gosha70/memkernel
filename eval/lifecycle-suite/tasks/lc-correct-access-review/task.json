@@ -18,7 +18,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "The last production access review was completed two weeks ago. When is the next production access review due? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "The last production access review was completed two weeks ago. When is the next production access review due? Write your answer to ANSWER.md in the repository root: first the line `Answer: <time from today until the next production access review, such as 3 days>`, then a sentence on why."
         }
       ]
     }

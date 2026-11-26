@@ -294,7 +294,7 @@ run_container() {  # $1 = run.sh mode, $2 = extra docker flags; on stdin: key, w
     IFS= read -r MEASURED_ANNOUNCEMENT || MEASURED_ANNOUNCEMENT=
     export ANTHROPIC_API_KEY CALIBRATION_WORKSPACE_ID MEASURED_SPEND_LIMIT MEASURED_ANNOUNCEMENT
     docker run $docker_flags -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e MEASURED_SPEND_LIMIT \
-      -e MEASURED_ANNOUNCEMENT ${2:-} \
+      -e MEASURED_ANNOUNCEMENT -e RUNS_OWNER=\"\$(id -u):\$(id -g)\" ${2:-} \
       -v \"\$HOME/$guest_runs:/runs\" '$tag' $1"
 }
 

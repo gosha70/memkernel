@@ -24,6 +24,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -303,6 +306,13 @@ class RunConfig:
     shared_cache: Path | None = None
     ops_command: tuple[str, ...] | None = None  # memkernel_ops.py's command; default: memkernel_python + the script
     wiki_studio_cmd: str = "wiki-studio"  # the governed arms' curator CLI (pinned by the arm's cli_pin)
+    # Blinding (the #90 review): what the agent's user may read. The hook scripts and the ledger run as the agent,
+    # so in the image they come from a world-readable copy; with agent_uid set, each session's files belong to the
+    # agent only while it runs, and everything else under the run stays the harness's.
+    hooks_dir: Path = REPO_ROOT / "templates" / "hooks"
+    ledger_script: Path = SUITE_DIR / "hook_ledger.py"
+    agent_uid: int | None = None
+    agent_gid: int | None = None
 
 
 def _ops_command(cfg: RunConfig) -> tuple[str, ...]:
@@ -363,11 +373,11 @@ def _write_wiring(
             target = (
                 list(cfg.hook_command_override)
                 if cfg.hook_command_override
-                else [cfg.memkernel_python, str(REPO_ROOT / "templates" / "hooks" / HOOK_SCRIPTS[event])]
+                else [cfg.memkernel_python, str(cfg.hooks_dir / HOOK_SCRIPTS[event])]
             )
             command = [
                 sys.executable,
-                str(SUITE_DIR / "hook_ledger.py"),
+                str(cfg.ledger_script),
                 "--ledger",
                 str(ledger),
                 "--event",
@@ -465,6 +475,60 @@ def _cli(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.
     return call
 
 
+SESSIONS_DIR = "sessions"  # under the run directory: where a session runs, under a name that tells nothing
+
+
+def _sessions_area(cfg: RunConfig) -> Path:
+    return cfg.run_root / cfg.run_id / SESSIONS_DIR
+
+
+def stage_session(dirs: SessionDirs, cfg: RunConfig) -> SessionDirs:
+    """Move a prepared session (built in ``<chain>/s<n>``) into ``sessions/<random>`` for the agent's run.
+
+    The agent's working directory then names neither the task nor the arm, nothing of the chain sits beside it (no
+    ``../../s0``), and its store, the store's state and the grep directory come with it under the same name.
+    """
+    area = _sessions_area(cfg)
+    area.mkdir(mode=0o711, exist_ok=True)
+    token = area / secrets.token_hex(6)
+    shutil.move(str(dirs.root), token)
+    memory = store = None
+    if dirs.memory_dir is not None:
+        memory = token / "memory"
+        shutil.move(str(dirs.memory_dir), memory)
+    if dirs.store is not None:
+        store = token / "store" / dirs.store.name
+        store.parent.mkdir()
+        shutil.move(str(dirs.store), store)
+        state = dirs.store.with_name(f"{dirs.store.name}.state")
+        if state.exists():
+            shutil.move(str(state), store.with_name(f"{store.name}.state"))
+    return SessionDirs(token, token / "workspace", token / "home", token / "config", memory, store, dirs.namespace)
+
+
+def unstage_session(staged: SessionDirs, home: SessionDirs) -> None:
+    """Move a finished session back to where the chain keeps it: the reverse of :func:`stage_session`."""
+    if staged.store is not None and home.store is not None:
+        shutil.move(str(staged.store), home.store)
+        state = staged.store.with_name(f"{staged.store.name}.state")
+        if state.exists():
+            shutil.move(str(state), home.store.with_name(f"{home.store.name}.state"))
+        staged.store.parent.rmdir()
+    if staged.memory_dir is not None and home.memory_dir is not None:
+        shutil.move(str(staged.memory_dir), home.memory_dir)
+    shutil.move(str(staged.root), home.root)
+
+
+def _own(path: Path, uid: int, gid: int, mode: int | None = None) -> None:
+    """chown ``path`` and everything under it, links not followed; then ``mode`` on ``path`` itself."""
+    for current, dirnames, filenames in os.walk(path):
+        for name in [*dirnames, *filenames]:
+            os.chown(os.path.join(current, name), uid, gid, follow_symlinks=False)
+    os.chown(path, uid, gid, follow_symlinks=False)
+    if mode is not None:
+        os.chmod(path, mode)
+
+
 @dataclass
 class StepResult:
     lines: list[dict[str, Any]]
@@ -544,6 +608,7 @@ class SessionOutcome:
     dirs: SessionDirs
     prompts: list[str]
     timed_out: bool
+    ran_in: Path | None = None  # the staged workspace the agent worked in, which its tool calls name
 
 
 def run_session(
@@ -580,6 +645,9 @@ def run_session(
             session.namespace,
         )
         invalid = "fixture_restore_failed"
+    home = dirs  # where the chain keeps this session; the agent runs it staged under a neutral name
+    if invalid is None:
+        dirs = stage_session(home, cfg)
     if observe is not None and invalid is None:
         observe(task, arm, position, dirs)  # before any correction: what the shared copy alone carries
     correction: dict[str, Any] | None = None
@@ -599,6 +667,8 @@ def run_session(
     ledger = dirs.root / "hook-ledger.jsonl"
     if invalid is None:
         wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger, task.brief_for(position))
+        if cfg.agent_uid is not None:  # the session's files are the agent's while it runs, and only then
+            _own(dirs.root, cfg.agent_uid, cfg.agent_gid if cfg.agent_gid is not None else cfg.agent_uid, 0o700)
         env = _session_env(arm, dirs, chain_id, cfg)
         session_uuid = str(uuid.uuid4())
         raw = dirs.root / STREAM_FILE
@@ -640,6 +710,12 @@ def run_session(
                 timed_out = True
                 break
         hooks = _read_ledger(ledger)
+    ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
+    if dirs is not home:
+        if cfg.agent_uid is not None:
+            _own(dirs.root, os.geteuid(), os.getegid(), 0o700)
+        unstage_session(dirs, home)
+        dirs = home
     compacted = any(
         exposure_at is not None and evaluation_at is not None and exposure_at < ts < evaluation_at
         for ts in summary.compactions
@@ -681,7 +757,7 @@ def run_session(
         "api_errors": dict(sorted(summary.api_errors.items())),
         "wall_time_ms": int((time.monotonic() - t0) * 1000),
         "stages": {"exposure_at": exposure_at, "evaluation_at": evaluation_at, "compactions": summary.compactions},
-        "diagnostics": session_diagnostics(summary, dirs.workspace, earlier_reads, hooks),
+        "diagnostics": session_diagnostics(summary, ran_in, earlier_reads, hooks),
         "answer_class": None,  # lc-correct only: informed, obsolete or other (FR-001), set by grading
         "correction": correction,  # lc-correct only: what the arm's correction event did (FR-002)
         "gate": None,  # the governed arms' evaluation session: the end state against the gate's records (FR-004)
@@ -693,7 +769,7 @@ def run_session(
     }
     if timed_out and receipt["valid"]:
         receipt["outcome"] = "timeout"  # a valid failure of this session; the chain inherits it (FR-015a)
-    return SessionOutcome(receipt, summary, dirs, prompts, timed_out)
+    return SessionOutcome(receipt, summary, dirs, prompts, timed_out, ran_in)
 
 
 # ── grading ───────────────────────────────────────────────────
@@ -754,7 +830,7 @@ def grade(task: Task, arm: Arm, final: SessionOutcome, cfg: RunConfig, earlier_t
 
 def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any = None) -> list[dict[str, Any]]:
     chain_dir = chain_dir_for(task, arm, run_index, cfg)
-    chain_dir.mkdir(parents=True)
+    chain_dir.mkdir(parents=True, mode=0o700)  # the harness's: the agent never reads another chain, or its own
     state = ChainState()
     earlier_reads: set[str] = set()
     receipts: list[dict[str, Any]] = []
@@ -764,7 +840,7 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
         receipts.append(outcome.receipt)
         if not outcome.receipt["valid"]:
             break
-        earlier_reads |= set(read_paths(outcome.summary, outcome.dirs.workspace))
+        earlier_reads |= set(read_paths(outcome.summary, outcome.ran_in or outcome.dirs.workspace))
         transcript = chain_dir / f"transcript-{position}.md"
         transcript.write_text(render_transcript(outcome.prompts, outcome.summary), encoding="utf-8")
         state = ChainState(workspace=outcome.dirs.workspace, transcripts=[*state.transcripts, transcript])
@@ -936,6 +1012,8 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"run directory is not empty: {out}")
     out.mkdir(parents=True, exist_ok=True)
+    if cfg.agent_uid is not None:  # the agent may pass through to its session, never list the run (chain names)
+        os.chmod(out, 0o711)
     receipts_path = out / "receipts.jsonl"
     tasks = [load_task(cfg.tasks_root / task_id) for task_id in task_ids]
     arms = [load_arm(name) for name in arm_names]
@@ -948,7 +1026,8 @@ def run(cfg: RunConfig, task_ids: list[str], arm_names: list[str], runs: int, ob
                 check_cli_pin(arm, cfg.wiki_studio_cmd)
             else:
                 check_cli_pin(arm)
-    with receipts_path.open("w", encoding="utf-8") as sink:
+    receipts_fd = os.open(receipts_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # never the agent's to read
+    with open(receipts_fd, "w", encoding="utf-8") as sink:
         for run_index in range(runs):
             for task in tasks:
                 for arm in arms:
@@ -1002,7 +1081,22 @@ def demo() -> int:
             ),
         }
 
+    # In the image, run.sh sets these: the stub agent then runs as the agent user from a world-readable copy, and
+    # its probe must find nothing of the run, the other sessions or the oracles (the #90 review's blinding check).
+    uid = int(os.environ["LC_AGENT_UID"]) if os.environ.get("LC_AGENT_UID") else None
+    gid = int(os.environ.get("LC_AGENT_GID") or uid) if uid is not None else None
+    tools = Path(os.environ.get("LC_AGENT_TOOLS") or SUITE_DIR)
+    agent: tuple[str, ...] = (sys.executable, str(tools / "stub_agent.py"))
+    if uid is not None:
+        agent = ("setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups", "--", *agent)
+    curator_cli = _wiki_studio_beside_python()
+    arms = list(ARM_NAMES)
+    if not _curator_cli_usable(curator_cli):
+        arms = [a for a in arms if not load_arm(a).wiki_governed]
+        print(f"demo: {curator_cli} predates wiki-studio 0.7 (no approve), so the governed arms are left out")
     with tempfile.TemporaryDirectory() as tmp:
+        if uid is not None:
+            os.chmod(tmp, 0o711)  # the agent passes through to its session; it may list nothing on the way
         cfg = RunConfig(
             run_root=Path(tmp),
             run_id="demo",
@@ -1010,7 +1104,10 @@ def demo() -> int:
             model="stub",
             code_sha="demo",
             preregistration_sha256=None,
-            agent_cmd=(sys.executable, str(SUITE_DIR / "stub_agent.py")),
+            agent_cmd=agent,
+            ledger_script=tools / "hook_ledger.py",
+            agent_uid=uid,
+            agent_gid=gid,
             memkernel_cmd="stub-memkernel",
             memkernel_python=sys.executable,
             tasks_root=SUITE_DIR / "fixtures" / "demo-tasks",
@@ -1020,11 +1117,12 @@ def demo() -> int:
             ops_command=(sys.executable, str(SUITE_DIR / "stub_ops.py")),
             wiki_studio_cmd=_wiki_studio_beside_python(),
         )
-        receipts_path = run(cfg, list(DEMO_TASKS), list(ARM_NAMES), runs=1, observe=observe)
+        receipts_path = run(cfg, list(DEMO_TASKS), arms, runs=1, observe=observe)
         receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
         delivered = _delivered_files(Path(tmp) / "demo")
+        probes = _probes(Path(tmp) / "demo", arms)
 
-    failures = check_demo(seen, receipts, delivered)
+    failures = check_demo(seen, receipts, delivered) + check_probes(probes, separated=uid is not None)
     for line in failures:
         print(f"FAIL {line}")
     print(f"demo: {len(receipts)} receipts, {len(seen)} sessions observed, {len(failures)} failure(s)")
@@ -1040,6 +1138,52 @@ def _wiki_studio_beside_python() -> str:
     """The wiki-studio installed beside this Python (the dev environment's), else whatever is on PATH."""
     beside = Path(sys.executable).with_name("wiki-studio")
     return str(beside) if beside.exists() else "wiki-studio"
+
+
+def _curator_cli_usable(command: str) -> bool:
+    """Whether ``command`` is a wiki-studio with ``approve`` (0.7 or later), which the governed arms' curator needs."""
+    try:
+        out = subprocess.run([command, "--version"], capture_output=True, text=True, timeout=30, check=False).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    numbers = [int(n) for n in re.findall(r"\d+", out.strip().split()[-1])[:2]] if out.strip() else []
+    return len(numbers) == 2 and tuple(numbers) >= (0, 7)
+
+
+def _probes(run_dir: Path, arms: list[str]) -> dict[str, dict[str, Any] | None]:
+    """Each arm's PROBE.json from its demo-correct evaluation session, as the chain keeps it."""
+    found: dict[str, dict[str, Any] | None] = {}
+    task = load_task(SUITE_DIR / "fixtures" / "demo-tasks" / "demo-correct")
+    for arm in (a for a in arms if load_arm(a).runs_on(task)):
+        path = run_dir / f"demo-correct.{arm}.r0" / "s1" / "workspace" / "PROBE.json"
+        found[arm] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    return found
+
+
+def check_probes(probes: dict[str, dict[str, Any] | None], separated: bool) -> list[str]:
+    """The blinding checks of the #90 review, from what the stub agent could reach in its evaluation session.
+
+    Always: its working directory names neither the task nor the arm, the sessions folder holds its own session
+    only, and session 0 of its chain is not at ``../../s0``. With the agent running as its own user (the image):
+    the run directory cannot be listed, and the oracles cannot be read.
+    """
+    failures: list[str] = []
+    for arm, found in probes.items():
+        if found is None:
+            failures.append(f"{arm}: the evaluation session left no PROBE.json")
+            continue
+        cwd = Path(str(found["cwd"]))
+        if "demo-correct" in str(cwd) or f".{arm}." in str(cwd) or arm in cwd.parts:
+            failures.append(f"{arm}: the working directory {cwd} names the task or the arm")
+        if found["sessions"] != [cwd.parent.name]:
+            failures.append(f"{arm}: the sessions folder shows {found['sessions']!r}, not only its own session")
+        if found["s0_reachable"]:
+            failures.append(f"{arm}: session 0 of the chain is reachable at ../../s0")
+        if separated and isinstance(found["run_dir"], list):
+            failures.append(f"{arm}: the agent can list the run directory: {found['run_dir']!r}")
+        if separated and isinstance(found["oracles"], list):
+            failures.append(f"{arm}: the agent can read the image's oracles")
+    return failures
 
 
 def _delivered_files(run_dir: Path) -> dict[str, bool]:
@@ -1151,6 +1295,10 @@ def main(argv: list[str]) -> int:
     p_run.add_argument("--timeout", type=float, default=900.0)
     p_run.add_argument("--shared-cache", type=Path)
     p_run.add_argument("--wiki-studio-cmd", default="wiki-studio", help="the governed arms' curator CLI")
+    p_run.add_argument("--agent-uid", type=int, help="run each session's files as this user (the image's agent)")
+    p_run.add_argument("--agent-gid", type=int)
+    p_run.add_argument("--hooks-dir", type=Path, default=REPO_ROOT / "templates" / "hooks")
+    p_run.add_argument("--ledger-script", type=Path, default=SUITE_DIR / "hook_ledger.py")
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo()
@@ -1165,7 +1313,7 @@ def main(argv: list[str]) -> int:
         model=args.model,
         code_sha=args.code_sha,
         preregistration_sha256=sha256_bytes(args.preregistration.read_bytes()) if args.preregistration else None,
-        agent_cmd=(args.agent_cmd,),
+        agent_cmd=tuple(shlex.split(args.agent_cmd)),  # e.g. "setpriv --reuid=… -- claude" in the image
         memkernel_cmd=args.memkernel_cmd,
         memkernel_python=args.memkernel_python,
         tasks_root=args.tasks_root,
@@ -1173,6 +1321,10 @@ def main(argv: list[str]) -> int:
         timeout_s=args.timeout,
         shared_cache=args.shared_cache,
         wiki_studio_cmd=args.wiki_studio_cmd,
+        hooks_dir=args.hooks_dir,
+        ledger_script=args.ledger_script,
+        agent_uid=args.agent_uid,
+        agent_gid=args.agent_gid,
     )
     print(run(cfg, args.task, args.arm, args.runs))
     return 0

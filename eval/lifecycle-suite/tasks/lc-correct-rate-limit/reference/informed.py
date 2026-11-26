@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "120, plus a burst of up to 20; the rest are throttled, because the limit is 120 requests per minute per API key."
+ANSWER = "Answer: 120\n\n120, plus a burst of up to 20; the rest are throttled, because the limit is 120 requests per minute per API key."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

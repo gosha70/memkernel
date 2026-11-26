@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A SEV3 incident opens at 02:00 on a Saturday. What happens to it? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "A SEV3 incident opens at 02:00 on a Saturday. What happens to it? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no: is anyone paged>; <weekday the incident is first worked on>`, then a sentence on why."
         }
       ]
     }

@@ -38,6 +38,14 @@ its CUDA packages. It also holds pinned tools:
   (`arms/wiki_studio/requirements.txt`), independent of memkernel's `poetry.lock`
 - memkernel and its embedding model, downloaded at build time
 
+**What the agent can read** (the #90 review). The container starts as root, the harness. Each session runs as
+the unprivileged `agent` user, in `/runs/<run>/sessions/<random>/`, a folder named after neither the task nor the
+arm, with its home folder inside it. The session's files belong to `agent` only while it runs; then they move back
+into the chain's folder, which is root's alone, as are the run folder's listing and the receipts. The repository
+in `/opt/memkernel`, with every task's prompts, corrections, oracles and references, is root's alone too. The hook
+scripts, the hook ledger and the demo's stub agent come from the world-readable `/opt/agent-tools`. The image
+build fails if `agent` can list `/opt/memkernel`, and `run.sh demo` has the stub agent probe the run folder, the
+other sessions, `../../s0` and the oracles, and fails on any it reaches.
 Inside the container, the agent sees only `/runs`. The API key arrives when the
 container starts and is never built into the image.
 

@@ -18,7 +18,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A login handler needs to log which customer signed in. What should it write to the log? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "A login handler needs to log which customer signed in. What should it write to the log? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no: does the log line hold anything derived from the email address>; <the identifier the log line holds>`, then a sentence on why."
         }
       ]
     }

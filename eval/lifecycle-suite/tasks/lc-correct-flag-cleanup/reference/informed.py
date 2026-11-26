@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "It is overdue: flags must be removed within 30 days of full rollout, so remove it now."
+ANSWER = "Answer: 0\n\nIt is overdue: flags must be removed within 30 days of full rollout, so remove it now."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

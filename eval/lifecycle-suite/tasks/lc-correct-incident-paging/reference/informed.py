@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Nobody is woken: it goes to the ops ticket queue and is handled on the next business day."
+ANSWER = "Answer: no; Monday\n\nNobody is woken: it goes to the ops ticket queue and is handled on the next business day."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

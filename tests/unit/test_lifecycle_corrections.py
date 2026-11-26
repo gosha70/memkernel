@@ -56,7 +56,7 @@ def test_twelve_chains_include_the_eight_of_issue_90_and_split_six_six_by_kind()
 
 @pytest.mark.parametrize("task_id", CORRECT_IDS)
 def test_each_fixture_wiki_has_a_competing_page_with_the_obsolete_rule_and_is_governed(task_id: str) -> None:
-    obsolete = json.loads((ORACLES_ROOT / task_id / "answers.json").read_text(encoding="utf-8"))["obsolete"]
+    obsolete = _spec(task_id)["correction"]["obsolete_patterns"]  # type: ignore[index]  # what the curator matches
     wiki = TASKS_ROOT / task_id / "tree" / "knowledge" / "wiki"
     pages = [p for p in wiki.rglob("*.md") if p.name not in ("index.md", "log.md")]
     assert any(re.search(o, p.read_text(encoding="utf-8"), re.IGNORECASE) for p in pages for o in obsolete)
@@ -77,7 +77,7 @@ def test_the_evaluation_prompt_names_neither_the_correction_nor_its_value(task_i
     assert "answer.md" in prompt
 
 
-# ── the checker (FR-001) ──────────────────────────────────────
+# ── the checker (FR-001, amendment A1: only the answer line is graded) ─
 
 
 def _answer(tmp_path: Path, text: str) -> Path:
@@ -86,17 +86,32 @@ def _answer(tmp_path: Path, text: str) -> Path:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
+    ("task_id", "text", "expected"),
     [
-        ("No; the earliest is Monday at 09:00 UTC.", "informed"),
-        ("It can go out on Friday after 17:00 UTC.", "obsolete"),
-        ("It used to be Friday after 17:00, now it is Monday.", "informed"),  # names both, says which holds
-        ("Friday or Monday.", "informed"),  # the stated limit: both values without saying which holds pass
-        ("Ask the release manager.", "other"),
+        ("lc-correct-deploy-window", "Answer: Monday; 09:00 UTC\n\nThe window closed Thursday.", "informed"),
+        ("lc-correct-deploy-window", "**Answer:** Monday; 9:00 UTC", "informed"),  # markdown, an unpadded hour
+        ("lc-correct-deploy-window", "Answer: Friday; 17:00 UTC", "obsolete"),
+        ("lc-correct-deploy-window", "Answer: Thursday; 16:00 UTC", "obsolete"),
+        ("lc-correct-deploy-window", "Answer: Monday; 17:00 UTC", "other"),  # half right is not right
+        ("lc-correct-deploy-window", "Answer: Friday or Monday; 09:00 UTC", "other"),  # two weekdays: unparsable
+        # the review's counterexamples: a value in prose decides nothing, only the answer line does
+        ("lc-correct-deploy-window", "Monday is explicitly not allowed.", "other"),
+        ("lc-correct-email-logging", "Do not log the internal user ID; log the email hash.", "other"),
+        ("lc-correct-email-logging", "Answer: yes; email hash\n\nDo not log the internal user ID.", "obsolete"),
+        ("lc-correct-rate-limit", "The limit is not 120; all 300 requests are accepted.", "other"),
+        ("lc-correct-rate-limit", "Answer: 300\n\nThe limit is not 120.", "obsolete"),
+        # completeness: every part of a multi-part answer must hold
+        ("lc-correct-token-lifetime", "Answer: 15 minutes; 24 hours", "other"),
+        ("lc-correct-token-lifetime", "Answer: 15 minutes", "other"),
+        ("lc-correct-token-lifetime", "Answer: 15 min; 8 h", "informed"),
+        ("lc-correct-review-approvals", "Answer: no; 1", "other"),
+        ("lc-correct-review-approvals", "Answer: yes; 2", "obsolete"),
     ],
 )
-def test_the_checker_has_three_outcomes(tmp_path: Path, text: str, expected: str) -> None:
-    oracle = ORACLES_ROOT / "lc-correct-deploy-window"
+def test_the_checker_grades_the_answer_line_with_three_outcomes(
+    tmp_path: Path, task_id: str, text: str, expected: str
+) -> None:
+    oracle = ORACLES_ROOT / task_id
     assert correct_checker.classify(_answer(tmp_path, text), oracle) == expected
     assert correct_checker.check(tmp_path, oracle) == (expected == "informed", expected)
 
@@ -105,9 +120,37 @@ def test_a_missing_or_linked_answer_is_other(tmp_path: Path) -> None:
     oracle = ORACLES_ROOT / "lc-correct-deploy-window"
     assert correct_checker.classify(tmp_path, oracle) == "other"
     outside = tmp_path.parent / "outside.md"
-    outside.write_text("Monday", encoding="utf-8")
+    outside.write_text("Answer: Monday; 09:00 UTC", encoding="utf-8")
     (tmp_path / "ANSWER.md").symlink_to(outside)
     assert correct_checker.classify(tmp_path, oracle) == "other"
+
+
+@pytest.mark.parametrize("task_id", CORRECT_IDS)
+def test_every_reference_including_the_adversarial_ones_grades_as_declared(task_id: str, tmp_path: Path) -> None:
+    import importlib.util
+
+    references = sorted((TASKS_ROOT / task_id / "reference").glob("*.py"))
+    names = {r.stem for r in references}
+    assert {"naive", "informed", "both", "adv_prose_only", "adv_line_x_prose_y", "adv_extra_parts"} <= names
+    for path in references:
+        spec = importlib.util.spec_from_file_location(f"ref_{task_id}_{path.stem}".replace("-", "_"), path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        workdir = tmp_path / path.stem
+        workdir.mkdir()
+        module.apply(workdir)
+        assert correct_checker.classify(workdir, ORACLES_ROOT / task_id) == module.EXPECTED, path.stem
+
+
+@pytest.mark.parametrize("task_id", CORRECT_IDS)
+def test_the_answer_form_in_the_prompt_reveals_no_fact_term(task_id: str) -> None:
+    spec = _spec(task_id)
+    form = json.loads((ORACLES_ROOT / task_id / "answers.json").read_text(encoding="utf-8"))["form"]
+    prompt = spec["sessions"][-1]["steps"][-1]["prompt"]  # type: ignore[index]
+    assert f"`Answer: {form}`" in prompt
+    for term in spec["fact_terms"]:  # type: ignore[attr-defined]
+        assert term.lower() not in form.lower()
 
 
 # ── the exposure copy never carries the correction (FR-002, SC-2) ─
@@ -478,3 +521,53 @@ def test_the_report_keeps_truncated_trials_apart_and_their_gate_evidence() -> No
     trials = report.assemble([base, truncated, missing], truncated=[truncated])
     table = "\n".join(report._correct_table(trials, ["memkernel_governed"]))
     assert "| memkernel_governed | 3 | 2 | 2 | 0/2 (0%) | 0 | 0 | 1 | 2 | 1 |" in table
+
+
+# ── blinding (the #90 review): what the agent can reach from its session ─
+
+
+def test_the_probe_check_flags_every_way_out() -> None:
+    leak = {
+        "cwd": "/runs/demo/demo-correct.bare.r0/s1/workspace",
+        "sessions": ["s0", "s1"],
+        "run_dir": ["demo-correct.bare.r0", "receipts.jsonl"],
+        "s0_reachable": True,
+        "oracles": ["lc-correct-deploy-window"],
+    }
+    failures = runner.check_probes({"bare": leak}, separated=True)
+    assert len(failures) == 5, failures
+    clean = {
+        "cwd": "/runs/demo/sessions/0a1b2c3d4e5f/workspace",
+        "sessions": ["0a1b2c3d4e5f"],
+        "run_dir": "unreadable (13)",
+        "s0_reachable": False,
+        "oracles": "unreadable (13)",
+    }
+    assert runner.check_probes({"bare": clean}, separated=True) == []
+
+
+def test_without_staging_the_probe_would_see_the_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "stage_session", lambda dirs, cfg: dirs)  # the layout before the review
+    runner.run(_cfg(tmp_path, "demo"), ["demo-correct"], ["bare"], runs=1)
+    probe = json.loads(
+        (tmp_path / "runs" / "t" / "demo-correct.bare.r0" / "s1" / "workspace" / "PROBE.json").read_text()
+    )
+    failures = runner.check_probes({"bare": probe}, separated=False)
+    assert any("names the task" in f for f in failures) and any("../../s0" in f for f in failures)
+
+
+def test_a_run_with_an_agent_user_keeps_the_run_chains_and_receipts_the_harnesss(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    cfg = _cfg(tmp_path, "demo")
+    cfg.agent_uid, cfg.agent_gid = os.getuid(), os.getgid()  # type: ignore[attr-defined]  # chown to oneself: the path runs
+    receipts_path = runner.run(cfg, ["demo-correct"], ["bare"], runs=1)
+    run_dir = receipts_path.parent
+    mode = lambda path: stat.S_IMODE(path.stat().st_mode)  # noqa: E731
+    assert mode(run_dir) == 0o711 and mode(run_dir / "sessions") == 0o711
+    assert mode(run_dir / "demo-correct.bare.r0") == 0o700 and mode(receipts_path) == 0o600
+    assert mode(run_dir / "demo-correct.bare.r0" / "s1") == 0o700
+    assert list((run_dir / "sessions").iterdir()) == []  # every session moved back into its chain
+    probe = json.loads((run_dir / "demo-correct.bare.r0" / "s1" / "workspace" / "PROBE.json").read_text())
+    assert runner.check_probes({"bare": probe}, separated=False) == []

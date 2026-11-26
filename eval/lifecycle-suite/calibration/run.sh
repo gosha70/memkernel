@@ -75,6 +75,15 @@ preflight() {
   echo "model: $model; spend cap: the workspace's spend limit, verified by you in the Console"
 }
 
+# Blinding (the #90 review): in the image the runner is root and each session runs as the agent user, from the
+# world-readable agent tools; outside it (tests, a dev checkout) nothing here is set and the runner runs as before.
+agent_args=()
+if [ -n "${LC_AGENT_UID:-}" ]; then
+  agent_args=(--agent-cmd "setpriv --reuid=$LC_AGENT_UID --regid=${LC_AGENT_GID:-$LC_AGENT_UID} --clear-groups -- claude"
+              --agent-uid "$LC_AGENT_UID" --agent-gid "${LC_AGENT_GID:-$LC_AGENT_UID}"
+              --hooks-dir "$LC_AGENT_TOOLS" --ledger-script "$LC_AGENT_TOOLS/hook_ledger.py")
+fi
+
 finish() {  # $1 = the runner's exit status; scans the run (partial output after a failure too) and exits
   local status=$1 copy scan code
   if [ -d "$runs/$run_id" ]; then
@@ -93,6 +102,9 @@ finish() {  # $1 = the runner's exit status; scans the run (partial output after
     python3 "$suite/scan_secrets.py" "$runs/$run_id" || scan=$?
     if [ "$scan" -ne 0 ]; then  # loud whichever exit status wins below
       echo "SECRET SCAN FOUND HITS in $runs/$run_id (exit $scan): do not commit anything from this run" >&2
+    fi
+    if [ -n "${RUNS_OWNER:-}" ]; then  # the run is root's while it runs; hand it to the VM user who copies it off
+      chown -R "$RUNS_OWNER" "$runs/$run_id" && chmod -R u+rwX "$runs/$run_id" || copy=$?
     fi
     echo "$( [ "$mode" = measure ] && echo measured || echo calibration ) output: $runs/$run_id" \
       "(runner exit $status, secret scan exit $scan, environment copy exit $copy)"
@@ -127,7 +139,7 @@ case "$mode" in
       --runs 1 --run-root "$runs" --run-id "$run_id" --phase calibration --model "$model" \
       --code-sha "$CODE_SHA" \
       --memkernel-cmd /opt/mk-venv/bin/memkernel --memkernel-python /opt/mk-venv/bin/python \
-      --shared-cache /opt/cache || status=$?
+      --shared-cache /opt/cache ${agent_args[@]+"${agent_args[@]}"} || status=$?
     finish "$status"
     ;;
   measure)
@@ -155,7 +167,7 @@ case "$mode" in
       "${args[@]}" --run-root "$runs" --run-id "$run_id" --phase measured --preregistration "$preregistration" \
       --code-sha "$CODE_SHA" \
       --memkernel-cmd /opt/mk-venv/bin/memkernel --memkernel-python /opt/mk-venv/bin/python \
-      --shared-cache /opt/cache || status=$?
+      --shared-cache /opt/cache ${agent_args[@]+"${agent_args[@]}"} || status=$?
     finish "$status"
     ;;
   *)

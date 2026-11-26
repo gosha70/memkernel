@@ -1,8 +1,16 @@
 {
+  "form": "<number of days>",
+  "parts": [
+    "number"
+  ],
   "informed": [
-    "\\b90[\\s-]*days?\\b"
+    {
+      "equals": 90
+    }
   ],
   "obsolete": [
-    "\\b30[\\s-]*days?\\b"
+    {
+      "equals": 30
+    }
   ]
 }

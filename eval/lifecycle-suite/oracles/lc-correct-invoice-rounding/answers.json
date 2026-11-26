@@ -1,8 +1,16 @@
 {
+  "form": "<amount billed>",
+  "parts": [
+    "number"
+  ],
   "informed": [
-    "2\\.34\\b"
+    {
+      "equals": 2.34
+    }
   ],
   "obsolete": [
-    "2\\.35\\b"
+    {
+      "equals": 2.35
+    }
   ]
 }

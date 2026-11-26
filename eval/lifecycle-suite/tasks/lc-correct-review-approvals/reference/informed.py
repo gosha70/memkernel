@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "No: changes under payments/ need two approvals, one of them from a code owner."
+ANSWER = "Answer: no; 2\n\nNo: changes under payments/ need two approvals, one of them from a code owner."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

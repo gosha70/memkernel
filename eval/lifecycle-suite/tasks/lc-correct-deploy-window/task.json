@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A change was approved and is ready on Thursday at 16:00 UTC. When is the earliest it may be deployed to production? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "A change was approved and is ready on Thursday at 16:00 UTC. When is the earliest it may be deployed to production? Write your answer to ANSWER.md in the repository root: first the line `Answer: <weekday>; <HH:MM> UTC`, then a sentence on why."
         }
       ]
     }

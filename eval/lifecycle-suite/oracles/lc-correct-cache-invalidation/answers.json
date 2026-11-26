@@ -1,11 +1,19 @@
 {
+  "form": "<duration, such as 45 seconds>",
+  "parts": [
+    "duration"
+  ],
   "informed": [
-    "catalog\\.updated",
-    "\\bpurg",
-    "\\bimmediately\\b",
-    "\\bat once\\b"
+    {
+      "range": [
+        0,
+        0.5
+      ]
+    }
   ],
   "obsolete": [
-    "\\b10[\\s-]*min"
+    {
+      "equals": 10
+    }
   ]
 }

@@ -1332,6 +1332,18 @@ def _preregistration(tmp_path: Path, **changes: Any) -> Path:
     return path
 
 
+def _completed(receipts: list[dict[str, Any]], digest: str) -> list[dict[str, Any]]:
+    """``receipts`` plus a valid failed trial for every other preregistered chain: the report refuses part of a run."""
+    block = {"tasks": PREREGISTERED_TASKS, "arms": ANALYSIS["arms"], "runs_per_arm_per_task": 1}
+    extra = []
+    for chain in report.missing_chains(receipts, block):
+        task, arm, run = chain.rsplit(".", 2)
+        extra.append(
+            _trial(arm, task, int(run[1:]), outcome="failed", checker_passed=False, preregistration_sha256=digest)
+        )
+    return [*receipts, *extra]
+
+
 def _cli(
     tmp_path: Path,
     receipts: list[dict[str, Any]],
@@ -1359,10 +1371,12 @@ def test_the_report_takes_its_analysis_from_the_preregistration(
         {**r, "preregistration_sha256": digest}
         for r in _pooled({"memkernel": passed, "claude_md": passed, "fs_grep": passed})
     ]
+    receipts = _completed(receipts, digest)
     status, text, _ = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
     assert status == 0 and _endpoint(text).count("| equivalent |") == 2 and "seed 17" in text
 
-    narrower = _preregistration(tmp_path, bootstrap_seed=5, min_tasks_inferential=21)  # a changed block
+    # a changed block; 22 is above the 21 preregistered tasks the completed receipts cover, so it stays descriptive
+    narrower = _preregistration(tmp_path, bootstrap_seed=5, min_tasks_inferential=22)
     digest = records.sha256_bytes(narrower.read_bytes())
     receipts = [{**r, "preregistration_sha256": digest} for r in receipts]
     status, changed, _ = _cli(tmp_path, receipts, REPORT_ONLY, narrower, capsys)
@@ -1525,15 +1539,31 @@ def test_the_report_refuses_receipts_outside_the_preregistered_experiment(
     as the preregistered experiment and could produce a gain headline."""
     prereg = _preregistration(tmp_path)
     digest = records.sha256_bytes(prereg.read_bytes())
-    receipts = [
-        _trial("memkernel", "t1", 0, preregistration_sha256=digest),
-        _trial("claude_md", "t1", 0, preregistration_sha256=digest),
-    ]
+    receipts = _completed(
+        [
+            _trial("memkernel", "t1", 0, preregistration_sha256=digest),
+            _trial("claude_md", "t1", 0, preregistration_sha256=digest),
+        ],
+        digest,
+    )
     status, _, _ = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
     assert status == 0
     receipts[0] = {**receipts[0], **change}
     status, out, err = _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)
     assert status == 1 and "outside the preregistered experiment" in err and message in err and out == ""
+
+
+def test_the_report_refuses_a_receipts_file_missing_a_preregistered_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The #90 review: a receipts file missing whole chains still produced a report."""
+    prereg = _preregistration(tmp_path)
+    digest = records.sha256_bytes(prereg.read_bytes())
+    receipts = _completed([_trial("memkernel", "t1", 0, preregistration_sha256=digest)], digest)
+    assert _cli(tmp_path, receipts, REPORT_ONLY, prereg, capsys)[0] == 0
+    dropped = [r for r in receipts if r["chain_id"] != "t05.fs_grep.r0"]
+    status, out, err = _cli(tmp_path, dropped, REPORT_ONLY, prereg, capsys)
+    assert status == 1 and "miss 1 preregistered chain(s), e.g. t05.fs_grep.r0" in err and out == ""
 
 
 def test_scored_sessions_with_api_errors_are_counted_by_arm_not_only_events() -> None:

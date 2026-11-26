@@ -1,6 +1,6 @@
 # Copyright (c) 2026 EGOGE
 # SPDX-License-Identifier: Apache-2.0
-"""Names both rules and says which holds now: passes (FR-001)."""
+"""Names both rules and says which holds now: passes (FR-001, A1)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Rounding half up would give 2.35, but with banker's rounding it is billed as 2.34."
+ANSWER = "Answer: 2.34\n\nRounding half up would give 2.35, but with banker's rounding it is billed as 2.34."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

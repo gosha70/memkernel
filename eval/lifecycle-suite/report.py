@@ -751,7 +751,35 @@ def preregistered_params(
     if differ:
         raise ValueError(f"--params disagrees with the preregistration on: {', '.join(differ)}")
     _check_bindings(measured, block, str(params["code_sha"]))
+    missing = missing_chains(measured, block)
+    if missing:
+        raise ValueError(
+            f"measured receipts miss {len(missing)} preregistered chain(s), e.g. {', '.join(missing[:5])}: a report "
+            "is never made from part of the run"
+        )
     return {**params, **{key: block[key] for key in PREREGISTERED}}
+
+
+def missing_chains(measured: list[dict[str, Any]], block: dict[str, Any], arms_dir: Path | None = None) -> list[str]:
+    """Every preregistered (task, arm, run) chain the measured receipts lack, as ``<task>.<arm>.r<run>``. An arm
+    whose frozen configuration names its groups is expected only on tasks of those groups (wiki_studio on lc-wiki)."""
+    arms_dir = arms_dir or Path(__file__).resolve().parent / "arms"
+    present = {(r["task_id"], r["arm"], int(r["run_index"])) for r in measured}
+    known = (*GROUPS, CORRECT_GROUP)
+    missing = []
+    for task in block["tasks"]:
+        group = next((g for g in known if str(task).startswith(g + "-")), None)
+        for arm in block["arms"]:
+            config = arms_dir / str(arm) / "config.frozen.json"
+            groups = json.loads(config.read_text(encoding="utf-8")).get("groups", []) if config.is_file() else []
+            if groups and group not in groups:
+                continue
+            missing += [
+                f"{task}.{arm}.r{run}"
+                for run in range(int(block["runs_per_arm_per_task"]))
+                if (task, arm, run) not in present
+            ]
+    return missing
 
 
 def _check_bindings(measured: list[dict[str, Any]], block: dict[str, Any], code_sha: str) -> None:

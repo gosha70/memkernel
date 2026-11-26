@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A product's price is changed in the catalog. For how long can the old price still be served from the cache? Write your answer, naming the value that applies, to ANSWER.md in the repository root."
+          "prompt": "A product's price is changed in the catalog. For how long can the old price still be served from the cache? Write your answer to ANSWER.md in the repository root: first the line `Answer: <duration, such as 45 seconds>`, then a sentence on why."
         }
       ]
     }

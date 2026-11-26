@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Only the internal user id; never the email address, hashed or not."
+ANSWER = "Answer: no; internal user id\n\nOnly the internal user id; never the email address, hashed or not."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

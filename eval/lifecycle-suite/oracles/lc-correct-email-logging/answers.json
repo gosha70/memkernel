@@ -1,10 +1,21 @@
 {
+  "form": "<yes or no: does the log line hold anything derived from the email address>; <the identifier the log line holds>",
+  "parts": [
+    "yesno",
+    "text"
+  ],
   "informed": [
-    "\\buser[ _-]?id\\b",
-    "\\binternal id\\b"
+    {
+      "equals": "no"
+    },
+    {
+      "pattern": "\\buser[ _-]?id\\b|\\binternal id\\b"
+    }
   ],
   "obsolete": [
-    "\\bsha-?1\\b",
-    "\\bhash"
+    {
+      "equals": "yes"
+    },
+    null
   ]
 }

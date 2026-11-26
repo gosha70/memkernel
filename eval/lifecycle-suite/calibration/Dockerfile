@@ -12,6 +12,13 @@
 # environment is written to /opt/environment.txt and copied into every run.
 # Nothing from the host is mounted except the runs directory, and no credential
 # is baked in: the API key arrives at `docker run` time only.
+#
+# Blinding (the #90 review): the container starts as root, the harness's user. The
+# repository under /opt/memkernel (tasks, corrections, oracles, references) is root's
+# alone; memkernel itself is installed in /opt/mk-venv. Each agent session runs as the
+# unprivileged `agent` user through setpriv, with the hook scripts, the hook ledger and
+# the demo's stub agent taken from the world-readable /opt/agent-tools. The runner gives
+# a session's files to `agent` only while that session runs.
 ARG PYTHON_IMAGE=python:3.11-slim@sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce
 
 FROM ${PYTHON_IMAGE} AS lock
@@ -75,15 +82,24 @@ RUN python -m venv /opt/mk-venv \
       echo "# wiki-studio venv (pip freeze):"; \
       /opt/ws-venv/bin/pip freeze --all; } > /opt/environment.txt
 
-RUN useradd --create-home --uid 1000 runner \
- && mkdir -p /runs && chown runner /runs \
- && chmod -R a+rX /opt/cache
+RUN useradd --system --no-create-home --uid 1001 --user-group --shell /usr/sbin/nologin agent \
+ && command -v setpriv \
+ && mkdir -p /opt/agent-tools /runs \
+ && cp /opt/memkernel/templates/hooks/*.py /opt/memkernel/eval/lifecycle-suite/hook_ledger.py \
+      /opt/memkernel/eval/lifecycle-suite/stub_agent.py /opt/agent-tools/ \
+ && chmod -R a+rX /opt/agent-tools /opt/cache /opt/mk-venv /opt/ws-venv \
+ && chown -R root:root /opt/memkernel && chmod -R go-rwx /opt/memkernel \
+ && setpriv --reuid=1001 --regid=1001 --clear-groups -- sh -c '! ls /opt/memkernel >/dev/null 2>&1' \
+ && setpriv --reuid=1001 --regid=1001 --clear-groups -- /opt/mk-venv/bin/python -c 'import memkernel'
 ENV CODE_SHA=${CODE_SHA} \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     WIKI_STUDIO_VERSION=${WIKI_STUDIO_VERSION} \
     EMBEDDING_MODEL=${EMBEDDING_MODEL} \
-    EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
-USER runner
-WORKDIR /home/runner
+    EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION} \
+    LC_AGENT_UID=1001 \
+    LC_AGENT_GID=1001 \
+    LC_AGENT_TOOLS=/opt/agent-tools
+USER root
+WORKDIR /root
 ENTRYPOINT ["/opt/memkernel/eval/lifecycle-suite/calibration/run.sh"]
 CMD ["calibrate"]

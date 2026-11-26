@@ -7,7 +7,8 @@ It accepts the same flags the runner passes, prints stream-json events, and
 simulates exactly what the demo checks: an init event (MCP connected when an
 MCP config is given), one Read, a NOTES.md written into the workspace, a
 store marker when MEMKERNEL_CHROMA_PERSIST_PATH is set, a wiki page on
-``[wiki-export]``, an ANSWER.txt on ``[answer]``, and for ``/compact`` the
+``[wiki-export]``, an ANSWER.txt on ``[answer]``, a PROBE.json on ``[probe]`` (what it could reach outside its
+session: the blinding check of the #90 review), and for ``/compact`` the
 PreCompact hooks, a compact_boundary event and the PostCompact hooks taken
 from the --settings file. It does not prove that Claude Code compacts.
 """
@@ -21,6 +22,26 @@ import sys
 from pathlib import Path
 
 COMPACT_PRE_TOKENS = 1000  # the stub compaction call's input, reported only in compact_boundary
+IMAGE_ORACLES = "/opt/memkernel/eval/lifecycle-suite/oracles"  # where the image keeps the hidden answers
+
+
+def _listing(path: Path | str) -> list[str] | str:
+    try:
+        return sorted(os.listdir(path))
+    except OSError as exc:
+        return f"unreadable ({exc.errno})"
+
+
+def probe(cwd: Path) -> dict[str, object]:
+    """What a curious agent could reach from its working directory: its session folder's siblings, the run
+    directory above them, session 0 of its chain at ``../../s0``, and the image's oracles."""
+    return {
+        "cwd": str(cwd),
+        "sessions": _listing(cwd.parent.parent),
+        "run_dir": _listing(cwd.parent.parent.parent),
+        "s0_reachable": (cwd / ".." / ".." / "s0").exists(),
+        "oracles": _listing(IMAGE_ORACLES),
+    }
 
 
 def _flag(argv: list[str], name: str) -> str | None:
@@ -88,6 +109,8 @@ def main(argv: list[str]) -> int:
         page.write_text("---\npage_type: decision\n---\n# Demo\n", encoding="utf-8")
     if "[answer]" in prompt:
         (cwd / "ANSWER.txt").write_text("42\n", encoding="utf-8")
+    if "[probe]" in prompt:
+        (cwd / "PROBE.json").write_text(json.dumps(probe(cwd)), encoding="utf-8")
     _emit({"type": "result", "subtype": "success", "result": "done", "usage": usage})
     return 0
 

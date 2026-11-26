@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "2.34, because amounts are rounded half to even (banker's rounding)."
+ANSWER = "Answer: 2.34\n\n2.34, because amounts are rounded half to even (banker's rounding)."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

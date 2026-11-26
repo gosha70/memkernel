@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Each token stays valid for 24 hours, so it does not need to log in again within a day."
+ANSWER = "Answer: 24 hours; 24 hours\n\nEach token stays valid for 24 hours, so it does not need to log in again within a day."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

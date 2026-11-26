@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Up to 90 days back, since customer database backups are kept for 90 days."
+ANSWER = "Answer: 90\n\nUp to 90 days back, since customer database backups are kept for 90 days."
+EXPECTED = "informed"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

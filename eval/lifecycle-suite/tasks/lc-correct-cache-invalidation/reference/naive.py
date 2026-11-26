@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Up to 10 minutes, until the cache entry's TTL expires."
+ANSWER = "Answer: 10 minutes\n\nUp to 10 minutes, until the cache entry's TTL expires."
+EXPECTED = "obsolete"  # the checker's class for this answer
 
 
 def apply(workdir: Path) -> None:

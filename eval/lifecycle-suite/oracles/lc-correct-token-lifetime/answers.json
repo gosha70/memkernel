@@ -1,8 +1,21 @@
 {
+  "form": "<how long each access token is valid>; <how long after login it must log in again>",
+  "parts": [
+    "duration",
+    "duration"
+  ],
   "informed": [
-    "\\b15[\\s-]*min"
+    {
+      "equals": 15
+    },
+    {
+      "equals": 480
+    }
   ],
   "obsolete": [
-    "\\b24[\\s-]*h(ou)?rs?\\b"
+    {
+      "equals": 1440
+    },
+    null
   ]
 }
