@@ -820,3 +820,29 @@ def test_the_report_refuses_a_chain_that_skips_or_lacks_session_zero() -> None:
         report.assemble([{**base, "position": 1}])
     with pytest.raises(ValueError, match=r"sessions \[0, 2\] do not run"):
         report.assemble([{**base, "position": 0, "stage": "exposure"}, {**base, "position": 2}])
+
+
+def test_a_zombie_is_not_alive_with_or_without_proc() -> None:
+    """The intermittent failure (2 of 10 fast-suite runs at d88b9d0): a killed process that its parent has not reaped
+    yet is a zombie, and without /proc (macOS) it was read as alive."""
+    import os
+    import signal
+    import subprocess as sp
+    import time
+
+    child = sp.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert runner._alive(child.pid)
+        os.kill(child.pid, signal.SIGKILL)
+        deadline = time.monotonic() + 10  # it becomes a zombie of ours, never reaped until wait()
+        while (
+            sp.run(["ps", "-o", "stat=", "-p", str(child.pid)], capture_output=True, text=True).stdout.strip()[:1]
+            != "Z"
+        ):
+            assert time.monotonic() < deadline, "the killed child never showed as a zombie"
+            time.sleep(0.05)
+        assert not runner._alive(child.pid)
+    finally:
+        child.kill()
+        child.wait()
+    assert not runner._alive(child.pid)

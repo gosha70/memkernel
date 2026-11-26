@@ -1292,7 +1292,14 @@ def _alive(pid: int) -> bool:
     try:
         return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
     except (OSError, IndexError):
+        pass
+    # No /proc (macOS): ask ps. A killed process whose parent has gone lingers as a zombie until its new parent reaps
+    # it; reading that as alive made the demo's check and its test fail now and then (2 of 10 runs at d88b9d0).
+    try:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
         return True
+    return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
 
 
 def check_lingering(probes: dict[str, dict[str, Any] | None], separated: bool) -> list[str]:
