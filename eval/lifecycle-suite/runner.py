@@ -348,14 +348,17 @@ def _helpers_own(roots: list[Path], traverse: tuple[Path, ...] = ()) -> Iterator
         os.chmod(directory, 0o711)
     for root in roots:
         _own(root, *grader)
+    survivors: list[int] = []
     try:
         yield
     finally:
-        survivors = kill_user_processes(*grader)
-        for root in roots:
-            _own(root, os.geteuid(), os.getegid(), 0o700)
-        for directory in traverse:
-            os.chmod(directory, 0o700)
+        try:
+            survivors = kill_user_processes(*grader)
+        finally:  # the handback happens even if the kill itself failed
+            for root in roots:
+                _own(root, os.geteuid(), os.getegid(), 0o700)
+            for directory in traverse:
+                os.chmod(directory, 0o700)
     if survivors:
         raise corrections.CorrectionError(f"the grader's processes {survivors} survived the helpers")
 
@@ -534,6 +537,7 @@ def _ledger_path(dirs: SessionDirs, cfg: RunConfig) -> Path:
     area.mkdir(mode=0o711, exist_ok=True)
     ledger = area / f"{dirs.root.name}.jsonl"
     ledger.touch(mode=0o600)
+    os.chmod(ledger, 0o600)  # also when it already existed
     if cfg.agent_uid is not None:
         os.chown(ledger, cfg.agent_uid, cfg.agent_gid if cfg.agent_gid is not None else cfg.agent_uid)
     return ledger
@@ -1505,7 +1509,8 @@ def _helper_probe(tmp: Path, cfg: RunConfig) -> int | None:
 def check_helpers(uids: list[int | None], separated: bool) -> list[str]:
     """memkernel_ops and the gate check never run as root in the image: each reports the grader's uid (the #166
     review); outside the image they run as the caller."""
-    expected = grader_ids()[0] if separated and grader_ids() is not None else os.geteuid()  # type: ignore[index]
+    grader = grader_ids() if separated else None
+    expected = grader[0] if grader is not None else os.geteuid()
     wrong = [u for u in uids if u != expected]
     failures = [f"helpers ran as uid {sorted(set(map(str, wrong)))}, expected {expected}"] if wrong else []
     if separated and 0 in uids:
