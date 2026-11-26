@@ -770,7 +770,7 @@ def test_every_reviewer_probe_grades_as_pinned(probe: dict[str, str]) -> None:
     assert correct_checker.classify_text(probe["answer"], spec) == probe["expected"], probe["source"]
 
 
-# ── leftover processes: setpriv … kill -KILL -1, then a check; chains start at 0 without gaps ─
+# ── leftover processes: setpriv … kill -KILL -- -1, then a check; chains start at 0 without gaps ─
 
 
 def test_leftover_processes_are_killed_as_their_user_and_checked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -782,7 +782,8 @@ def test_leftover_processes_are_killed_as_their_user_and_checked(monkeypatch: py
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(sp, "run", lambda cmd, **kw: calls.append(cmd) or sp.CompletedProcess(cmd, 0))
     assert checker_support.kill_user_processes(54321, 54320) == []
-    assert calls == [["setpriv", "--reuid=54321", "--regid=54320", "--clear-groups", "--", "kill", "-KILL", "-1"]]
+    # procps's kill needs "--" before -1, or it kills nothing (found in the image)
+    assert calls == [["setpriv", "--reuid=54321", "--regid=54320", "--clear-groups", "--", "kill", "-KILL", "--", "-1"]]
 
 
 def test_a_process_that_survives_the_kill_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:

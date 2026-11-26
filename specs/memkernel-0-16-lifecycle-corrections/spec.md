@@ -195,7 +195,7 @@ between the options put to them; the rest are fixes within the spec.
     the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
     user, it also fails unless the run folder and the oracles are unreadable.
   - **Processes:** each step runs in its own process group, killed when the step ends. In the image, when the
-    session ends, every process of the agent user is killed with `setpriv --reuid=<uid> -- kill -KILL -1` (procps's
+    session ends, every process of the agent user is killed with `setpriv --reuid=<uid> -- kill -KILL -- -1` (procps's
     `kill`, installed for this). `/proc` is then checked, and a session with any live survivor is invalid
     (`agent_processes_survived`). Grading does the same for the grader, and a survivor there is an infrastructure
     error (`checker_crashed`). The probe leaves one process in the group and one detached from

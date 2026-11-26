@@ -58,8 +58,9 @@ def user_processes(uid: int) -> list[int]:
 
 
 def kill_user_processes(uid: int, gid: int | None = None, rounds: int = 5) -> list[int]:
-    """Kill every process of ``uid`` with ``setpriv --reuid=<uid> -- kill -KILL -1``, then check that none is left;
-    return the pids still alive (empty: all gone).
+    """Kill every process of ``uid`` with ``setpriv --reuid=<uid> -- kill -KILL -- -1``, then check that none is
+    left; return the pids still alive (empty: all gone). procps's ``kill`` needs the ``--`` before ``-1``: without
+    it, it refuses to parse the argument and kills nothing (found in the image, 2026-11-26).
 
     The harness calls it as root after an agent session and after grading, so nothing the agent or the candidate's
     code started (a daemon, a detached child) outlives its turn. ``kill -1`` as that user signals every process the
@@ -77,11 +78,11 @@ def kill_user_processes(uid: int, gid: int | None = None, rounds: int = 5) -> li
         if not remaining:
             return []
         subprocess.run(
-            ["setpriv", f"--reuid={uid}", f"--regid={group}", "--clear-groups", "--", "kill", "-KILL", "-1"],
+            ["setpriv", f"--reuid={uid}", f"--regid={group}", "--clear-groups", "--", "kill", "-KILL", "--", "-1"],
             capture_output=True,
             check=False,
             timeout=30,
-        )
+        )  # its exit status is not trusted either way: the check of /proc below decides
         time.sleep(0.1)
         remaining = user_processes(uid)
     return remaining
