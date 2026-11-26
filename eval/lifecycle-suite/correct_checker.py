@@ -19,13 +19,23 @@ holds (``null`` holds for anything), and ``other`` otherwise, including a missin
 decides. A part carrying a negation or a qualifier (``not``, ``no longer``, ``except``, ``never``, ``under``,
 ``over``, ``at most``, ``at least``, ``instead of``, ``was``, ``previously``) is unparsable, so the answer is
 ``other``; only a yes/no part's leading ``yes`` or ``no`` is the answer itself, not a negation. A time with am or pm
-is refused (the form asks for a 24-hour time), and a hyphenated unit (``15-minute``) reads as ``15 minute``.
+is refused (the form asks for a 24-hour time).
 
-Part kinds, each a full grammar for the whole part (anything around the value makes the part unparsable):
-``weekday`` (a weekday name), ``time`` (``HH:MM``, 24-hour, optionally ``UTC``), ``duration`` (one number with a
-known unit, in minutes; a bare ``0`` is zero), ``number`` (a number in digits, optionally followed by one of the
-part's ``units``), ``yesno`` (exactly yes or no), ``text`` (a short identifier). Conditions: ``equals``, ``in``,
-``range`` (inclusive), ``pattern`` (a case-insensitive regex search), ``fullmatch`` (the same, over the whole value).
+Part kinds, each a full grammar for the whole part and each exactly what the chain's form text states (anything
+around the value makes the part unparsable):
+
+- ``weekday``, form ``<weekday>``: a weekday name.
+- ``time``, form ``<HH:MM, 24-hour> UTC``: two-digit hour and minute, 24-hour, then ``UTC``.
+- ``duration``, form ``a number and a unit in words (seconds, minutes, hours, days, weeks or months)``: a number,
+  a space or a hyphen, one of those units, singular or plural. A bare ``0`` only where the form adds
+  ``or 0 if none`` (the part's ``"zero": true``).
+- ``count``, form ``digits only``: digits, nothing else.
+- ``amount``, form ``digits with two decimal places, no currency symbol``: digits, a point, two digits.
+- ``yesno``, form ``<yes or no ...>``: exactly yes or no.
+- ``text``, form ``in a few words``: up to eight words of letters and digits.
+
+Conditions: ``equals``, ``in``, ``range`` (inclusive), ``pattern`` (a case-insensitive regex search), ``fullmatch``
+(the same, over the whole value). A time with am or pm is refused; a part with a negation or a qualifier is too.
 
 No candidate code runs: the answer is read as text, so no oracle driver is needed.
 """
@@ -45,13 +55,9 @@ INFORMED, OBSOLETE, OTHER = "informed", "obsolete", "other"
 ANSWER_CLASSES = (INFORMED, OBSOLETE, OTHER)
 MAX_ANSWER_BYTES = 64_000  # an answer is a line and a sentence or two; a larger file is read up to this size
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-MINUTES = {
-    "s": 1 / 60, "sec": 1 / 60, "secs": 1 / 60, "second": 1 / 60, "seconds": 1 / 60,
-    "m": 1, "min": 1, "mins": 1, "minute": 1, "minutes": 1,
-    "h": 60, "hr": 60, "hrs": 60, "hour": 60, "hours": 60,
-    "d": 1440, "day": 1440, "days": 1440,
-    "w": 10080, "week": 10080, "weeks": 10080,
-    "month": 43200, "months": 43200,
+UNITS = {  # minutes per unit, in words, singular or plural: what the duration forms name
+    "second": 1 / 60, "seconds": 1 / 60, "minute": 1, "minutes": 1, "hour": 60, "hours": 60,
+    "day": 1440, "days": 1440, "week": 10080, "weeks": 10080, "month": 43200, "months": 43200,
 }  # fmt: skip
 _LINE = re.compile(r"^[\s>*_`#-]*answer[\s*_`]*:[\s*_`]*(.*?)[\s*_`]*$", re.IGNORECASE | re.MULTILINE)
 _QUALIFIER = re.compile(
@@ -80,51 +86,49 @@ def answer_line(text: str) -> str | None:
 
 
 def parse_part(kind: str | dict[str, Any], part: str) -> Any:
-    """Parse one part with its kind's full grammar: the whole part must be the value, so surrounding words
-    ("approximately 120", "bananas 120 elephants") make it unparsable, not a match (the #166 review).
+    """Parse one part with its kind's full grammar, which is exactly what the chain's form text states: the whole
+    part must be the value, so surrounding words ("approximately 120", "bananas 120 elephants") make it unparsable.
 
-    ``kind`` is a kind name, or ``{"kind": "number", "units": [...]}`` for a number that may carry one of the named
-    units ("120 requests")."""
+    ``kind`` is a kind name, or a dict with ``kind`` and its options (``{"kind": "duration", "zero": true}``)."""
     spec = kind if isinstance(kind, dict) else {"kind": kind}
     name = str(spec["kind"])
     text = part.strip().lower().rstrip(".!")
     hedged = re.sub(r"^(yes|no)\b", "", text) if name == "yesno" else text  # a yes/no part's own yes or no
     if _QUALIFIER.search(hedged):
         raise UnparsableError("a negation or a qualifier")
-    text = re.sub(r"(\d)\s*-\s*([a-z])", r"\1 \2", text)  # 15-minute reads as 15 minute
-    if name == "weekday":
-        found = re.fullmatch(rf"({'|'.join(WEEKDAYS)})s?", text)
-        if found is None:
+    if name == "weekday":  # "a weekday": its name, nothing else
+        if text not in WEEKDAYS:
             raise UnparsableError("expected a weekday")
-        return found.group(1)
-    if name == "time":
+        return text
+    if name == "time":  # "<HH:MM, 24-hour> UTC": two-digit hour and minute, then UTC
         if _MERIDIEM.search(text):
             raise UnparsableError("a time with am or pm: the form asks for a 24-hour time")
-        found = re.fullmatch(r"(\d{1,2}):(\d{2})(?:\s*utc)?", text)
+        found = re.fullmatch(r"(\d{2}):(\d{2}) utc", text)
         if found is None or int(found.group(1)) > 23 or int(found.group(2)) > 59:
-            raise UnparsableError("expected a 24-hour time of day")
-        return f"{int(found.group(1)):02d}:{found.group(2)}"
-    if name == "duration":
-        if re.fullmatch(r"0+(\.0+)?", text):
+            raise UnparsableError("expected HH:MM UTC, 24-hour")
+        return f"{found.group(1)}:{found.group(2)}"
+    if name == "duration":  # "a number and a unit in words", "or 0 if none" only where the form offers it
+        if spec.get("zero") and text == "0":
             return 0.0
-        found = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([a-z]+)", text)
-        if found is None or found.group(2) not in MINUTES:
-            raise UnparsableError("expected one number with a known unit")
-        return float(found.group(1)) * MINUTES[found.group(2)]
-    if name == "number":
-        units = "|".join(re.escape(str(u)) for u in spec.get("units", []))
-        grammar = rf"(-?\d+(?:\.\d+)?)(?:\s+(?:{units}))?" if units else r"(-?\d+(?:\.\d+)?)"
-        found = re.fullmatch(grammar, text.replace(",", ""))
-        if found is None:
-            raise UnparsableError("expected a number in digits")
-        return float(found.group(1))
-    if name == "yesno":
+        found = re.fullmatch(r"(\d+(?:\.\d+)?)(?: |-)([a-z]+)", text)
+        if found is None or found.group(2) not in UNITS:
+            raise UnparsableError("expected a number and a unit in words")
+        return float(found.group(1)) * UNITS[found.group(2)]
+    if name == "count":  # "digits only"
+        if re.fullmatch(r"\d+", text) is None:
+            raise UnparsableError("expected digits only")
+        return float(text)
+    if name == "amount":  # "digits with two decimal places, no currency symbol"
+        if re.fullmatch(r"\d+\.\d{2}", text) is None:
+            raise UnparsableError("expected digits with two decimal places")
+        return float(text)
+    if name == "yesno":  # "yes or no"
         if text not in ("yes", "no"):
             raise UnparsableError("expected yes or no")
         return text
-    if name == "text":
-        if re.fullmatch(r"[a-z0-9][a-z0-9 _.\-]{0,59}", text) is None:
-            raise UnparsableError("expected a short identifier")
+    if name == "text":  # "in a few words": letters, digits and spaces
+        if re.fullmatch(r"[a-z0-9]+(?: [a-z0-9]+){0,7}", text) is None:
+            raise UnparsableError("expected a few words of letters and digits")
         return text
     raise ValueError(f"unknown part kind {name!r}")
 

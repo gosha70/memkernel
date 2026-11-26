@@ -1,7 +1,7 @@
 {
-  "form": "<amount billed, in digits>",
+  "form": "<amount billed: digits with two decimal places, no currency symbol>",
   "parts": [
-    "number"
+    "amount"
   ],
   "informed": [
     {

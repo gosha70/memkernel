@@ -177,8 +177,15 @@ between the options put to them; the rest are fixes within the spec.
     - Every reviewer probe is pinned in `tests/fixtures/lc-correct/probes.json` with its source.
   - **Full grammars (the third pasted review):** each part kind is a full-match grammar for the whole part, not a
     search inside it, so surrounding words make a part unparsable: `Answer: approximately 120 requests` and
-    `Answer: bananas 120 elephants` are `other`. A number may carry only the units its chain names (`120 requests`,
-    `90 days`). The email chain's identifier must match `(the )?(internal )?user[ _-]?id` in full.
+    `Answer: bananas 120 elephants` are `other`.
+  - **Forms state the grammar exactly (the owner, 2026-11-26):** each form says what its grammar accepts, and the
+    grammar accepts only that. A test checks every chain's form against its parts.
+    - A count is `digits only`, and an amount `digits with two decimal places, no currency symbol`.
+    - A duration is `a number and a unit in words (seconds, minutes, hours, days, weeks or months)`, with a bare
+      `0` only where the form adds `or 0 if none`.
+    - A time is `<HH:MM, 24-hour> UTC`, a weekday its name, and an identifier `in a few words`.
+    - So `120 requests`, `90 days`, `$2.34`, `9:00 UTC`, `15 min` and `Mondays` are `other`. The probes whose
+      class this changed are marked as revised in the fixture.
 - **A2 Blinding (owner: separate users).**
   - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
     root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user

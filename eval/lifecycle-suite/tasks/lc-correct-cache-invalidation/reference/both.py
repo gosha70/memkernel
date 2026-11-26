@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Answer: 0 seconds\n\nBefore it was up to 10 minutes; now the catalog.updated event purges it immediately."
+ANSWER = "Answer: 0\n\nBefore it was up to 10 minutes; now the catalog.updated event purges it immediately."
 EXPECTED = "informed"  # the checker's class for this answer
 
 

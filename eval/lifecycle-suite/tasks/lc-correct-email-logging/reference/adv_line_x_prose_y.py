@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Answer: yes; SHA-1 hash of the email\n\nOnly the internal user id; never the email address, hashed or not."
+ANSWER = "Answer: yes; sha1 hash of the email\n\nOnly the internal user id; never the email address, hashed or not."
 EXPECTED = "obsolete"  # the checker's class for this answer
 
 

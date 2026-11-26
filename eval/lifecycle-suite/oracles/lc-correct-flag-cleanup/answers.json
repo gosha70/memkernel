@@ -1,20 +1,11 @@
 {
-  "form": "<number of days from today until the flag must be out of the code, in digits, or 0 if none are left>",
+  "form": "<number of days from today until the flag must be out of the code: digits only, 0 if none are left>",
   "parts": [
-    {
-      "kind": "number",
-      "units": [
-        "day",
-        "days"
-      ]
-    }
+    "count"
   ],
   "informed": [
     {
-      "range": [
-        -400,
-        0
-      ]
+      "equals": 0
     }
   ],
   "obsolete": [

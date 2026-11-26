@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-ANSWER = "Answer: 0 seconds; 10 minutes"
+ANSWER = "Answer: 0; 10 minutes"
 EXPECTED = "other"  # the checker's class for this answer
 
 

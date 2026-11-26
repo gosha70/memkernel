@@ -1,5 +1,5 @@
 {
-  "form": "<yes or no: does the log line hold anything derived from the email address>; <the identifier the log line holds>",
+  "form": "<yes or no: does the log line hold anything derived from the email address>; <the identifier the log line holds, in a few words>",
   "parts": [
     "yesno",
     "text"
@@ -9,7 +9,7 @@
       "equals": "no"
     },
     {
-      "fullmatch": "(the )?(internal )?user[ _-]?id"
+      "fullmatch": "(the )?(internal )?user id"
     }
   ],
   "obsolete": [

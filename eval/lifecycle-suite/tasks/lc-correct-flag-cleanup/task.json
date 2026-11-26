@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A feature flag reached full rollout 45 days ago. What should happen to it now? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of days from today until the flag must be out of the code, in digits, or 0 if none are left>`, then a sentence on why."
+          "prompt": "A feature flag reached full rollout 45 days ago. What should happen to it now? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of days from today until the flag must be out of the code: digits only, 0 if none are left>`, then a sentence on why."
         }
       ]
     }

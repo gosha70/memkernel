@@ -1,14 +1,8 @@
 {
-  "form": "<yes or no>; <total number of approvals the pull request needs, in digits>",
+  "form": "<yes or no>; <total number of approvals the pull request needs: digits only>",
   "parts": [
     "yesno",
-    {
-      "kind": "number",
-      "units": [
-        "approval",
-        "approvals"
-      ]
-    }
+    "count"
   ],
   "informed": [
     {

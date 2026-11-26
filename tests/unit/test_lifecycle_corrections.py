@@ -89,7 +89,8 @@ def _answer(tmp_path: Path, text: str) -> Path:
     ("task_id", "text", "expected"),
     [
         ("lc-correct-deploy-window", "Answer: Monday; 09:00 UTC\n\nThe window closed Thursday.", "informed"),
-        ("lc-correct-deploy-window", "**Answer:** Monday; 9:00 UTC", "informed"),  # markdown, an unpadded hour
+        ("lc-correct-deploy-window", "**Answer:** Monday; 09:00 UTC", "informed"),  # markdown around the line
+        ("lc-correct-deploy-window", "Answer: Monday; 9:00 UTC", "other"),  # the form says HH:MM
         ("lc-correct-deploy-window", "Answer: Friday; 17:00 UTC", "obsolete"),
         ("lc-correct-deploy-window", "Answer: Thursday; 16:00 UTC", "obsolete"),
         ("lc-correct-deploy-window", "Answer: Monday; 17:00 UTC", "other"),  # half right is not right
@@ -103,7 +104,7 @@ def _answer(tmp_path: Path, text: str) -> Path:
         # completeness: every part of a multi-part answer must hold
         ("lc-correct-token-lifetime", "Answer: 15 minutes; 24 hours", "other"),
         ("lc-correct-token-lifetime", "Answer: 15 minutes", "other"),
-        ("lc-correct-token-lifetime", "Answer: 15 min; 8 h", "informed"),
+        ("lc-correct-token-lifetime", "Answer: 15 min; 8 h", "other"),  # the form says a unit in words
         ("lc-correct-review-approvals", "Answer: no; 1", "other"),
         ("lc-correct-review-approvals", "Answer: yes; 2", "obsolete"),
     ],
@@ -881,3 +882,34 @@ def test_a_session_the_agent_partly_removed_is_invalid_with_its_receipt_written(
     assert receipts[0]["valid"] is False and receipts[0]["invalid_reason"] == "session_state_missing"
     assert list((receipts_path.parent / "sessions").iterdir()) == []  # nothing stranded under sessions/<token>
     assert (receipts_path.parent / f"demo-retain.{arm}.r0" / "s0" / "workspace").is_dir()
+
+
+FORM_STATES = {  # what each part kind's form text must say: exactly what the checker's grammar accepts
+    "weekday": "weekday",
+    "time": "HH:MM, 24-hour> UTC",  # the placeholder's "<" is the separator's, after the split
+    "duration": "a number and a unit in words (seconds, minutes, hours, days, weeks or months)",
+    "count": "digits only",
+    "amount": "digits with two decimal places, no currency symbol",
+    "yesno": "yes or no",
+    "text": "in a few words",
+}
+
+
+@pytest.mark.parametrize("task_id", CORRECT_IDS)
+def test_each_part_of_the_form_states_its_grammar_and_nothing_else(task_id: str) -> None:
+    spec = json.loads((ORACLES_ROOT / task_id / "answers.json").read_text(encoding="utf-8"))
+    pieces = spec["form"].split(">; <")
+    assert len(pieces) == len(spec["parts"]), "one placeholder per part"
+    for piece, part in zip(pieces, spec["parts"], strict=True):
+        kind = part["kind"] if isinstance(part, dict) else part
+        assert FORM_STATES[kind] in piece, (kind, piece)
+        zero = bool(isinstance(part, dict) and part.get("zero"))
+        if "0 if none" in piece:  # offered only by a count, or a duration whose grammar takes a bare 0
+            assert kind == "count" or (kind == "duration" and zero), piece
+        if kind == "duration":  # a bare 0 is accepted exactly where the form offers it
+            assert zero == ("0 if none" in piece), piece
+            if zero:
+                assert correct_checker.parse_part(part, "0") == 0.0
+            else:
+                with pytest.raises(correct_checker.UnparsableError):
+                    correct_checker.parse_part(part, "0")

@@ -19,7 +19,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "An invoice line comes to 2.345. What amount is billed for it? Write your answer to ANSWER.md in the repository root: first the line `Answer: <amount billed, in digits>`, then a sentence on why."
+          "prompt": "An invoice line comes to 2.345. What amount is billed for it? Write your answer to ANSWER.md in the repository root: first the line `Answer: <amount billed: digits with two decimal places, no currency symbol>`, then a sentence on why."
         }
       ]
     }
