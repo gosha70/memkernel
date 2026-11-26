@@ -167,6 +167,14 @@ between the options put to them; the rest are fixes within the spec.
     (both values without saying which holds) no longer exists.
   - **Fixtures:** every chain has three adversarial references, each pinned to its class: Y only in prose (other),
     X on the line with Y in prose (obsolete), and the line with extra parts (other).
+  - **Stricter reading (the owner, 2026-11-26):**
+    - A part carrying a negation or a qualifier (`not`, `n't`, `no longer`, `except`, `never`, `under`, `over`,
+      `at most`, `at least`, `instead of`, `was`, `previously`) is unparsable, so the answer is `other`. Only a
+      yes/no part's leading `yes` or `no` is the answer itself.
+    - A time with am or pm is refused, and more than one `Answer:` line is `other`.
+    - Each form says what it wants (`in digits`, `a number with a unit`, `or 0 if none`, `24-hour`), and a
+      hyphenated unit (`15-minute`) is read as `15 minute`.
+    - Every reviewer probe is pinned in `tests/fixtures/lc-correct/probes.json` with its source.
 - **A2 Blinding (owner: separate users).**
   - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
     root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user
@@ -186,8 +194,11 @@ between the options put to them; the rest are fixes within the spec.
   - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
     the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
     user, it also fails unless the run folder and the oracles are unreadable.
-  - **Processes:** each step runs in its own process group, killed when the step ends. In the image every process of
-    the agent user is killed when the session ends. The probe leaves one process in the group and one detached from
+  - **Processes:** each step runs in its own process group, killed when the step ends. In the image, when the
+    session ends, every process of the agent user is killed with `setpriv --reuid=<uid> -- kill -KILL -1` (procps's
+    `kill`, installed for this). `/proc` is then checked, and a session with any live survivor is invalid
+    (`agent_processes_survived`). Grading does the same for the grader, and a survivor there is an infrastructure
+    error (`checker_crashed`). The probe leaves one process in the group and one detached from
     it, and the demo fails if either survives (outside the image the detached one can escape, and is only cleaned
     up).
   - **Grading:** in the image the candidate's code runs as a second unprivileged user, `grader`, from a copy of the
@@ -202,7 +213,7 @@ between the options put to them; the rest are fixes within the spec.
   - **Curator CLI:** a paid run resolves it to one absolute path, checks that file's version against the pin, and
     invokes only it.
   - **`qualify.py`:** requires the exact `12 × 2 × R_cal` manifest; a missing, unexpected or duplicated chain is
-    refused.
+    refused. It and the report also refuse a chain whose sessions do not start at position 0 or skip one.
   - **Stale-base retry:** re-renders the corrected page from the fresh read; the scripted policy says so and its
     hash is re-pinned.
   - **Helper failures:** helpers have a timeout, and unreadable helper output is `correction_failed`, never a crash.

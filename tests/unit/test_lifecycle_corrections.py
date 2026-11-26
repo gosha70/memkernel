@@ -758,3 +758,63 @@ def test_the_image_check_passes_only_with_both_users_and_a_repository_the_agent_
     cfg.agent_uid = None  # type: ignore[attr-defined]
     with pytest.raises(SystemExit, match="--agent-uid is None, not the agent user's 1001"):
         runner.require_isolated_image(cfg)
+
+
+PROBES = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "lc-correct" / "probes.json").read_text())
+
+
+@pytest.mark.parametrize("probe", PROBES["probes"], ids=lambda p: f"{p['chain']}:{p['answer'][:40]}")
+def test_every_reviewer_probe_grades_as_pinned(probe: dict[str, str]) -> None:
+    spec = correct_checker.load_spec(ORACLES_ROOT / f"lc-correct-{probe['chain']}")
+    assert correct_checker.classify_text(probe["answer"], spec) == probe["expected"], probe["source"]
+
+
+# ── leftover processes: setpriv … kill -KILL -1, then a check; chains start at 0 without gaps ─
+
+
+def test_leftover_processes_are_killed_as_their_user_and_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess as sp
+
+    calls: list[list[str]] = []
+    alive = iter([[41, 42], [], []])  # before the kill, after it
+    monkeypatch.setattr(checker_support, "user_processes", lambda uid: next(alive))
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr(sp, "run", lambda cmd, **kw: calls.append(cmd) or sp.CompletedProcess(cmd, 0))
+    assert checker_support.kill_user_processes(54321, 54320) == []
+    assert calls == [["setpriv", "--reuid=54321", "--regid=54320", "--clear-groups", "--", "kill", "-KILL", "-1"]]
+
+
+def test_a_process_that_survives_the_kill_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess as sp
+
+    monkeypatch.setattr(checker_support, "user_processes", lambda uid: [99])
+    monkeypatch.setattr(sp, "run", lambda cmd, **kw: sp.CompletedProcess(cmd, 0))
+    assert checker_support.kill_user_processes(54321, rounds=2) == [99]
+
+
+def test_an_agent_process_surviving_its_session_makes_the_session_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _cfg(tmp_path, "demo")
+    cfg.agent_uid = cfg.agent_gid = 54321  # type: ignore[attr-defined]
+    monkeypatch.setattr(runner.os, "geteuid", lambda: 0)  # as the image's root harness
+    monkeypatch.setattr(runner, "_own", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "kill_user_processes", lambda uid, gid: [4242])
+    receipts_path = runner.run(cfg, ["demo-correct"], ["bare"], runs=1)
+    (first,) = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
+    assert first["valid"] is False and first["invalid_reason"] == "agent_processes_survived"
+
+
+def test_qualify_refuses_a_chain_that_skips_or_lacks_session_zero() -> None:
+    gap = _complete({("a", "bare"): ["obsolete"], ("a", "informed"): ["informed"]})
+    gap = [r for r in gap if not (r["chain_id"] == "a.bare.r0" and r["position"] == 0)]
+    with pytest.raises(ValueError, match=r"a\.bare\.r0: sessions \[1\] do not run 0\.\.0 without a gap"):
+        qualify.qualify(gap, ["a"], runs=1)
+
+
+def test_the_report_refuses_a_chain_that_skips_or_lacks_session_zero() -> None:
+    base = _receipt("bare", "lc-correct-a", "lc-correct", "obsolete", 1)
+    with pytest.raises(ValueError, match=r"sessions \[1\] do not run 0\.\.n without a gap"):
+        report.assemble([{**base, "position": 1}])
+    with pytest.raises(ValueError, match=r"sessions \[0, 2\] do not run"):
+        report.assemble([{**base, "position": 0, "stage": "exposure"}, {**base, "position": 2}])

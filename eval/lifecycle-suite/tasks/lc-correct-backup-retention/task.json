@@ -18,7 +18,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A customer record was deleted by mistake. How far back can it be restored from backups? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of days>`, then a sentence on why."
+          "prompt": "A customer record was deleted by mistake. How far back can it be restored from backups? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of days, in digits>`, then a sentence on why."
         }
       ]
     }

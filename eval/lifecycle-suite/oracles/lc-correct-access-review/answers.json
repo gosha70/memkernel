@@ -1,5 +1,5 @@
 {
-  "form": "<time from today until the next production access review, such as 3 days>",
+  "form": "<time from today until the next production access review, a number with a unit>",
   "parts": [
     "duration"
   ],

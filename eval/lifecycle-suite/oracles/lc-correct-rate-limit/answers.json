@@ -1,5 +1,5 @@
 {
-  "form": "<number of requests accepted in that minute>",
+  "form": "<number of requests accepted in that minute, in digits>",
   "parts": [
     "number"
   ],

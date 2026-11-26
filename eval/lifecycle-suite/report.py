@@ -115,8 +115,9 @@ def truncated_sessions(receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def assemble(receipts: list[dict[str, Any]], truncated: list[dict[str, Any]] | None = None) -> list[Trial]:
-    """One trial per (run_id, chain_id); duplicate sessions are rejected rather than merged. A trial with any
-    truncated session is excluded by truncation, whatever else it is."""
+    """One trial per (run_id, chain_id); duplicate sessions are rejected rather than merged, and so is a chain whose
+    sessions do not start at position 0 or skip one. A trial with any truncated session is excluded by truncation,
+    whatever else it is."""
     cut = {(r["run_id"], r["chain_id"]) for r in truncated or []}
     chains: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     seen: set[tuple[str, str, int]] = set()
@@ -129,6 +130,9 @@ def assemble(receipts: list[dict[str, Any]], truncated: list[dict[str, Any]] | N
     trials = []
     for run_id, chain_id in sorted(chains):
         sessions = sorted(chains[(run_id, chain_id)], key=lambda r: r["position"])
+        positions = [r["position"] for r in sessions]
+        if positions != list(range(len(positions))):  # a chain starts at session 0 and has no gap
+            raise ValueError(f"run {run_id}, chain {chain_id}: sessions {positions} do not run 0..n without a gap")
         first, last = sessions[0], sessions[-1]
         invalid = next((r["invalid_reason"] for r in sessions if not r["valid"]), None)
         if invalid is None and last["stage"] != "evaluation":

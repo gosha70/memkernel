@@ -41,37 +41,49 @@ def grader_ids() -> tuple[int, int] | None:
     return int(uid), int(os.environ.get(GRADER_GID_ENV) or uid)
 
 
-def kill_user_processes(uid: int, rounds: int = 5) -> int:
-    """SIGKILL every process owned by ``uid`` (Linux, from /proc), repeating until none is left; return how many.
+def user_processes(uid: int) -> list[int]:
+    """Live processes owned by ``uid`` (Linux, from /proc); a zombie, already dead and waiting to be reaped, is not."""
+    from pathlib import Path as _Path
+
+    found = []
+    for status in _Path("/proc").glob("[0-9]*/status"):
+        try:
+            lines = status.read_text().splitlines()
+        except OSError:
+            continue
+        fields = dict(line.split(":", 1) for line in lines if ":" in line)
+        if str(uid) in fields.get("Uid", "").split()[:2] and not fields.get("State", "").strip().startswith("Z"):
+            found.append(int(status.parent.name))
+    return found
+
+
+def kill_user_processes(uid: int, gid: int | None = None, rounds: int = 5) -> list[int]:
+    """Kill every process of ``uid`` with ``setpriv --reuid=<uid> -- kill -KILL -1``, then check that none is left;
+    return the pids still alive (empty: all gone).
 
     The harness calls it as root after an agent session and after grading, so nothing the agent or the candidate's
-    code started (a daemon, a detached child) outlives its turn. It refuses the harness's own uid.
+    code started (a daemon, a detached child) outlives its turn. ``kill -1`` as that user signals every process the
+    user owns. It refuses the harness's own uid.
     """
     import os
-    import signal
-    from pathlib import Path as _Path
+    import time
 
     if uid == os.geteuid():
         raise ValueError("refusing to kill the harness's own processes")
-    killed = 0
+    group = gid if gid is not None else uid
+    remaining = user_processes(uid)
     for _ in range(rounds):
-        found = []
-        for status in _Path("/proc").glob("[0-9]*/status"):
-            try:
-                uids = next(line for line in status.read_text().splitlines() if line.startswith("Uid:")).split()[1:]
-            except (OSError, StopIteration):
-                continue
-            if str(uid) in uids[:2]:
-                found.append(int(status.parent.name))
-        if not found:
-            return killed
-        for pid in found:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                killed += 1
-            except ProcessLookupError:
-                pass
-    return killed
+        if not remaining:
+            return []
+        subprocess.run(
+            ["setpriv", f"--reuid={uid}", f"--regid={group}", "--clear-groups", "--", "kill", "-KILL", "-1"],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        time.sleep(0.1)
+        remaining = user_processes(uid)
+    return remaining
 
 
 RESULT_PATH_ENV = "LC_ORACLE_RESULT"
@@ -167,8 +179,9 @@ def run_driver(workdir: Path, oracle_dir: Path, timeout_s: float = 60.0) -> tupl
         except subprocess.TimeoutExpired:
             exit_code = None
         finally:
-            if grader is not None:
-                kill_user_processes(grader[0])
+            survivors = kill_user_processes(*grader) if grader is not None else []
+        if survivors:  # the grader's processes outlived grading: the result cannot be trusted
+            raise CheckerInfrastructureError(f"the grader's processes {survivors} survived grading")
         records = []
         if result.exists():
             for line in result.read_text(encoding="utf-8").splitlines():

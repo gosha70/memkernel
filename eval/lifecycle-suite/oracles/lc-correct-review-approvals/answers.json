@@ -1,5 +1,5 @@
 {
-  "form": "<yes or no>; <total number of approvals the pull request needs>",
+  "form": "<yes or no>; <total number of approvals the pull request needs, in digits>",
   "parts": [
     "yesno",
     "number"

@@ -20,7 +20,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A pull request changes payments/ledger.py and has one approval from another maintainer. Can it be merged? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no>; <total number of approvals the pull request needs>`, then a sentence on why."
+          "prompt": "A pull request changes payments/ledger.py and has one approval from another maintainer. Can it be merged? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no>; <total number of approvals the pull request needs, in digits>`, then a sentence on why."
         }
       ]
     }

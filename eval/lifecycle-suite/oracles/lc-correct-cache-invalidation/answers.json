@@ -1,5 +1,5 @@
 {
-  "form": "<duration, such as 45 seconds>",
+  "form": "<how long the old price can still be served, a number with a unit, or 0 if none>",
   "parts": [
     "duration"
   ],

@@ -1,5 +1,5 @@
 {
-  "form": "<how long each access token is valid>; <how long after login it must log in again>",
+  "form": "<how long each access token is valid, a number with a unit>; <how long after login it must log in again, a number with a unit>",
   "parts": [
     "duration",
     "duration"

@@ -1,5 +1,5 @@
 {
-  "form": "<number of automatic retries>",
+  "form": "<number of automatic retries, in digits, or 0 if none>",
   "parts": [
     "number"
   ],

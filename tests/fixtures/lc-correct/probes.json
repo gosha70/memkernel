@@ -1,0 +1,185 @@
+{
+  "comment": "Every reviewer probe of the lc-correct checker, pinned (memkernel-0-16 amendment A1). chain is the lc-correct-<chain> task; expected is the checker's class.",
+  "probes": [
+    {
+      "chain": "deploy-window",
+      "answer": "Monday is explicitly not allowed.",
+      "expected": "other",
+      "source": "review 1 (pasted 2026-11-25)"
+    },
+    {
+      "chain": "email-logging",
+      "answer": "Do not log the internal user ID; log the email hash.",
+      "expected": "other",
+      "source": "review 1 (pasted 2026-11-25)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "The limit is not 120; all 300 requests are accepted.",
+      "expected": "other",
+      "source": "review 1 (pasted 2026-11-25)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: not Monday; 09:00 UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "email-logging",
+      "answer": "Answer: no; not the internal user id",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: at most 120",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: at least 120",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: no longer 24 hours; 8 hours",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "backup-retention",
+      "answer": "Answer: over 90",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "backup-retention",
+      "answer": "Answer: under 90",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "invoice-rounding",
+      "answer": "Answer: 2.34 instead of 2.35",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "retry-policy",
+      "answer": "Answer: previously 3, now 0",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "retry-policy",
+      "answer": "Answer: 0 except for idempotent calls",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "cache-invalidation",
+      "answer": "Answer: it was 10 minutes",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "incident-paging",
+      "answer": "Answer: never; Monday",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: no, not yet; 2",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: no; 2",
+      "expected": "informed",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: No; 2 approvals",
+      "expected": "informed",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: yes; 1",
+      "expected": "obsolete",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 9:00 am UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 9 AM UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 09:00 p.m. UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 09:00 UTC",
+      "expected": "informed",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 09:00 UTC\nAnswer: Friday; 17:00 UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15 minutes",
+      "expected": "other",
+      "source": "review 1 (pasted 2026-11-25)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15 minutes; 24 hours",
+      "expected": "other",
+      "source": "review 1 (pasted 2026-11-25)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 2 fortnights, 15 minutes; 8 hours",
+      "expected": "other",
+      "source": "DeepSeek round 3"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15 minuets; 8 hours",
+      "expected": "other",
+      "source": "DeepSeek round 3"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15-minute; 8-hour",
+      "expected": "informed",
+      "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15 - minutes; 8 - hours",
+      "expected": "informed",
+      "source": "owner (2026-11-26)"
+    }
+  ]
+}

@@ -14,8 +14,12 @@ The hidden ``<oracle>/answers.json`` gives each part's kind and two condition li
      "obsolete": [{"in": ["thursday", "friday"]}, null]}
 
 The answer is ``informed`` (passes) when every informed condition holds, ``obsolete`` when every obsolete condition
-holds (``null`` holds for anything), and ``other`` otherwise, including a missing or unparsable line or the wrong
-number of parts. The explanation may name both the old and the new value; the line decides.
+holds (``null`` holds for anything), and ``other`` otherwise, including a missing or unparsable line, more than one
+``Answer:`` line, or the wrong number of parts. The explanation may name both the old and the new value; the line
+decides. A part carrying a negation or a qualifier (``not``, ``no longer``, ``except``, ``never``, ``under``,
+``over``, ``at most``, ``at least``, ``instead of``, ``was``, ``previously``) is unparsable, so the answer is
+``other``; only a yes/no part's leading ``yes`` or ``no`` is the answer itself, not a negation. A time with am or pm
+is refused (the form asks for a 24-hour time), and a hyphenated unit (``15-minute``) reads as ``15 minute``.
 
 Part kinds: ``weekday`` (one weekday name), ``time`` (one ``HH:MM``), ``duration`` (one number with a unit, in
 minutes; a bare ``0`` is zero), ``number`` (one number), ``yesno`` (starts with yes or no), ``text`` (the part,
@@ -48,6 +52,10 @@ MINUTES = {
     "month": 43200, "months": 43200,
 }  # fmt: skip
 _LINE = re.compile(r"^[\s>*_`#-]*answer[\s*_`]*:[\s*_`]*(.*?)[\s*_`]*$", re.IGNORECASE | re.MULTILINE)
+_QUALIFIER = re.compile(
+    r"\b(not|no longer|except|never|under|over|at most|at least|instead of|was|previously)\b|n't\b", re.IGNORECASE
+)
+_MERIDIEM = re.compile(r"\b\d{1,2}(:\d{2})?\s*([ap]\.?\s?m\b\.?)", re.IGNORECASE)
 _DURATION = re.compile(r"(-?\d+(?:\.\d+)?)\s*([a-z]+)")
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
@@ -66,8 +74,9 @@ def answer_text(workdir: Path) -> str | None:
 
 
 def answer_line(text: str) -> str | None:
-    match = _LINE.search(text)
-    return match.group(1).strip().rstrip(".") if match else None
+    """The one ``Answer:`` line's value; None when there is none or more than one (an answer hedged across lines)."""
+    found = _LINE.findall(text)
+    return str(found[0]).strip().rstrip(".") if len(found) == 1 else None
 
 
 def _one(found: list[Any], what: str) -> Any:
@@ -78,9 +87,15 @@ def _one(found: list[Any], what: str) -> Any:
 
 def parse_part(kind: str, part: str) -> Any:
     text = part.strip().lower()
+    hedged = re.sub(r"^(yes|no)\b", "", text) if kind == "yesno" else text  # a yes/no part's own yes or no
+    if _QUALIFIER.search(hedged):
+        raise UnparsableError("a negation or a qualifier")
+    text = re.sub(r"(\d)\s*-\s*([a-z])", r"\1 \2", text)  # 15-minute reads as 15 minute
     if kind == "weekday":
         return _one([w for w in WEEKDAYS if re.search(rf"\b{w}s?\b", text)], "weekday")
     if kind == "time":
+        if _MERIDIEM.search(text):
+            raise UnparsableError("a time with am or pm: the form asks for a 24-hour time")
         times = re.findall(r"\b(\d{1,2}):(\d{2})\b", text)
         if any(int(h) > 23 or int(m) > 59 for h, m in times):
             raise UnparsableError("not a time of day")

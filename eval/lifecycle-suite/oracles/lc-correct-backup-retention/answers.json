@@ -1,5 +1,5 @@
 {
-  "form": "<number of days>",
+  "form": "<number of days, in digits>",
   "parts": [
     "number"
   ],

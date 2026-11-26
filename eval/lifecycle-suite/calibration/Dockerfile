@@ -51,7 +51,7 @@ ARG EMBEDDING_MODEL=all-MiniLM-L6-v2
 ARG EMBEDDING_MODEL_REVISION=1110a243fdf4706b3f48f1d95db1a4f5529b4d41
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends nodejs npm git curl ca-certificates \
+ && apt-get install -y --no-install-recommends nodejs npm git curl ca-certificates procps \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
@@ -87,7 +87,7 @@ RUN python -m venv /opt/mk-venv \
 
 RUN useradd --system --no-create-home --uid 1001 --user-group --shell /usr/sbin/nologin agent \
  && useradd --system --no-create-home --uid 1002 --user-group --shell /usr/sbin/nologin grader \
- && command -v setpriv \
+ && command -v setpriv && test -x /usr/bin/kill \
  && mkdir -p /opt/agent-tools /runs \
  && cp /opt/memkernel/templates/hooks/*.py /opt/memkernel/eval/lifecycle-suite/hook_ledger.py \
       /opt/memkernel/eval/lifecycle-suite/stub_agent.py /opt/agent-tools/ \

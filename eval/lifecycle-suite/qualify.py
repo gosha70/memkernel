@@ -39,7 +39,8 @@ def qualify(receipts: list[dict[str, Any]], tasks: list[str], runs: int) -> dict
     """Qualify ``tasks`` from a complete calibration: exactly ``tasks`` x (bare, informed) x ``runs`` chains.
 
     Raises ``ValueError`` for anything but that manifest: a receipt from another group or phase, a measured arm, a
-    chain that is missing or not expected, or a session recorded twice. A chain that stopped at an invalid session
+    chain that is missing or not expected, a session recorded twice, or a chain whose sessions do not start at 0
+    and run without a gap. A chain that stopped at an invalid session
     is complete (its receipts end there) and counts as an invalid trial, never as qualified evidence.
     """
     expected = {f"{task}.{arm}.r{run}": (task, arm) for task in tasks for arm in ARMS for run in range(runs)}
@@ -64,6 +65,9 @@ def qualify(receipts: list[dict[str, Any]], tasks: list[str], runs: int) -> dict
     invalid: dict[str, int] = defaultdict(int)
     for chain_id, (task, arm) in sorted(expected.items()):
         ordered = sorted(sessions[chain_id], key=lambda r: int(r["position"]))
+        positions = [int(r["position"]) for r in ordered]
+        if positions != list(range(len(positions))):  # a chain starts at session 0 and has no gap
+            raise ValueError(f"{chain_id}: sessions {positions} do not run 0..{len(positions) - 1} without a gap")
         final = ordered[-1]
         if all(r["valid"] for r in ordered) and final["stage"] == "evaluation":
             trials[task][arm].append("timeout" if final["outcome"] == "timeout" else final.get("answer_class"))

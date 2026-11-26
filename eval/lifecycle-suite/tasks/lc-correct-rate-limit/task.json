@@ -18,7 +18,7 @@
       "steps": [
         {
           "stage": "evaluation",
-          "prompt": "A tenant with a single API key sends 300 requests within one minute. How many are accepted before it is throttled? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of requests accepted in that minute>`, then a sentence on why."
+          "prompt": "A tenant with a single API key sends 300 requests within one minute. How many are accepted before it is throttled? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of requests accepted in that minute, in digits>`, then a sentence on why."
         }
       ]
     }

@@ -39,7 +39,9 @@ Every prompt is in the chain's `task.json`, recorded here by the task directory'
 asks for `ANSWER.md` whose `Answer:` line gives the value in a neutral form per chain (for example
 `<weekday>; <HH:MM> UTC`), parts separated by `;`. Only that line is graded: it is `informed` when every part meets
 the corrected rule's condition, `obsolete` when the parts meet the old rule's, and `other` otherwise, a missing,
-unparsable or incomplete line included. The explanation below it may name both values; it decides nothing. Every
+unparsable or incomplete line included. A part with a negation or a qualifier (`not`, `no longer`, `at most`,
+`instead of`, `was`, and the like) is unparsable, except a yes/no part's own yes or no. So are a time with am or pm
+and an answer with more than one `Answer:` line. The explanation below it may name both values; it decides nothing. Every
 chain carries three adversarial references (the corrected rule only in prose; the old rule on the line with the
 new one in prose; the line with extra parts), pinned to other, obsolete and other. There is no LLM judge.
 

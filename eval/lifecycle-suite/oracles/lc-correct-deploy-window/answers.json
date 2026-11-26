@@ -1,5 +1,5 @@
 {
-  "form": "<weekday>; <HH:MM> UTC",
+  "form": "<weekday>; <HH:MM, 24-hour> UTC",
   "parts": [
     "weekday",
     "time"

@@ -719,7 +719,10 @@ def run_session(
                 break
         hooks = _read_ledger(ledger)
     if cfg.agent_uid not in (None, os.geteuid()) and invalid != "fixture_restore_failed":
-        kill_user_processes(cfg.agent_uid)  # no agent process (a detached child, a daemon) outlives its session
+        # no agent process (a detached child, a daemon) outlives its session; one that does voids the session
+        survivors = kill_user_processes(int(cfg.agent_uid or 0), cfg.agent_gid)
+        if survivors and invalid is None:
+            invalid = "agent_processes_survived"
     ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
     if dirs is not home:
         if cfg.agent_uid is not None:
