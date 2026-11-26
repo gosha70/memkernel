@@ -49,6 +49,7 @@ COMPACT_GROUP = "lc-compact"
 CORRECT_GROUP = "lc-correct"  # memkernel-0-16-lifecycle-corrections: its own section, against the negative control
 NEGATIVE_CONTROL = "bare"
 ANSWER_CLASSES = ("informed", "obsolete", "other")
+OTHER_REASONS = ("no_line", "unreadable", "wrong_value")  # why an lc-correct answer is other
 GOVERNED_ARMS = ("memkernel_governed", "memkernel_governed_oracle")  # the arms whose end state the gate check reads
 # api_errors keys of an authentication refusal (FR-015a (c)); any other key is a non-authentication API error
 AUTHENTICATION_KEYS = frozenset({*(str(status) for status in AUTHENTICATION_STATUSES), AUTHENTICATION_ERROR})
@@ -87,6 +88,7 @@ class Trial:
     truncated: bool = False  # excluded by truncation (FR-015a): neither invalid nor scored
     answer_class: str | None = None  # lc-correct: informed, obsolete or other (memkernel-0-16 FR-001)
     gate_breaches: int | None = None  # governed arms: pages landed without the gate's records (FR-004)
+    other_reason: str | None = None  # lc-correct, for other: no_line, unreadable or wrong_value
 
     @property
     def scored(self) -> bool:
@@ -164,6 +166,7 @@ def assemble(receipts: list[dict[str, Any]], truncated: list[dict[str, Any]] | N
                 (run_id, chain_id) in cut,
                 last.get("answer_class"),
                 len(last["gate"].get("breaches", [])) if isinstance(last.get("gate"), dict) else None,
+                last.get("other_reason"),
             )
         )
     return trials
@@ -232,9 +235,9 @@ def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
     about the gate whether or not the trial is scored. A governed trial with no gate record is shown as missing.
     """
     lines = [
-        "| Arm | Trials | Valid | Informed | Obsolete (rate) | Other | Invalid | Truncated | Gate breaches "
-        "| Gate missing |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Arm | Trials | Valid | Informed | Obsolete (rate) | Other: no line | Other: unreadable "
+        "| Other: wrong value | Other: not graded | Invalid | Truncated | Gate breaches | Gate missing |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for arm in arms:
         rows = [t for t in trials if t.group == CORRECT_GROUP and t.arm == arm]
@@ -242,7 +245,9 @@ def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
             continue
         valid = [t for t in rows if t.scored]
         count = {c: sum(1 for t in valid if t.answer_class == c) for c in ANSWER_CLASSES}
-        other = len(valid) - count["informed"] - count["obsolete"]  # timeouts and no answer count as other
+        why = {r: sum(1 for t in valid if t.answer_class == "other" and t.other_reason == r) for r in OTHER_REASONS}
+        # other with no recorded reason: a timeout or a session the checker never graded
+        ungraded = len(valid) - count["informed"] - count["obsolete"] - sum(why.values())
         invalid = sum(1 for t in rows if not t.valid and not t.truncated)
         truncated = [t for t in rows if t.truncated]
         evidence = [t for t in (*valid, *truncated) if t.gate_breaches is not None]
@@ -251,7 +256,8 @@ def _correct_table(trials: list[Trial], arms: list[str]) -> list[str]:
         breaches = str(sum(t.gate_breaches or 0 for t in evidence)) if governed else "-"
         lines.append(
             f"| {arm} | {len(rows)} | {len(valid)} | {count['informed']} | {_pct(count['obsolete'], len(valid))} "
-            f"| {other} | {invalid} | {len(truncated)} | {breaches} | {missing if governed else '-'} |"
+            f"| {why['no_line']} | {why['unreadable']} | {why['wrong_value']} | {ungraded} "
+            f"| {invalid} | {len(truncated)} | {breaches} | {missing if governed else '-'} |"
         )
     return lines
 

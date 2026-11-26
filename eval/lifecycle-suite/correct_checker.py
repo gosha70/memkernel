@@ -53,6 +53,8 @@ ANSWER_FILE = "ANSWER.md"
 ANSWERS_FILE = "answers.json"
 INFORMED, OBSOLETE, OTHER = "informed", "obsolete", "other"
 ANSWER_CLASSES = (INFORMED, OBSOLETE, OTHER)
+NO_LINE, UNREADABLE, WRONG_VALUE = "no_line", "unreadable", "wrong_value"  # why an answer is other
+OTHER_REASONS = (NO_LINE, UNREADABLE, WRONG_VALUE)
 MAX_ANSWER_BYTES = 64_000  # an answer is a line and a sentence or two; a larger file is read up to this size
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 UNITS = {  # minutes per unit, in words, singular or plural: what the duration forms name
@@ -153,25 +155,33 @@ def _holds(condition: dict[str, Any] | None, value: Any) -> bool:
     raise ValueError(f"unknown condition {condition!r}")
 
 
-def classify_text(text: str | None, spec: dict[str, Any]) -> str:
-    if text is None:
-        return OTHER
+def grade_text(text: str | None, spec: dict[str, Any]) -> tuple[str, str | None]:
+    """(class, why it is other): the reason is ``no_line`` (no answer file, or no ``Answer:`` line), ``unreadable``
+    (a line that does not fit the form: more than one ``Answer:`` line, the wrong number of parts, or a part outside
+    its grammar) or ``wrong_value`` (a readable line whose value is neither the corrected rule nor the old one);
+    None for ``informed`` and ``obsolete``."""
+    if text is None or not _LINE.search(text):
+        return OTHER, NO_LINE
     line = answer_line(text)
-    if line is None:
-        return OTHER
+    if line is None:  # more than one Answer: line
+        return OTHER, UNREADABLE
     kinds: list[str | dict[str, Any]] = spec["parts"]
     parts = [p for p in (piece.strip() for piece in line.split(";")) if p]
     if len(parts) != len(kinds):
-        return OTHER
+        return OTHER, UNREADABLE
     try:
         values = [parse_part(kind, part) for kind, part in zip(kinds, parts, strict=True)]
     except UnparsableError:
-        return OTHER
+        return OTHER, UNREADABLE
     if all(_holds(c, v) for c, v in zip(spec[INFORMED], values, strict=True)):
-        return INFORMED
+        return INFORMED, None
     if all(_holds(c, v) for c, v in zip(spec[OBSOLETE], values, strict=True)):
-        return OBSOLETE
-    return OTHER
+        return OBSOLETE, None
+    return OTHER, WRONG_VALUE
+
+
+def classify_text(text: str | None, spec: dict[str, Any]) -> str:
+    return grade_text(text, spec)[0]
 
 
 def load_spec(oracle_dir: Path) -> dict[str, Any]:
@@ -181,6 +191,11 @@ def load_spec(oracle_dir: Path) -> dict[str, Any]:
 
 def classify(workdir: Path, oracle_dir: Path) -> str:
     return classify_text(answer_text(workdir), load_spec(oracle_dir))
+
+
+def other_reason(workdir: Path, oracle_dir: Path) -> str | None:
+    """Why the answer is ``other`` (``no_line``, ``unreadable``, ``wrong_value``), or None when it is not."""
+    return grade_text(answer_text(workdir), load_spec(oracle_dir))[1]
 
 
 def check(workdir: Path, oracle_dir: Path) -> tuple[bool, str]:

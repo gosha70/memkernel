@@ -319,8 +319,8 @@ def test_the_report_tables_lc_correct_by_answer_class_and_tokens_by_group() -> N
     trials = report.assemble(receipts)
     arms = ["bare", "memkernel", "memkernel_governed"]
     table = "\n".join(report._correct_table(trials, arms))
-    assert "| bare | 1 | 1 | 0 | 1/1 (100%) | 0 | 0 | 0 | - | - |" in table
-    assert "| memkernel_governed | 1 | 1 | 1 | 0/1 (0%) | 0 | 0 | 0 | 1 | 0 |" in table
+    assert "| bare | 1 | 1 | 0 | 1/1 (100%) | 0 | 0 | 0 | 0 | 0 | 0 | - | - |" in table
+    assert "| memkernel_governed | 1 | 1 | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |" in table
     pairs = "\n".join(report._correct_pairs(trials, arms))
     assert "| memkernel | 1 | 0 | 1 | 0 | 0 | 0 | 0 |" in pairs
     tokens = "\n".join(report._tokens_by_group(trials))
@@ -524,7 +524,7 @@ def test_the_report_keeps_truncated_trials_apart_and_their_gate_evidence() -> No
     missing = {**base, "chain_id": "lc-correct-c.memkernel_governed.r0", "task_id": "lc-correct-c", "gate": None}
     trials = report.assemble([base, truncated, missing], truncated=[truncated])
     table = "\n".join(report._correct_table(trials, ["memkernel_governed"]))
-    assert "| memkernel_governed | 3 | 2 | 2 | 0/2 (0%) | 0 | 0 | 1 | 2 | 1 |" in table
+    assert "| memkernel_governed | 3 | 2 | 2 | 0/2 (0%) | 0 | 0 | 0 | 0 | 0 | 1 | 2 | 1 |" in table
 
 
 # ── blinding (the #90 review): what the agent can reach from its session ─
@@ -913,3 +913,58 @@ def test_each_part_of_the_form_states_its_grammar_and_nothing_else(task_id: str)
             else:
                 with pytest.raises(correct_checker.UnparsableError):
                     correct_checker.parse_part(part, "0")
+
+
+# ── why an answer is other: no line, unreadable, wrong value ──
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        (None, "no_line"),  # no answer file
+        ("Monday at 09:00 UTC, I think.", "no_line"),  # no Answer: line
+        ("Answer: Monday; 09:00 UTC\nAnswer: Friday; 17:00 UTC", "unreadable"),  # two lines
+        ("Answer: Monday", "unreadable"),  # a part missing
+        ("Answer: Monday morning; 09:00 UTC", "unreadable"),  # a part outside its grammar
+        ("Answer: not Monday; 09:00 UTC", "unreadable"),  # a qualifier
+        ("Answer: Tuesday; 10:00 UTC", "wrong_value"),  # readable, neither rule
+        ("Answer: Monday; 17:00 UTC", "wrong_value"),
+        ("Answer: Monday; 09:00 UTC", None),  # informed
+        ("Answer: Friday; 17:00 UTC", None),  # obsolete
+    ],
+)
+def test_the_checker_says_why_an_answer_is_other(text: str | None, reason: str | None) -> None:
+    spec = correct_checker.load_spec(ORACLES_ROOT / "lc-correct-deploy-window")
+    answer, why = correct_checker.grade_text(text, spec)
+    assert why == reason and (answer == "other") == (reason is not None)
+
+
+def test_receipts_record_why_an_answer_is_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "require_isolated_image", lambda cfg: None)  # the stub agent needs no image
+    receipts_path = runner.run(_cfg(tmp_path, "calibration"), ["demo-correct"], ["bare"], runs=1)
+    (final,) = [
+        r for r in map(json.loads, receipts_path.read_text(encoding="utf-8").splitlines()) if r["position"] == 1
+    ]
+    assert final["answer_class"] == "other" and final["other_reason"] == "no_line"  # the stub writes no ANSWER.md
+
+
+def test_the_report_and_qualify_count_other_answers_by_reason() -> None:
+    def other(task: str, reason: str) -> dict:  # type: ignore[type-arg]
+        return {**_receipt("bare", task, "lc-correct", "other", 1), "other_reason": reason}
+
+    receipts = [
+        other("lc-correct-a", "no_line"),
+        other("lc-correct-b", "unreadable"),
+        other("lc-correct-c", "wrong_value"),
+    ]
+    receipts.append({**_receipt("bare", "lc-correct-d", "lc-correct", None, 1), "outcome": "timeout"})
+    table = "\n".join(report._correct_table(report.assemble(receipts), ["bare"]))
+    assert "| bare | 4 | 4 | 0 | 0/4 (0%) | 1 | 1 | 1 | 1 | 0 | 0 | - | - |" in table
+    calibration = [
+        {**_calibration("t", "bare", "other"), "other_reason": "unreadable"},
+        _calibration("t", "bare", None, position=0),
+        _calibration("t", "informed", "informed"),
+        _calibration("t", "informed", None, position=0),
+    ]
+    result = qualify.qualify(calibration, ["t"], runs=1)
+    assert result["chains"][0]["bare"] == {"other: unreadable": 1} and result["qualified"] == ["t"]

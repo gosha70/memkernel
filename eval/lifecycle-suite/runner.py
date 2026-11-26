@@ -802,6 +802,7 @@ def run_session(
         "stages": {"exposure_at": exposure_at, "evaluation_at": evaluation_at, "compactions": summary.compactions},
         "diagnostics": session_diagnostics(summary, ran_in, earlier_reads, hooks),
         "answer_class": None,  # lc-correct only: informed, obsolete or other (FR-001), set by grading
+        "other_reason": None,  # lc-correct only, for other: no_line, unreadable or wrong_value
         "correction": correction,  # lc-correct only: what the arm's correction event did (FR-002)
         "gate": None,  # the governed arms' evaluation session: the end state against the gate's records (FR-004)
         "hashes": {
@@ -847,8 +848,10 @@ def grade(task: Task, arm: Arm, final: SessionOutcome, cfg: RunConfig, earlier_t
     try:
         checker = _load_checker(task)
         passed, _detail = checker.check(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
-        if hasattr(checker, "classify"):  # lc-correct's three outcomes (FR-001)
+        if hasattr(checker, "classify"):  # lc-correct's three outcomes (FR-001), and why an answer is other
             receipt["answer_class"] = checker.classify(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
+            if hasattr(checker, "other_reason"):
+                receipt["other_reason"] = checker.other_reason(final.dirs.workspace, task.oracle_dir(cfg.oracles_root))
     except Exception:  # a crashing checker is a harness failure, never the agent's
         receipt["valid"], receipt["invalid_reason"] = False, "checker_crashed"
         return

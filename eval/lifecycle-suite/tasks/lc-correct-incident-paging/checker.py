@@ -18,3 +18,7 @@ def check(workdir: Path, oracle_dir: Path) -> tuple[bool, str]:
 
 def classify(workdir: Path, oracle_dir: Path) -> str:
     return correct_checker.classify(workdir, oracle_dir)
+
+
+def other_reason(workdir: Path, oracle_dir: Path) -> str | None:
+    return correct_checker.other_reason(workdir, oracle_dir)

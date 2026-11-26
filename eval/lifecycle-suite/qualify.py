@@ -70,7 +70,10 @@ def qualify(receipts: list[dict[str, Any]], tasks: list[str], runs: int) -> dict
             raise ValueError(f"{chain_id}: sessions {positions} do not run 0..{len(positions) - 1} without a gap")
         final = ordered[-1]
         if all(r["valid"] for r in ordered) and final["stage"] == "evaluation":
-            trials[task][arm].append("timeout" if final["outcome"] == "timeout" else final.get("answer_class"))
+            answer = final.get("answer_class")
+            if answer == "other" and final.get("other_reason"):  # why: no_line, unreadable or wrong_value
+                answer = f"other: {final['other_reason']}"
+            trials[task][arm].append("timeout" if final["outcome"] == "timeout" else answer)
         else:
             invalid[task] += 1
     qualified, dropped, table = [], [], []

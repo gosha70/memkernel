@@ -186,6 +186,13 @@ between the options put to them; the rest are fixes within the spec.
     - A time is `<HH:MM, 24-hour> UTC`, a weekday its name, and an identifier `in a few words`.
     - So `120 requests`, `90 days`, `$2.34`, `9:00 UTC`, `15 min` and `Mondays` are `other`. The probes whose
       class this changed are marked as revised in the fixture.
+  - **Why an answer is `other` (the owner, 2026-11-26):** each receipt records it in `other_reason`.
+    - `no_line`: no answer file, or no `Answer:` line.
+    - `unreadable`: a line that does not fit the form (more than one `Answer:` line, the wrong number of parts, or
+      a part outside its grammar).
+    - `wrong_value`: a readable line whose value is neither rule.
+    - The report's lc-correct table counts each per arm, beside a "not graded" column for timeouts, and
+      `qualify.py`'s table shows them as `other: <reason>`.
 - **A2 Blinding (owner: separate users).**
   - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
     root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user

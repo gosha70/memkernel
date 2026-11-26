@@ -99,6 +99,7 @@
       }
     },
     "answer_class": {"type": ["string", "null"], "enum": ["informed", "obsolete", "other", null]},
+    "other_reason": {"type": ["string", "null"], "enum": ["no_line", "unreadable", "wrong_value", null]},
     "correction": {
       "type": ["object", "null"],
       "required": ["path", "delivered"],
