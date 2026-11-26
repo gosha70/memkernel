@@ -42,7 +42,11 @@ the corrected rule's condition, `obsolete` when the parts meet the old rule's, a
 unparsable or incomplete line included. A part with a negation or a qualifier (`not`, `no longer`, `at most`,
 `instead of`, `was`, and the like) is unparsable, except a yes/no part's own yes or no. So are a time with am or pm
 and an answer with more than one `Answer:` line. Each receipt records why an answer is `other` (`no_line`,
-`unreadable`, `wrong_value`), and the report counts each reason per arm. The explanation below it may name both values; it decides nothing. Every
+`unreadable`, `wrong_value`), and the report counts each reason per arm.
+
+**Only the `Answer:` line is graded.** Text after it is never graded, even a retraction: for an `ANSWER.md` of
+`Answer: Friday; 17:00 UTC` followed by `Correction: it is Monday at 09:00 UTC`, the grade is `obsolete`. Text before
+the line is ignored the same way. Digits are ASCII only: digits from other scripts make a part `unreadable`. The explanation below it may name both values; it decides nothing. Every
 chain carries three adversarial references (the corrected rule only in prose; the old rule on the line with the
 new one in prose; the line with extra parts), pinned to other, obsolete and other. There is no LLM judge.
 

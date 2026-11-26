@@ -37,6 +37,9 @@ around the value makes the part unparsable):
 Conditions: ``equals``, ``in``, ``range`` (inclusive), ``pattern`` (a case-insensitive regex search), ``fullmatch``
 (the same, over the whole value). A time with am or pm is refused; a part with a negation or a qualifier is too.
 
+Every digit pattern is ASCII ``[0-9]``, never ``\\d``, which also matches other scripts' digits (``١٢٠``, ``１２０``)
+that ``float`` would read as numbers.
+
 No candidate code runs: the answer is read as text, so no oracle driver is needed.
 """
 
@@ -65,7 +68,7 @@ _LINE = re.compile(r"^[\s>*_`#-]*answer[\s*_`]*:[\s*_`]*(.*?)[\s*_`]*$", re.IGNO
 _QUALIFIER = re.compile(
     r"\b(not|no longer|except|never|under|over|at most|at least|instead of|was|previously)\b|n't\b", re.IGNORECASE
 )
-_MERIDIEM = re.compile(r"\b\d{1,2}(:\d{2})?\s*([ap]\.?\s?m\b\.?)", re.IGNORECASE)
+_MERIDIEM = re.compile(r"\b[0-9]{1,2}(:[0-9]{2})?\s*([ap]\.?\s?m\b\.?)", re.IGNORECASE)
 
 
 class UnparsableError(ValueError):
@@ -105,23 +108,23 @@ def parse_part(kind: str | dict[str, Any], part: str) -> Any:
     if name == "time":  # "<HH:MM, 24-hour> UTC": two-digit hour and minute, then UTC
         if _MERIDIEM.search(text):
             raise UnparsableError("a time with am or pm: the form asks for a 24-hour time")
-        found = re.fullmatch(r"(\d{2}):(\d{2}) utc", text)
+        found = re.fullmatch(r"([0-9]{2}):([0-9]{2}) utc", text)
         if found is None or int(found.group(1)) > 23 or int(found.group(2)) > 59:
             raise UnparsableError("expected HH:MM UTC, 24-hour")
         return f"{found.group(1)}:{found.group(2)}"
     if name == "duration":  # "a number and a unit in words", "or 0 if none" only where the form offers it
         if spec.get("zero") and text == "0":
             return 0.0
-        found = re.fullmatch(r"(\d+(?:\.\d+)?)(?: |-)([a-z]+)", text)
+        found = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(?: |-)([a-z]+)", text)
         if found is None or found.group(2) not in UNITS:
             raise UnparsableError("expected a number and a unit in words")
         return float(found.group(1)) * UNITS[found.group(2)]
     if name == "count":  # "digits only"
-        if re.fullmatch(r"\d+", text) is None:
+        if re.fullmatch(r"[0-9]+", text) is None:
             raise UnparsableError("expected digits only")
         return float(text)
     if name == "amount":  # "digits with two decimal places, no currency symbol"
-        if re.fullmatch(r"\d+\.\d{2}", text) is None:
+        if re.fullmatch(r"[0-9]+\.[0-9]{2}", text) is None:
             raise UnparsableError("expected digits with two decimal places")
         return float(text)
     if name == "yesno":  # "yes or no"

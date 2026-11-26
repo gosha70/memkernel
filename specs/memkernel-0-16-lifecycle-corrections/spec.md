@@ -193,6 +193,9 @@ between the options put to them; the rest are fixes within the spec.
     - `wrong_value`: a readable line whose value is neither rule.
     - The report's lc-correct table counts each per arm, beside a "not graded" column for timeouts, and
       `qualify.py`'s table shows them as `other: <reason>`.
+  - **ASCII digits (the owner, 2026-11-26):** every digit pattern is `[0-9]`. Python's `\d` also matches other
+    scripts' digits (`١٢٠`, `１２０`), which `float` reads as numbers. Probes pin them as `other`. Text after the answer
+    line is never graded, even a retraction; the preregistration draft says so.
 - **A2 Blinding (owner: separate users).**
   - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
     root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user

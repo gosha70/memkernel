@@ -426,6 +426,42 @@
       "answer": "Answer: no; the user id",
       "expected": "informed",
       "source": "owner (2026-11-26, forms state the grammar)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: ١٢٠",
+      "expected": "other",
+      "source": "owner (2026-11-26, ASCII digits only)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: １２０",
+      "expected": "other",
+      "source": "owner (2026-11-26, ASCII digits only)"
+    },
+    {
+      "chain": "invoice-rounding",
+      "answer": "Answer: ٢.٣٤",
+      "expected": "other",
+      "source": "owner (2026-11-26, ASCII digits only)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; ０９:００ UTC",
+      "expected": "other",
+      "source": "owner (2026-11-26, ASCII digits only)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: ١٥ minutes; 8 hours",
+      "expected": "other",
+      "source": "owner (2026-11-26, ASCII digits only)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Friday; 17:00 UTC\nCorrection: it is Monday at 09:00 UTC",
+      "expected": "obsolete",
+      "source": "owner (2026-11-26, text after the answer line is never graded)"
     }
   ]
 }
