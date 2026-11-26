@@ -175,6 +175,10 @@ between the options put to them; the rest are fixes within the spec.
     - Each form says what it wants (`in digits`, `a number with a unit`, `or 0 if none`, `24-hour`), and a
       hyphenated unit (`15-minute`) is read as `15 minute`.
     - Every reviewer probe is pinned in `tests/fixtures/lc-correct/probes.json` with its source.
+  - **Full grammars (the third pasted review):** each part kind is a full-match grammar for the whole part, not a
+    search inside it, so surrounding words make a part unparsable: `Answer: approximately 120 requests` and
+    `Answer: bananas 120 elephants` are `other`. A number may carry only the units its chain names (`120 requests`,
+    `90 days`). The email chain's identifier must match `(the )?(internal )?user[ _-]?id` in full.
 - **A2 Blinding (owner: separate users).**
   - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
     root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user
@@ -186,11 +190,16 @@ between the options put to them; the rest are fixes within the spec.
       the grep directory come with it.
     - With `--agent-uid`, the session's files are the agent's only while it runs; then they return to the chain.
     - Chain folders are mode 0700, the run folder 0711 and the receipts 0600, all the harness's.
-    - On a rootful Docker host, `RUNS_OWNER` makes `run.sh` hand the finished run to whoever copies it off. Lima's
-      rootless Docker needs none: the container's root is the VM user.
+    - On a rootful Docker host, `RUNS_OWNER` makes `run.sh` hand the finished run to whoever copies it off, even
+      after a failed runner. The README's direct-Docker commands pass it, and say how to take back a run that a
+      killed container left root's. Lima's rootless Docker needs none: the container's root is the VM user.
     - A calibration or measured run refuses to start outside the isolated image, before it creates anything. It
       requires root, the `agent` and `grader` users named by the run, and a read attempt as `agent` that fails on
       the repository, the tasks and the oracles.
+  - **Reclaiming a session (the third pasted review):** the agent owns its staged files while it runs, so it can
+    remove any of them. The kill and the move back run in a `finally`. Whatever is left returns to the chain, each
+    missing directory is recreated empty, and a session missing its store, memory, workspace or folder is invalid
+    (`session_state_missing`), with its receipt written. Nothing is left stranded under `sessions/`.
   - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
     the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
     user, it also fails unless the run folder and the oracles are unreadable.

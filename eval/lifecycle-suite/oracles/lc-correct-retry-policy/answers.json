@@ -1,7 +1,13 @@
 {
   "form": "<number of automatic retries, in digits, or 0 if none>",
   "parts": [
-    "number"
+    {
+      "kind": "number",
+      "units": [
+        "retry",
+        "retries"
+      ]
+    }
   ],
   "informed": [
     {

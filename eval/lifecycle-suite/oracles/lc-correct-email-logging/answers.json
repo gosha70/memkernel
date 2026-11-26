@@ -9,7 +9,7 @@
       "equals": "no"
     },
     {
-      "pattern": "\\buser[ _-]?id\\b|\\binternal id\\b"
+      "fullmatch": "(the )?(internal )?user[ _-]?id"
     }
   ],
   "obsolete": [

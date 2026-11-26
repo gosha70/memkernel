@@ -284,17 +284,32 @@ delete afterwards:
 git clone https://github.com/gosha70/memkernel.git && cd memkernel   # stay on the main commit to calibrate
 eval/lifecycle-suite/calibration/build.sh            # tags memkernel-calibration:<sha12>
 docker image inspect --format '{{.Id}}' memkernel-calibration:<sha12>   # record it
-mkdir -p calibration-runs && sudo chown 1000:1000 calibration-runs      # the container runs as uid 1000
+mkdir -p calibration-runs    # the harness in the container is root, which can write here
 read -r -s -p "API key: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY && echo
 export CALIBRATION_WORKSPACE_ID=wrkspc_...
-docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID \
+export RUNS_OWNER="$(id -u):$(id -g)"   # who gets the run when it ends (run.sh's finish step)
+docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e RUNS_OWNER \
   -v "$PWD/calibration-runs:/runs" memkernel-calibration:<sha12> preflight
-docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID \
+docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e RUNS_OWNER \
   -v "$PWD/calibration-runs:/runs" memkernel-calibration:<sha12> calibrate
 ```
 
 `--tmpfs /tmp` keeps the agent's scratch files, such as the `wiki_studio`
 arm's `mktemp -d` drafts, in memory, where they vanish with the container.
+
+**Who owns the run.** The image runs its harness as root and each session as the unprivileged `agent` user, so
+with rootful Docker, as here, a run's files belong to the host's root while it runs. The receipts are mode 0600,
+and the chain folders 0700. When `run.sh` finishes, with or without an error from the runner, it gives
+`calibration-runs/<run id>` to `RUNS_OWNER`. A measured run (`run.sh measure`) takes the same `-e RUNS_OWNER`.
+
+If the container is killed before that step, for example by `docker kill`, a crash or a reboot, the run stays
+root's. Take it back before reading or copying it:
+
+```bash
+sudo chown -R "$(id -u):$(id -g)" calibration-runs && chmod -R u+rwX calibration-runs
+```
+
+Lima's Docker (section 3) is rootless: the container's root already is the VM user, so it needs neither.
 
 ## 5. Afterwards
 

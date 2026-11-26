@@ -1,7 +1,13 @@
 {
   "form": "<number of days from today until the flag must be out of the code, in digits, or 0 if none are left>",
   "parts": [
-    "number"
+    {
+      "kind": "number",
+      "units": [
+        "day",
+        "days"
+      ]
+    }
   ],
   "informed": [
     {

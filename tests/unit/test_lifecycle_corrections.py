@@ -846,3 +846,38 @@ def test_a_zombie_is_not_alive_with_or_without_proc() -> None:
         child.kill()
         child.wait()
     assert not runner._alive(child.pid)
+
+
+# ── the agent removes part of its own session (the #166 review, finding 2) ─
+
+
+def _deleting_agent(tmp_path: Path, what: str) -> tuple[str, ...]:
+    """The stub agent, after which the session removes ``what``: its store, or its whole session folder."""
+    script = tmp_path / f"agent_removes_{what}.py"
+    script.write_text(
+        "import os, runpy, shutil, sys\n"
+        f"stub = {str(SUITE_DIR / 'stub_agent.py')!r}\n"
+        "sys.argv = [stub, *sys.argv[1:]]\n"
+        "try:\n"
+        "    runpy.run_path(stub, run_name='__main__')\n"
+        "finally:\n"
+        f"    if {what!r} == 'store' and os.environ.get('MEMKERNEL_CHROMA_PERSIST_PATH'):\n"
+        "        shutil.rmtree(os.environ['MEMKERNEL_CHROMA_PERSIST_PATH'], ignore_errors=True)\n"
+        f"    if {what!r} == 'session':\n"
+        "        shutil.rmtree(os.path.dirname(os.getcwd()), ignore_errors=True)\n",
+        encoding="utf-8",
+    )
+    return (sys.executable, str(script))
+
+
+@pytest.mark.parametrize(("what", "arm"), [("store", "memkernel"), ("session", "bare")])
+def test_a_session_the_agent_partly_removed_is_invalid_with_its_receipt_written(
+    tmp_path: Path, what: str, arm: str
+) -> None:
+    cfg = _cfg(tmp_path, "demo")
+    cfg.agent_cmd = _deleting_agent(tmp_path, what)  # type: ignore[attr-defined]
+    receipts_path = runner.run(cfg, ["demo-retain"], [arm], runs=1)
+    receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
+    assert receipts[0]["valid"] is False and receipts[0]["invalid_reason"] == "session_state_missing"
+    assert list((receipts_path.parent / "sessions").iterdir()) == []  # nothing stranded under sessions/<token>
+    assert (receipts_path.parent / f"demo-retain.{arm}.r0" / "s0" / "workspace").is_dir()

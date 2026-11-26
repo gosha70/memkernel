@@ -35,7 +35,8 @@
       "type": ["string", "null"],
       "enum": ["session_not_started", "mcp_not_connected", "fixture_restore_failed", "checker_crashed",
                "no_compaction_before_evaluation", "authentication_failed", "correction_failed",
-               "gate_check_failed", "agent_processes_survived", null]
+               "gate_check_failed", "agent_processes_survived",
+               "session_state_missing", null]
     },
     "outcome": {"type": ["string", "null"], "enum": ["passed", "failed", "timeout", "no_answer", null]},
     "checker_passed": {"type": ["boolean", "null"]},

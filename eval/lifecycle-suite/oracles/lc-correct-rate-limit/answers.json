@@ -1,7 +1,13 @@
 {
   "form": "<number of requests accepted in that minute, in digits>",
   "parts": [
-    "number"
+    {
+      "kind": "number",
+      "units": [
+        "request",
+        "requests"
+      ]
+    }
   ],
   "informed": [
     {

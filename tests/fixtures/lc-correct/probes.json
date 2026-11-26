@@ -180,6 +180,132 @@
       "answer": "Answer: 15 - minutes; 8 - hours",
       "expected": "informed",
       "source": "owner (2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: approximately 120 requests",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: bananas 120 elephants",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: 120 requests",
+      "expected": "informed",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: 120 apples",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "rate-limit",
+      "answer": "Answer: roughly 120",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: about 15 minutes; 8 hours",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "token-lifetime",
+      "answer": "Answer: 15 minutes or so; 8 hours",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday morning; 09:00 UTC",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: Monday; 09:00 UTC sharp",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "deploy-window",
+      "answer": "Answer: probably Monday; 09:00 UTC",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: no thanks; 2",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: no; 2 approvals",
+      "expected": "informed",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "review-approvals",
+      "answer": "Answer: no; 2 bananas",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "email-logging",
+      "answer": "Answer: no; the user id probably",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "email-logging",
+      "answer": "Answer: no; user id and the email",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "email-logging",
+      "answer": "Answer: no; internal user id",
+      "expected": "informed",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "backup-retention",
+      "answer": "Answer: 90 days",
+      "expected": "informed",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "backup-retention",
+      "answer": "Answer: 90 days or more",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "invoice-rounding",
+      "answer": "Answer: $2.34",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "retry-policy",
+      "answer": "Answer: 0 retries",
+      "expected": "informed",
+      "source": "review 3 (pasted 2026-11-26)"
+    },
+    {
+      "chain": "cache-invalidation",
+      "answer": "Answer: 0 seconds, purged at once",
+      "expected": "other",
+      "source": "review 3 (pasted 2026-11-26)"
     }
   ]
 }

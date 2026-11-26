@@ -1,7 +1,13 @@
 {
   "form": "<number of days, in digits>",
   "parts": [
-    "number"
+    {
+      "kind": "number",
+      "units": [
+        "day",
+        "days"
+      ]
+    }
   ],
   "informed": [
     {

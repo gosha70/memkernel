@@ -510,24 +510,47 @@ def stage_session(dirs: SessionDirs, cfg: RunConfig) -> SessionDirs:
     return SessionDirs(token, token / "workspace", token / "home", token / "config", memory, store, dirs.namespace)
 
 
-def unstage_session(staged: SessionDirs, home: SessionDirs) -> None:
-    """Move a finished session back to where the chain keeps it: the reverse of :func:`stage_session`."""
+def unstage_session(staged: SessionDirs, home: SessionDirs) -> list[str]:
+    """Move a finished session back to where the chain keeps it, the reverse of :func:`stage_session`; return what
+    was missing (empty: everything came back).
+
+    The agent owned these files while it ran, so it may have removed any of them. Whatever is left comes back, what
+    is gone is reported, and each missing directory is recreated empty, so the chain's later steps (the next
+    session's copy, the store's next namespace) never fail on it. Nothing here raises for a missing path.
+    """
+    missing: list[str] = []
+
+    def move(source: Path, target: Path, what: str, required: bool = True) -> None:
+        if os.path.lexists(source):
+            shutil.move(str(source), target)
+        elif required:
+            missing.append(what)
+
     if staged.store is not None and home.store is not None:
-        shutil.move(str(staged.store), home.store)
-        state = staged.store.with_name(f"{staged.store.name}.state")
-        if state.exists():
-            shutil.move(str(state), home.store.with_name(f"{home.store.name}.state"))
-        staged.store.parent.rmdir()
+        move(staged.store, home.store, "store")
+        move(staged.store.with_name(f"{staged.store.name}.state"), home.store.with_name(f"{home.store.name}.state"),
+             "store state", required=False)  # fmt: skip
+        with contextlib.suppress(OSError):
+            staged.store.parent.rmdir()
+        home.store.mkdir(parents=True, exist_ok=True)
     if staged.memory_dir is not None and home.memory_dir is not None:
-        shutil.move(str(staged.memory_dir), home.memory_dir)
-    shutil.move(str(staged.root), home.root)
+        move(staged.memory_dir, home.memory_dir, "memory")
+        home.memory_dir.mkdir(parents=True, exist_ok=True)
+    move(staged.root, home.root, "session")
+    if "session" not in missing and not os.path.lexists(home.workspace):
+        missing.append("workspace")
+    home.workspace.mkdir(parents=True, exist_ok=True)
+    return missing
 
 
 def _own(path: Path, uid: int, gid: int, mode: int | None = None) -> None:
     """chown ``path`` and everything under it, links not followed; then ``mode`` on ``path`` itself."""
+    if not os.path.lexists(path):  # the agent removed its whole session; unstage_session reports it
+        return
     for current, dirnames, filenames in os.walk(path):
         for name in [*dirnames, *filenames]:
-            os.chown(os.path.join(current, name), uid, gid, follow_symlinks=False)
+            with contextlib.suppress(FileNotFoundError):
+                os.chown(os.path.join(current, name), uid, gid, follow_symlinks=False)
     os.chown(path, uid, gid, follow_symlinks=False)
     if mode is not None:
         os.chmod(path, mode)
@@ -658,79 +681,84 @@ def run_session(
     home = dirs  # where the chain keeps this session; the agent runs it staged under a neutral name
     if invalid is None:
         dirs = stage_session(home, cfg)
-    if observe is not None and invalid is None:
-        observe(task, arm, position, dirs)  # before any correction: what the shared copy alone carries
-    correction: dict[str, Any] | None = None
-    if invalid is None and task.correction is not None and position == int(task.correction["after_session"]) + 1:
-        try:
-            correction = corrections.deliver(
-                arm.name,
-                task.correction,
-                dirs.workspace,
-                dirs.memory_dir,
-                _ops(arm, dirs, chain_id, cfg) if arm.persist_store else None,
-                _cli(arm, dirs, chain_id, cfg) if arm.wiki_governed else None,
-            )
-        except corrections.CorrectionError as exc:
-            correction = {"path": corrections.PATHS[arm.name], "delivered": False, "error": str(exc)}
-            invalid = "correction_failed"
-    ledger = dirs.root / "hook-ledger.jsonl"
-    if invalid is None:
-        wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger, task.brief_for(position))
-        if cfg.agent_uid is not None:  # the session's files are the agent's while it runs, and only then
-            _own(dirs.root, cfg.agent_uid, cfg.agent_gid if cfg.agent_gid is not None else cfg.agent_uid, 0o700)
-        env = _session_env(arm, dirs, chain_id, cfg)
-        session_uuid = str(uuid.uuid4())
-        raw = dirs.root / STREAM_FILE
-        for index, step in enumerate(session.steps):
-            if step.stage == "exposure":
-                exposure_at = utc_now()
-            elif step.stage == "evaluation":
-                evaluation_at = utc_now()
-            prompts.append(step.prompt)
-            resume = ["--session-id", session_uuid] if index == 0 else ["--resume", session_uuid]
-            cmd = [
-                *cfg.agent_cmd,
-                "-p",
-                step.prompt,
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--model",
-                cfg.model,
-                "--permission-mode",
-                "acceptEdits",
-                "--allowed-tools",
-                ",".join(arm.allowed_tools),
-                *resume,
-                *wiring,
-            ]
-            result = _run_step(cmd, dirs.workspace, env, cfg.timeout_s, raw)
-            summarise(result.lines, into=summary)
-            if result.spawn_failed or (index == 0 and not summary.init_seen):
-                invalid = "session_not_started"
-                break
-            if summary.authentication_failed:  # the API refused the run's key, at any step (FR-015a (c))
-                invalid = "authentication_failed"
-                break
-            if index == 0 and arm.mcp and summary.mcp_status.get("memkernel") not in CONNECTED_STATUSES:
-                invalid = "mcp_not_connected"
-                break
-            if result.timed_out:
-                timed_out = True
-                break
-        hooks = _read_ledger(ledger)
-    # No agent process (a detached child, a daemon) outlives its session; one that does voids the session, whatever
-    # else went wrong in it: a survivor is the harness's failure and the most serious one.
-    agent_uid = cfg.agent_uid
-    if agent_uid is not None and agent_uid != os.geteuid() and kill_user_processes(agent_uid, cfg.agent_gid):
-        invalid = "agent_processes_survived"
-    ran_in = dirs.workspace  # the path the agent saw: tool calls in the stream name it
-    if dirs is not home:
-        if cfg.agent_uid is not None:
-            _own(dirs.root, os.geteuid(), os.getegid(), 0o700)
-        unstage_session(dirs, home)
-        dirs = home
+    staged = dirs
+    try:
+        if observe is not None and invalid is None:
+            observe(task, arm, position, dirs)  # before any correction: what the shared copy alone carries
+        correction: dict[str, Any] | None = None
+        if invalid is None and task.correction is not None and position == int(task.correction["after_session"]) + 1:
+            try:
+                correction = corrections.deliver(
+                    arm.name,
+                    task.correction,
+                    dirs.workspace,
+                    dirs.memory_dir,
+                    _ops(arm, dirs, chain_id, cfg) if arm.persist_store else None,
+                    _cli(arm, dirs, chain_id, cfg) if arm.wiki_governed else None,
+                )
+            except corrections.CorrectionError as exc:
+                correction = {"path": corrections.PATHS[arm.name], "delivered": False, "error": str(exc)}
+                invalid = "correction_failed"
+        ledger = dirs.root / "hook-ledger.jsonl"
+        if invalid is None:
+            wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger, task.brief_for(position))
+            if cfg.agent_uid is not None:  # the session's files are the agent's while it runs, and only then
+                _own(dirs.root, cfg.agent_uid, cfg.agent_gid if cfg.agent_gid is not None else cfg.agent_uid, 0o700)
+            env = _session_env(arm, dirs, chain_id, cfg)
+            session_uuid = str(uuid.uuid4())
+            raw = dirs.root / STREAM_FILE
+            for index, step in enumerate(session.steps):
+                if step.stage == "exposure":
+                    exposure_at = utc_now()
+                elif step.stage == "evaluation":
+                    evaluation_at = utc_now()
+                prompts.append(step.prompt)
+                resume = ["--session-id", session_uuid] if index == 0 else ["--resume", session_uuid]
+                cmd = [
+                    *cfg.agent_cmd,
+                    "-p",
+                    step.prompt,
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--model",
+                    cfg.model,
+                    "--permission-mode",
+                    "acceptEdits",
+                    "--allowed-tools",
+                    ",".join(arm.allowed_tools),
+                    *resume,
+                    *wiring,
+                ]
+                result = _run_step(cmd, dirs.workspace, env, cfg.timeout_s, raw)
+                summarise(result.lines, into=summary)
+                if result.spawn_failed or (index == 0 and not summary.init_seen):
+                    invalid = "session_not_started"
+                    break
+                if summary.authentication_failed:  # the API refused the run's key, at any step (FR-015a (c))
+                    invalid = "authentication_failed"
+                    break
+                if index == 0 and arm.mcp and summary.mcp_status.get("memkernel") not in CONNECTED_STATUSES:
+                    invalid = "mcp_not_connected"
+                    break
+                if result.timed_out:
+                    timed_out = True
+                    break
+            hooks = _read_ledger(ledger)
+    finally:  # whatever the session did, its processes end and what is left of its files returns to the chain
+        # No agent process (a detached child, a daemon) outlives its session; one that does voids the session,
+        # whatever else went wrong in it: a survivor is the harness's failure and the most serious one.
+        agent_uid = cfg.agent_uid
+        if agent_uid is not None and agent_uid != os.geteuid() and kill_user_processes(agent_uid, cfg.agent_gid):
+            invalid = "agent_processes_survived"
+        if staged is not home:
+            if cfg.agent_uid is not None:
+                _own(staged.root, os.geteuid(), os.getegid(), 0o700)
+            missing = unstage_session(staged, home)
+            if missing and invalid is None:  # the agent removed part of its own session: no evidence to grade
+                invalid = "session_state_missing"
+    ran_in = staged.workspace  # the path the agent saw: tool calls in the stream name it
+    dirs = home
     compacted = any(
         exposure_at is not None and evaluation_at is not None and exposure_at < ts < evaluation_at
         for ts in summary.compactions

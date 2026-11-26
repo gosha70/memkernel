@@ -21,9 +21,11 @@ decides. A part carrying a negation or a qualifier (``not``, ``no longer``, ``ex
 ``other``; only a yes/no part's leading ``yes`` or ``no`` is the answer itself, not a negation. A time with am or pm
 is refused (the form asks for a 24-hour time), and a hyphenated unit (``15-minute``) reads as ``15 minute``.
 
-Part kinds: ``weekday`` (one weekday name), ``time`` (one ``HH:MM``), ``duration`` (one number with a unit, in
-minutes; a bare ``0`` is zero), ``number`` (one number), ``yesno`` (starts with yes or no), ``text`` (the part,
-lowercased). Conditions: ``equals``, ``in``, ``range`` (inclusive), ``pattern`` (a case-insensitive regex).
+Part kinds, each a full grammar for the whole part (anything around the value makes the part unparsable):
+``weekday`` (a weekday name), ``time`` (``HH:MM``, 24-hour, optionally ``UTC``), ``duration`` (one number with a
+known unit, in minutes; a bare ``0`` is zero), ``number`` (a number in digits, optionally followed by one of the
+part's ``units``), ``yesno`` (exactly yes or no), ``text`` (a short identifier). Conditions: ``equals``, ``in``,
+``range`` (inclusive), ``pattern`` (a case-insensitive regex search), ``fullmatch`` (the same, over the whole value).
 
 No candidate code runs: the answer is read as text, so no oracle driver is needed.
 """
@@ -56,8 +58,6 @@ _QUALIFIER = re.compile(
     r"\b(not|no longer|except|never|under|over|at most|at least|instead of|was|previously)\b|n't\b", re.IGNORECASE
 )
 _MERIDIEM = re.compile(r"\b\d{1,2}(:\d{2})?\s*([ap]\.?\s?m\b\.?)", re.IGNORECASE)
-_DURATION = re.compile(r"(-?\d+(?:\.\d+)?)\s*([a-z]+)")
-_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 class UnparsableError(ValueError):
@@ -79,45 +79,54 @@ def answer_line(text: str) -> str | None:
     return str(found[0]).strip().rstrip(".") if len(found) == 1 else None
 
 
-def _one(found: list[Any], what: str) -> Any:
-    if len(set(found)) != 1:
-        raise UnparsableError(f"expected one {what}, found {len(set(found))}")
-    return found[0]
+def parse_part(kind: str | dict[str, Any], part: str) -> Any:
+    """Parse one part with its kind's full grammar: the whole part must be the value, so surrounding words
+    ("approximately 120", "bananas 120 elephants") make it unparsable, not a match (the #166 review).
 
-
-def parse_part(kind: str, part: str) -> Any:
-    text = part.strip().lower()
-    hedged = re.sub(r"^(yes|no)\b", "", text) if kind == "yesno" else text  # a yes/no part's own yes or no
+    ``kind`` is a kind name, or ``{"kind": "number", "units": [...]}`` for a number that may carry one of the named
+    units ("120 requests")."""
+    spec = kind if isinstance(kind, dict) else {"kind": kind}
+    name = str(spec["kind"])
+    text = part.strip().lower().rstrip(".!")
+    hedged = re.sub(r"^(yes|no)\b", "", text) if name == "yesno" else text  # a yes/no part's own yes or no
     if _QUALIFIER.search(hedged):
         raise UnparsableError("a negation or a qualifier")
     text = re.sub(r"(\d)\s*-\s*([a-z])", r"\1 \2", text)  # 15-minute reads as 15 minute
-    if kind == "weekday":
-        return _one([w for w in WEEKDAYS if re.search(rf"\b{w}s?\b", text)], "weekday")
-    if kind == "time":
+    if name == "weekday":
+        found = re.fullmatch(rf"({'|'.join(WEEKDAYS)})s?", text)
+        if found is None:
+            raise UnparsableError("expected a weekday")
+        return found.group(1)
+    if name == "time":
         if _MERIDIEM.search(text):
             raise UnparsableError("a time with am or pm: the form asks for a 24-hour time")
-        times = re.findall(r"\b(\d{1,2}):(\d{2})\b", text)
-        if any(int(h) > 23 or int(m) > 59 for h, m in times):
-            raise UnparsableError("not a time of day")
-        return _one([f"{int(h):02d}:{m}" for h, m in times], "time")
-    if kind == "duration":
+        found = re.fullmatch(r"(\d{1,2}):(\d{2})(?:\s*utc)?", text)
+        if found is None or int(found.group(1)) > 23 or int(found.group(2)) > 59:
+            raise UnparsableError("expected a 24-hour time of day")
+        return f"{int(found.group(1)):02d}:{found.group(2)}"
+    if name == "duration":
         if re.fullmatch(r"0+(\.0+)?", text):
             return 0.0
-        pairs = _DURATION.findall(text)
-        # every number must carry a known unit: "2 fortnights, 15 minutes" is not 15 minutes
-        if len(pairs) != len(_NUMBER.findall(text)) or any(u not in MINUTES for _, u in pairs):
-            raise UnparsableError("a number without a known unit")
-        return _one([float(n) * MINUTES[u] for n, u in pairs], "duration")
-    if kind == "number":
-        return _one([float(n) for n in _NUMBER.findall(text.replace(",", ""))], "number")
-    if kind == "yesno":
-        word = re.match(r"[a-z]+", text)
-        if word is None or word.group(0) not in ("yes", "no"):
+        found = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([a-z]+)", text)
+        if found is None or found.group(2) not in MINUTES:
+            raise UnparsableError("expected one number with a known unit")
+        return float(found.group(1)) * MINUTES[found.group(2)]
+    if name == "number":
+        units = "|".join(re.escape(str(u)) for u in spec.get("units", []))
+        grammar = rf"(-?\d+(?:\.\d+)?)(?:\s+(?:{units}))?" if units else r"(-?\d+(?:\.\d+)?)"
+        found = re.fullmatch(grammar, text.replace(",", ""))
+        if found is None:
+            raise UnparsableError("expected a number in digits")
+        return float(found.group(1))
+    if name == "yesno":
+        if text not in ("yes", "no"):
             raise UnparsableError("expected yes or no")
-        return word.group(0)
-    if kind == "text":
         return text
-    raise ValueError(f"unknown part kind {kind!r}")
+    if name == "text":
+        if re.fullmatch(r"[a-z0-9][a-z0-9 _.\-]{0,59}", text) is None:
+            raise UnparsableError("expected a short identifier")
+        return text
+    raise ValueError(f"unknown part kind {name!r}")
 
 
 def _holds(condition: dict[str, Any] | None, value: Any) -> bool:
@@ -135,6 +144,8 @@ def _holds(condition: dict[str, Any] | None, value: Any) -> bool:
         return isinstance(value, int | float) and low <= value <= high
     if "pattern" in condition:
         return re.search(str(condition["pattern"]), str(value), re.IGNORECASE) is not None
+    if "fullmatch" in condition:
+        return re.fullmatch(str(condition["fullmatch"]), str(value), re.IGNORECASE) is not None
     raise ValueError(f"unknown condition {condition!r}")
 
 
@@ -144,7 +155,7 @@ def classify_text(text: str | None, spec: dict[str, Any]) -> str:
     line = answer_line(text)
     if line is None:
         return OTHER
-    kinds: list[str] = spec["parts"]
+    kinds: list[str | dict[str, Any]] = spec["parts"]
     parts = [p for p in (piece.strip() for piece in line.split(";")) if p]
     if len(parts) != len(kinds):
         return OTHER
