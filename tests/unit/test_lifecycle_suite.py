@@ -28,7 +28,8 @@ runner = load("runner")
 TASKS_ROOT = SUITE_DIR / "tasks"
 ORACLES_ROOT = SUITE_DIR / "oracles"
 TASK_IDS = sorted(p.name for p in TASKS_ROOT.iterdir() if (p / "task.json").is_file())
-GROUPS = ("lc-retain", "lc-reval", "lc-wiki", "lc-compact")
+GROUPS = ("lc-retain", "lc-reval", "lc-wiki", "lc-compact", "lc-correct")
+CORRECT_CHAINS = 12  # memkernel-0-16-lifecycle-corrections D7: #90's eight chains and four more
 
 
 def _evaluation_fixture(task_id: str, tmp_path: Path) -> tuple[object, Path]:
@@ -52,10 +53,11 @@ def _grade(task: object, workspace: Path) -> tuple[bool, str]:
     return runner._load_checker(task).check(workspace, task.oracle_dir(ORACLES_ROOT))  # type: ignore[attr-defined]
 
 
-def test_every_group_has_five_to_eight_tasks() -> None:
+def test_every_group_has_five_to_eight_tasks_and_lc_correct_has_twelve() -> None:
     counts = Counter(runner.load_task(TASKS_ROOT / t).group for t in TASK_IDS)
     assert set(counts) == set(GROUPS)
-    assert all(5 <= counts[g] <= 8 for g in GROUPS), counts
+    assert all(5 <= counts[g] <= 8 for g in GROUPS if g != "lc-correct"), counts
+    assert counts["lc-correct"] == CORRECT_CHAINS
 
 
 @pytest.mark.parametrize("task_id", TASK_IDS)
@@ -65,7 +67,8 @@ def test_structure_matches_the_group(task_id: str) -> None:
     stages = [step.stage for step in first.steps]
     assert "exposure" in stages, "the fact must be delivered in the first session"
     assert last.steps[-1].stage == "evaluation"
-    assert (ORACLES_ROOT / task_id / "driver.py").is_file()
+    oracle = "answers.json" if task.group == "lc-correct" else "driver.py"  # lc-correct reads text, runs no code
+    assert (ORACLES_ROOT / task_id / oracle).is_file()
     if task.group == "lc-compact":
         assert len(task.sessions) == 1
         all_stages = [step.stage for step in first.steps]
@@ -100,11 +103,14 @@ def test_references_fail_or_pass_as_designed(task_id: str, tmp_path: Path) -> No
     task = runner.load_task(TASKS_ROOT / task_id)
     if task.group == "lc-reval" or task_id.endswith("-revised"):
         assert "stale" in references, "tasks whose fact or code changed must carry a stale reference"
+    if task.group == "lc-correct":
+        assert "both" in references, "FR-001: a fixture pins an answer naming both values"
     for name in references:
         _, workspace = _evaluation_fixture(task_id, tmp_path / name)
         _apply(task_id, name, workspace)
         passed, detail = _grade(task, workspace)
-        assert passed is (name == "informed"), f"{name}: {detail}"
+        # FR-001: naming both values passes when Y is there ("it was X; now it's Y")
+        assert passed is (name in ("informed", "both")), f"{name}: {detail}"
 
 
 @pytest.mark.parametrize("task_id", TASK_IDS)

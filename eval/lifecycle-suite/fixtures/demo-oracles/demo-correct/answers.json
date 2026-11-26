@@ -1,0 +1,6 @@
+{
+  "form": "<the rule>",
+  "parts": ["text"],
+  "informed": [{"pattern": "DEMO-Y"}],
+  "obsolete": [{"pattern": "DEMO-X"}]
+}

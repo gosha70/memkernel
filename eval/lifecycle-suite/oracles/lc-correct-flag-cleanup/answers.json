@@ -1,0 +1,19 @@
+{
+  "form": "<number of days from today until the flag must be out of the code: digits only, 0 if none are left>",
+  "parts": [
+    "count"
+  ],
+  "informed": [
+    {
+      "equals": 0
+    }
+  ],
+  "obsolete": [
+    {
+      "range": [
+        300,
+        330
+      ]
+    }
+  ]
+}

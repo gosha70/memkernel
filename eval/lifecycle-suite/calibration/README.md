@@ -38,6 +38,24 @@ its CUDA packages. It also holds pinned tools:
   (`arms/wiki_studio/requirements.txt`), independent of memkernel's `poetry.lock`
 - memkernel and its embedding model, downloaded at build time
 
+**What the agent can read** (the #90 review). The container starts as root, the harness. Each session runs as
+the unprivileged `agent` user, in `/runs/<run>/sessions/<random>/`, a folder named after neither the task nor the
+arm, with its home folder inside it. The session's files belong to `agent` only while it runs; then they move back
+into the chain's folder, which is root's alone, as are the run folder's listing and the receipts. The repository
+in `/opt/memkernel`, with every task's prompts, corrections, oracles and references, is root's alone too. The hook
+scripts, the hook ledger and the demo's stub agent come from the world-readable `/opt/agent-tools`. The image
+build fails if `agent` can list `/opt/memkernel`. When a session ends, every process of the `agent` user is killed with
+`setpriv --reuid=<agent> -- kill -KILL -- -1`, and the session is invalid if any survives. That kills everything the
+user owns, so the runner runs one session at a time, as it always has. Grading
+runs the agent's code as a second unprivileged user, `grader`, never as root, and kills its processes afterwards.
+The correction helpers and the gate check (memkernel_ops, the wiki-studio CLI) also run as `grader`, since they
+open files the agent wrote. Each session's hook ledger is kept outside the session's folder.
+`run.sh demo` checks all of this:
+- the stub agent probes the run folder, the other sessions, `../../s0` and the oracles, and the demo fails on any
+  it reaches;
+- the probe leaves two processes running (one detached), and the demo fails if either survives the session;
+- the memkernel arm's real hooks run as `agent` and must all exit 0;
+- a grading probe must report the `grader` uid.
 Inside the container, the agent sees only `/runs`. The API key arrives when the
 container starts and is never built into the image.
 
@@ -268,17 +286,32 @@ delete afterwards:
 git clone https://github.com/gosha70/memkernel.git && cd memkernel   # stay on the main commit to calibrate
 eval/lifecycle-suite/calibration/build.sh            # tags memkernel-calibration:<sha12>
 docker image inspect --format '{{.Id}}' memkernel-calibration:<sha12>   # record it
-mkdir -p calibration-runs && sudo chown 1000:1000 calibration-runs      # the container runs as uid 1000
+mkdir -p calibration-runs    # the harness in the container is root, which can write here
 read -r -s -p "API key: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY && echo
 export CALIBRATION_WORKSPACE_ID=wrkspc_...
-docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID \
+export RUNS_OWNER="$(id -u):$(id -g)"   # who gets the run when it ends (run.sh's finish step)
+docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e RUNS_OWNER \
   -v "$PWD/calibration-runs:/runs" memkernel-calibration:<sha12> preflight
-docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID \
+docker run --rm --tmpfs /tmp:rw,size=1g -e ANTHROPIC_API_KEY -e CALIBRATION_WORKSPACE_ID -e RUNS_OWNER \
   -v "$PWD/calibration-runs:/runs" memkernel-calibration:<sha12> calibrate
 ```
 
 `--tmpfs /tmp` keeps the agent's scratch files, such as the `wiki_studio`
 arm's `mktemp -d` drafts, in memory, where they vanish with the container.
+
+**Who owns the run.** The image runs its harness as root and each session as the unprivileged `agent` user, so
+with rootful Docker, as here, a run's files belong to the host's root while it runs. The receipts are mode 0600,
+and the chain folders 0700. When `run.sh` finishes, with or without an error from the runner, it gives
+`calibration-runs/<run id>` to `RUNS_OWNER`. A measured run (`run.sh measure`) takes the same `-e RUNS_OWNER`.
+
+If the container is killed before that step, for example by `docker kill`, a crash or a reboot, the run stays
+root's. Take it back before reading or copying it:
+
+```bash
+sudo chown -R "$(id -u):$(id -g)" calibration-runs && chmod -R u+rwX calibration-runs
+```
+
+Lima's Docker (section 3) is rootless: the container's root already is the VM user, so it needs neither.
 
 ## 5. Afterwards
 

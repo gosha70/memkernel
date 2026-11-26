@@ -1,0 +1,19 @@
+{
+  "form": "<number of requests accepted in that minute: digits only>",
+  "parts": [
+    "count"
+  ],
+  "informed": [
+    {
+      "range": [
+        120,
+        140
+      ]
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": 300
+    }
+  ]
+}

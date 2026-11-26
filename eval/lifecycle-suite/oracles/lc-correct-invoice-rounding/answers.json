@@ -1,0 +1,16 @@
+{
+  "form": "<amount billed: digits with two decimal places, no currency symbol>",
+  "parts": [
+    "amount"
+  ],
+  "informed": [
+    {
+      "equals": 2.34
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": 2.35
+    }
+  ]
+}

@@ -225,7 +225,10 @@ def _measure_setup(tmp_path: Path, *, preregistered_limit: float = 150, runs: in
         "sys.exit(0)\n",
         encoding="utf-8",
     )
-    tasks = sorted(p.name for p in (SUITE_DIR / "tasks").iterdir() if p.is_dir())
+    # the 0.5 preregistration's task set: its four groups (lc-correct is memkernel-0-16's, preregistered on its own)
+    tasks = sorted(
+        p.name for p in (SUITE_DIR / "tasks").iterdir() if p.is_dir() and not p.name.startswith("lc-correct-")
+    )
     parameters = {
         "model": "claude-sonnet-5-5",
         "tasks": tasks,
@@ -316,3 +319,22 @@ def test_a_nan_allowance_never_reaches_the_runner(tmp_path: Path) -> None:
     completed, calls = _measure(env)
     assert completed.returncode != 0 and "invalid_allowance" in completed.stderr
     assert not any(call.startswith("runner") for call in calls) and "$nan" not in completed.stdout
+
+
+@pytest.mark.parametrize("runner_exit", ["0", "17"])
+def test_runs_owner_gets_the_run_when_run_sh_finishes_even_after_a_failed_runner(
+    tmp_path: Path, runner_exit: str
+) -> None:
+    """The #166 review: under rootful Docker the run is root's while it runs; RUNS_OWNER takes it back at the end."""
+    env = _setup(tmp_path)
+    _executable(Path(env["PATH"].split(os.pathsep)[0]) / "chown", '#!/bin/sh\necho "chown $*" >> "$STUB_LOG"\n')
+    status, calls = _calibrate({**env, "RUNS_OWNER": "4321:4321", "STUB_RUNNER_EXIT": runner_exit})
+    assert status == int(runner_exit)
+    assert f"chown -R 4321:4321 {env['CALIBRATION_RUNS_DIR']}/probe" in calls
+
+
+def test_without_runs_owner_the_run_is_left_as_written(tmp_path: Path) -> None:
+    env = _setup(tmp_path)
+    _executable(Path(env["PATH"].split(os.pathsep)[0]) / "chown", '#!/bin/sh\necho "chown $*" >> "$STUB_LOG"\n')
+    _, calls = _calibrate(env)
+    assert not any(call.startswith("chown") for call in calls)

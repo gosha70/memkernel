@@ -1,0 +1,16 @@
+{
+  "form": "<number of automatic retries: digits only, 0 if none>",
+  "parts": [
+    "count"
+  ],
+  "informed": [
+    {
+      "equals": 0
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": 3
+    }
+  ]
+}

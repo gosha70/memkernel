@@ -111,3 +111,159 @@ measured run happens without a preregistration and a budget the owner approves (
 - **D7 The chain count: plan on 12 chains.** Eight reach significance only when every chain favours one arm (FR-006's
   arithmetic: 8 of 8 gives p ≈ 0.008, 7 of 8 p ≈ 0.07; with 12, 10 of 12 gives p ≈ 0.04). The four added chains
   follow #90 §2.1 and are written before the calibration; the preregistration states the final count.
+
+## Build decisions (2026-11-25)
+
+B1–B4 are the owner's answers to the questions the build put before writing code. B5–B9 were made in the build and
+are listed for review.
+
+- **B1 claude_md (owner).** A scripted curator appends the chain's correction brief to `CLAUDE.md` in the workspace
+  the arm carries, creating the file if session 0 did not. FR-002 had no path for this arm, which D2 added.
+- **B2 Governed import (owner).** The runner runs memkernel's governed `wiki_import` as the last step of the
+  correction event, after the curator approves. FR-002 lists the import as part of delivery.
+- **B3 Calibration (owner).** A calibration-only arm, `informed`: `bare` plus the correction brief in its instruction,
+  only in the sessions after the correction. An lc-correct calibration runs and grades only `bare` and `informed`.
+  Measured arms never run in it, so nothing about them is seen before the preregistration. The runner refuses any
+  other arm in such a calibration, and `informed` in a measured run.
+- **B4 Correction kinds (owner).** Six replacements and six withdrawals, applied in the `memkernel` arm.
+  - **Replacement:** retain Y with `supersedes` on the first live record carrying X, and supersede the rest by it.
+  - **Withdrawal:** withdraw every record carrying X (`deprecated`), then retain Y unlinked.
+  - **Other arms:** one path each; the governed arms correct through `corrects:`.
+- **B5 The answer.** The evaluation session writes `ANSWER.md`. `correct_checker.py` classifies it by the chain's
+  hidden patterns (`oracles/<task>/answers.json`): Y first, then X, else other. No candidate code runs.
+- **B6 The oracle curator is its own arm,** `memkernel_governed_oracle`, so its receipts carry their own arm name and
+  config hash.
+- **B7 What the governed arms carry.** The store and the exposure wiki, as `memkernel` does, plus
+  `doc_internal/proposals` (the gate's receipts), so the end-state check can find them. Both sessions use one memkernel
+  namespace: the correction happens in the same project.
+- **B8 Gate breaches.**
+  - **A breach** is a landed content page without a committed receipt, or a non-draft page without an approval at
+    its live sha256.
+  - **Drafts:** a draft memkernel exported through the gate that nobody approved is counted separately, as an
+    unreviewed draft. `approve` refuses drafts, and governed import never reads them.
+  - **Lint:** violations on the end state are counted alongside.
+- **B9 The receipt schema stays at version 3.** The change is additive: optional `answer_class`, `correction` and
+  `gate`, and wider `arm`, `group` and `invalid_reason` enums (`correction_failed`, `gate_check_failed`). Receipts
+  written before it, the committed 0.5 ones included, still validate.
+
+**Found in the build:** an obsolete pattern written as `\bfriday\b` missed the competing page's "Fridays". The
+test that every fixture's competing page matches its chain's obsolete patterns caught it, and the patterns now
+accept the plural. Two chains' competing pages stated the old rule but not its answer; they now carry the obsolete
+answer as well.
+
+## Review amendments (2026-11-25)
+
+Two reviews of the unpushed build, which the owner pasted, found what follows. A1 and A2 are the owner's choices
+between the options put to them; the rest are fixes within the spec.
+
+- **A1 The answer line (owner; replaces B5 and amends FR-001).**
+  - **What failed:** the free-text checker passed wrong answers that merely contained Y ("Monday is explicitly not
+    allowed"; "The limit is not 120; all 300 requests are accepted"), and multi-part answers could omit a part.
+  - **The answer:** the evaluation prompt asks for an `Answer:` line in a neutral form per chain that reveals
+    nothing of Y (for example `<weekday>; <HH:MM> UTC`), parts separated by `;`.
+  - **Grading:** each part is parsed and compared with the hidden conditions. All of them meet Y's: `informed`.
+    The parts meet X's: `obsolete`. Anything else is `other`, including a missing, unparsable or incomplete line.
+  - **Both values:** the explanation below the line may name both values; the line decides. FR-001's stated limit
+    (both values without saying which holds) no longer exists.
+  - **Fixtures:** every chain has three adversarial references, each pinned to its class: Y only in prose (other),
+    X on the line with Y in prose (obsolete), and the line with extra parts (other).
+  - **Stricter reading (the owner, 2026-11-26):**
+    - A part carrying a negation or a qualifier (`not`, `n't`, `no longer`, `except`, `never`, `under`, `over`,
+      `at most`, `at least`, `instead of`, `was`, `previously`) is unparsable, so the answer is `other`. Only a
+      yes/no part's leading `yes` or `no` is the answer itself.
+    - A time with am or pm is refused, and more than one `Answer:` line is `other`.
+    - Each form says what it wants (`in digits`, `a number with a unit`, `or 0 if none`, `24-hour`), and a
+      hyphenated unit (`15-minute`) is read as `15 minute`.
+    - Every reviewer probe is pinned in `tests/fixtures/lc-correct/probes.json` with its source.
+  - **Full grammars (the third pasted review):** each part kind is a full-match grammar for the whole part, not a
+    search inside it, so surrounding words make a part unparsable: `Answer: approximately 120 requests` and
+    `Answer: bananas 120 elephants` are `other`.
+  - **Forms state the grammar exactly (the owner, 2026-11-26):** each form says what its grammar accepts, and the
+    grammar accepts only that. A test checks every chain's form against its parts.
+    - A count is `digits only`, and an amount `digits with two decimal places, no currency symbol`.
+    - A duration is `a number and a unit in words (seconds, minutes, hours, days, weeks or months)`, with a bare
+      `0` only where the form adds `or 0 if none`.
+    - A time is `<HH:MM, 24-hour> UTC`, a weekday its name, and an identifier `in a few words`.
+    - So `120 requests`, `90 days`, `$2.34`, `9:00 UTC`, `15 min` and `Mondays` are `other`. The probes whose
+      class this changed are marked as revised in the fixture.
+  - **Why an answer is `other` (the owner, 2026-11-26):** each receipt records it in `other_reason`.
+    - `no_line`: no answer file, or no `Answer:` line.
+    - `unreadable`: a line that does not fit the form (more than one `Answer:` line, the wrong number of parts, or
+      a part outside its grammar).
+    - `wrong_value`: a readable line whose value is neither rule.
+    - The report's lc-correct table counts each per arm, beside a "not graded" column for timeouts, and
+      `qualify.py`'s table shows them as `other: <reason>`.
+  - **ASCII digits (the owner, 2026-11-26):** every digit pattern is `[0-9]`. Python's `\d` also matches other
+    scripts' digits (`١٢٠`, `１２０`), which `float` reads as numbers. Probes pin them as `other`. Text after the answer
+    line is never graded, even a retraction; the preregistration draft says so.
+- **A2 Blinding (owner: separate users).**
+  - **The image:** the container starts as root. `/opt/memkernel` (tasks, corrections, oracles, references) is
+    root's alone; memkernel is installed in `/opt/mk-venv`. Each session runs as an unprivileged `agent` user
+    through `setpriv`, with the hook scripts, the ledger and the stub agent from the world-readable
+    `/opt/agent-tools`. The image build fails if `agent` can list `/opt/memkernel`.
+  - **The runner:**
+    - Each session is prepared in its chain's folder, then run in `sessions/<random>/`, which names neither the
+      task nor the arm and has nothing of the chain beside it (no `../../s0`). Its store, the store's state and
+      the grep directory come with it.
+    - With `--agent-uid`, the session's files are the agent's only while it runs; then they return to the chain.
+    - Chain folders are mode 0700, the run folder 0711 and the receipts 0600, all the harness's.
+    - On a rootful Docker host, `RUNS_OWNER` makes `run.sh` hand the finished run to whoever copies it off, even
+      after a failed runner. The README's direct-Docker commands pass it, and say how to take back a run that a
+      killed container left root's. Lima's rootless Docker needs none: the container's root is the VM user.
+    - A calibration or measured run refuses to start outside the isolated image, before it creates anything. It
+      requires root, the `agent` and `grader` users named by the run, and a read attempt as `agent` that fails on
+      the repository, the tasks and the oracles.
+  - **Reclaiming a session (the third pasted review):** the agent owns its staged files while it runs, so it can
+    remove any of them. The kill and the move back run in a `finally`. Whatever is left returns to the chain, each
+    missing directory is recreated empty, and a session missing its store, memory, workspace or folder is invalid
+    (`session_state_missing`), with its receipt written. Nothing is left stranded under `sessions/`.
+  - **The probe:** the demo's stub agent records what it can reach (the sessions folder, the run folder, `../../s0`,
+    the oracles). The demo fails unless its own session is all it sees. In the image, where the agent is a separate
+    user, it also fails unless the run folder and the oracles are unreadable.
+  - **Processes:** each step runs in its own process group, killed when the step ends. In the image, when the
+    session ends, every process of the agent user is killed with `setpriv --reuid=<uid> -- kill -KILL -- -1` (procps's
+    `kill`, installed for this). `/proc` is then checked, and a session with any live survivor is invalid
+    (`agent_processes_survived`). Grading does the same for the grader, and a survivor there is an infrastructure
+    error (`checker_crashed`). The probe leaves one process in the group and one detached from
+    it, and the demo fails if either survives (outside the image the detached one can escape, and is only cleaned
+    up).
+  - **Grading:** in the image the candidate's code runs as a second unprivileged user, `grader`, from a copy of the
+    oracle driver, and its processes are killed afterwards. The demo's grading probe must report that uid.
+  - **Helpers (the owner, 2026-11-26):** memkernel_ops (the memkernel arm's correction, the oracle's search, the
+    governed import), the wiki-studio CLI (the curators) and the gate check open files the agent wrote, among them a
+    Chroma store holding a pickle. So in the image they run as `grader`, never root.
+    - The files they touch are the grader's only while they run; then every grader process is killed and the files
+      return to root. A survivor fails the correction or the gate check.
+    - The gate check reads a copy of the fixture wiki, since the task itself is root's alone.
+    - The demo reports the uid every memkernel_ops call and a gate-command probe ran as, and fails unless it is the
+      grader's.
+    - The wiki-studio CLI runs through the same wrapper. The governed arms do not run in the image yet (wiki-studio
+      0.4.1), so no in-image run shows its uid; a unit test pins the wrapper.
+  - **The hook ledger** is written outside the session folder, in the run folder's `ledgers/` (mode 0711), and
+    belongs to the agent only while its session runs. Afterwards it joins the chain's copy of the session.
+  - **The curator's notes** for `claude_md` and `fs_grep` are written without following a link
+    (`O_NOFOLLOW`). The agent controlled those folders in session 0, and the harness writing as root must not be
+    led through a link it planted.
+  - **Hooks:** in the image the demo runs the memkernel arm's real hook scripts as the agent user, against the
+    pinned model cache, and fails unless every hook exits 0 and all three ran. This is the owner's ready gate for
+    PR #166, with the probe.
+- **A3 The rest of the review.**
+  - **Gate check:** also requires each covering receipt's audit archive (`plan.json` matching the receipt's
+    `plan_sha256`, `proposal.md`, and `curator-delta.md` when the receipt shows a hand edit). The `gate` field has
+    a fixed shape.
+  - **Curator CLI:** a paid run resolves it to one absolute path, checks that file's version against the pin, and
+    invokes only it.
+  - **`qualify.py`:** requires the exact `12 × 2 × R_cal` manifest; a missing, unexpected or duplicated chain is
+    refused. It and the report also refuse a chain whose sessions do not start at position 0 or skip one.
+  - **Stale-base retry:** re-renders the corrected page from the fresh read; the scripted policy says so and its
+    hash is re-pinned.
+  - **Helper failures:** helpers have a timeout, and unreadable helper output is `correction_failed`, never a crash.
+  - **Report:** separates invalid from truncated trials and counts truncated pairs. It keeps gate evidence from
+    truncated trials and shows a governed trial without gate evidence as missing. It refuses a receipts file that
+    lacks any preregistered chain.
+  - **Arm hash:** a governed arm's hash covers its curator policy, and `load_arm` refuses a policy that does not
+    match its pin.
+  - **Not done here, and tracked for the paid runs:** the image carries wiki-studio 0.4.1 only, so the governed
+    arms cannot run in it until it gains wiki-studio 0.10.0 for memkernel's governed mode and the curator.
+    Meanwhile the image's demo leaves them out and says so. The report's primary endpoint still fixes the
+    treatment as `memkernel`.

@@ -1,0 +1,40 @@
+{
+  "task_id": "lc-correct-flag-cleanup",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "30 days",
+    "overdue"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the release team for this project: feature flags stay in the code for a year after full rollout. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A feature flag reached full rollout 45 days ago. What should happen to it now? Write your answer to ANSWER.md in the repository root: first the line `Answer: <number of days from today until the flag must be out of the code: digits only, 0 if none are left>`, then a sentence on why."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "replacement",
+    "headline": "Feature flags are removed within 30 days of full rollout",
+    "rule": "Flags are now removed within 30 days of reaching full rollout; a flag past that limit is overdue and is removed by its owning team.",
+    "obsolete_patterns": [
+      "\\ba year\\b",
+      "\\bone year\\b",
+      "\\b12 months\\b",
+      "\\b365\\b"
+    ]
+  }
+}

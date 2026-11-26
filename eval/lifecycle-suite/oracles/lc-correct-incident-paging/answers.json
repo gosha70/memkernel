@@ -1,0 +1,21 @@
+{
+  "form": "<yes or no: is anyone paged>; <weekday the incident is first worked on>",
+  "parts": [
+    "yesno",
+    "weekday"
+  ],
+  "informed": [
+    {
+      "equals": "no"
+    },
+    {
+      "equals": "monday"
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": "yes"
+    },
+    null
+  ]
+}

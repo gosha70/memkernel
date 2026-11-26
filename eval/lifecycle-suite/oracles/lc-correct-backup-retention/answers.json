@@ -1,0 +1,16 @@
+{
+  "form": "<number of days: digits only>",
+  "parts": [
+    "count"
+  ],
+  "informed": [
+    {
+      "equals": 90
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": 30
+    }
+  ]
+}

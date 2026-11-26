@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "arm": "memkernel_governed",
+  "note": "memkernel (server, the three hooks, the store under the chain's namespace) with a governed wiki-studio wiki: the agent retains and exports drafts through the gate; between sessions the scripted curator corrects, promotes and approves under its frozen policy, and the runner runs memkernel's governed import. The gate's receipts (doc_internal/proposals) are carried with the wiki.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": true
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit",
+    "mcp__memkernel__retain",
+    "mcp__memkernel__recall",
+    "mcp__memkernel__get",
+    "mcp__memkernel__forget",
+    "mcp__memkernel__promote",
+    "mcp__memkernel__consolidate",
+    "mcp__memkernel__ask",
+    "mcp__memkernel__wiki_export",
+    "mcp__memkernel__wiki_import"
+  ],
+  "mcp": true,
+  "hooks": [
+    "SessionStart",
+    "PreCompact",
+    "PostCompact"
+  ],
+  "shared_artifact_rule": "lc-correct tasks: the task's exposure_artifact directory from the exposure session is copied into the next session's workspace before the correction is delivered, so it carries the exposure state only; the correction reaches the arm only through its own path (memkernel-0-16-lifecycle-corrections FR-002).",
+  "groups": [
+    "lc-correct"
+  ],
+  "carry": [
+    "doc_internal/proposals"
+  ],
+  "wiki_governed": true,
+  "curator": "scripted",
+  "curator_policy": "curator-policy.md",
+  "curator_policy_sha256": "870769bf519422873dd6dc7d7bf52d14e9cb5e7ad5f009391012de722df3a403",
+  "cli_pin": {
+    "command": "wiki-studio",
+    "version": "0.10.0"
+  }
+}

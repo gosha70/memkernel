@@ -1,0 +1,39 @@
+{
+  "task_id": "lc-correct-incident-paging",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "ticket",
+    "next business day"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the ops team for this project: every SEV3 incident pages the on-call engineer. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A SEV3 incident opens at 02:00 on a Saturday. What happens to it? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no: is anyone paged>; <weekday the incident is first worked on>`, then a sentence on why."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "replacement",
+    "headline": "SEV3 incidents go to the ticket queue for the next business day; only SEV1 and SEV2 page on-call",
+    "rule": "To cut night pages, SEV3 incidents no longer page anyone: they open a ticket in the ops queue, handled on the next business day. Only SEV1 and SEV2 incidents page the on-call engineer.",
+    "obsolete_patterns": [
+      "\\bpaged\\b",
+      "\\bpages?\\b",
+      "\\bwake\\b"
+    ]
+  }
+}

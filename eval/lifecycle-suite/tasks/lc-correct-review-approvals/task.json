@@ -1,0 +1,40 @@
+{
+  "task_id": "lc-correct-review-approvals",
+  "group": "lc-correct",
+  "kind": "lifecycle",
+  "fact_terms": [
+    "two approvals",
+    "code owner",
+    "CODEOWNERS"
+  ],
+  "sessions": [
+    {
+      "steps": [
+        {
+          "stage": "exposure",
+          "prompt": "Decision from the engineering leads for this project: a pull request may merge after one approval from any maintainer. Record what you learned so that later sessions in this repository can find it."
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "stage": "evaluation",
+          "prompt": "A pull request changes payments/ledger.py and has one approval from another maintainer. Can it be merged? Write your answer to ANSWER.md in the repository root: first the line `Answer: <yes or no>; <total number of approvals the pull request needs: digits only>`, then a sentence on why."
+        }
+      ]
+    }
+  ],
+  "exposure_artifact": "knowledge/wiki",
+  "correction": {
+    "after_session": 0,
+    "kind": "withdrawal",
+    "headline": "Changes under payments/ need two approvals, one of them from a code owner",
+    "rule": "After the ledger incident, any change under payments/ needs two approvals, and one of them must come from a code owner listed in CODEOWNERS. Other changes still need one approval.",
+    "obsolete_patterns": [
+      "\\byes\\b",
+      "\\bone approval (from a maintainer )?is enough\\b",
+      "\\bcan be merged now\\b"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "form": "<yes or no>; <total number of approvals the pull request needs: digits only>",
+  "parts": [
+    "yesno",
+    "count"
+  ],
+  "informed": [
+    {
+      "equals": "no"
+    },
+    {
+      "equals": 2
+    }
+  ],
+  "obsolete": [
+    {
+      "equals": "yes"
+    },
+    null
+  ]
+}

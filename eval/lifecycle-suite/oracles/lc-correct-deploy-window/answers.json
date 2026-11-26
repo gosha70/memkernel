@@ -1,0 +1,24 @@
+{
+  "form": "<weekday>; <HH:MM, 24-hour> UTC",
+  "parts": [
+    "weekday",
+    "time"
+  ],
+  "informed": [
+    {
+      "equals": "monday"
+    },
+    {
+      "equals": "09:00"
+    }
+  ],
+  "obsolete": [
+    {
+      "in": [
+        "thursday",
+        "friday"
+      ]
+    },
+    null
+  ]
+}

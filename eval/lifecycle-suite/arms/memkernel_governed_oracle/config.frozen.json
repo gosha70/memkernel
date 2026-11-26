@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "arm": "memkernel_governed_oracle",
+  "note": "As memkernel_governed, with the oracle curator: the upper bound, perfect curation through the gate. Not a deployable workflow; the gap to memkernel_governed is reported as curator error.",
+  "persist": {
+    "workspace": false,
+    "transcripts": false,
+    "store": true
+  },
+  "instruction": "instruction.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write",
+    "Edit",
+    "mcp__memkernel__retain",
+    "mcp__memkernel__recall",
+    "mcp__memkernel__get",
+    "mcp__memkernel__forget",
+    "mcp__memkernel__promote",
+    "mcp__memkernel__consolidate",
+    "mcp__memkernel__ask",
+    "mcp__memkernel__wiki_export",
+    "mcp__memkernel__wiki_import"
+  ],
+  "mcp": true,
+  "hooks": [
+    "SessionStart",
+    "PreCompact",
+    "PostCompact"
+  ],
+  "shared_artifact_rule": "lc-correct tasks: the task's exposure_artifact directory from the exposure session is copied into the next session's workspace before the correction is delivered, so it carries the exposure state only; the correction reaches the arm only through its own path (memkernel-0-16-lifecycle-corrections FR-002).",
+  "groups": [
+    "lc-correct"
+  ],
+  "carry": [
+    "doc_internal/proposals"
+  ],
+  "wiki_governed": true,
+  "curator": "oracle",
+  "curator_policy": "curator-policy.md",
+  "curator_policy_sha256": "718b897978562bf19e48e8787ad28f00a96160003a5041b5593051c4f8c6ecef",
+  "cli_pin": {
+    "command": "wiki-studio",
+    "version": "0.10.0"
+  }
+}
