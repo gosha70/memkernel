@@ -48,6 +48,8 @@ build fails if `agent` can list `/opt/memkernel`. When a session ends, every pro
 `setpriv --reuid=<agent> -- kill -KILL -- -1`, and the session is invalid if any survives. That kills everything the
 user owns, so the runner runs one session at a time, as it always has. Grading
 runs the agent's code as a second unprivileged user, `grader`, never as root, and kills its processes afterwards.
+The correction helpers and the gate check (memkernel_ops, the wiki-studio CLI) also run as `grader`, since they
+open files the agent wrote. Each session's hook ledger is kept outside the session's folder.
 `run.sh demo` checks all of this:
 - the stub agent probes the run folder, the other sessions, `../../s0` and the oracles, and the demo fails on any
   it reaches;

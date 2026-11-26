@@ -124,7 +124,8 @@
           }
         },
         "lint_violations": {"type": "integer", "minimum": 0},
-        "error": {"type": "string"}
+        "error": {"type": "string"},
+        "uid": {"type": "integer"}
       }
     }
   }

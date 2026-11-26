@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -206,6 +207,7 @@ def main(argv: list[str], embedding: EmbeddingPort | None = None) -> int:
             result = find(service, json.loads(args.patterns))
         else:
             result = run_import(service)
+    result["uid"] = os.geteuid()  # who the helper ran as: the grader, in the image (the #166 review)
     print(json.dumps(result, sort_keys=True))
     return 0
 

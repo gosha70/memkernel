@@ -20,6 +20,7 @@ correction) and before the agent starts. Each arm gets the correction only throu
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 import curator
@@ -93,20 +94,21 @@ def _deliver(
         return {"path": path, "delivered": path == BRIEF}
     if path == CLAUDE_MD:
         target = workspace / CLAUDE_MD_FILE
-        before = target.read_text(encoding="utf-8") if target.is_file() else ""
+        before = _read_no_link(target)
         separator = "\n" if before and not before.endswith("\n\n") else ""
-        target.write_text(before + separator + "## Correction\n\n" + brief_text(correction), encoding="utf-8")
+        _write_no_link(target, before + separator + "## Correction\n\n" + brief_text(correction))
         return {"path": path, "delivered": True}
     if path == GREP_NOTE:
         if memory_dir is None:
             raise CorrectionError("fs_grep has no grep directory to write the curator's note into")
-        (memory_dir / GREP_NOTE_FILE).write_text(brief_text(correction), encoding="utf-8")
+        _write_no_link(memory_dir / GREP_NOTE_FILE, brief_text(correction))
         return {"path": path, "delivered": True}
     if ops is None:
         raise CorrectionError(f"{arm}: the memkernel helper is not available")
     if path == MEMKERNEL:
         result = ops("correct", "--brief", _brief_json(correction))
-        return {"path": path, "delivered": True, "matched": result["matched"], "new_ref": result["new_ref"]}
+        record = {"path": path, "delivered": True, "matched": result["matched"], "new_ref": result["new_ref"]}
+        return {**record, "helper_uid": result.get("uid")}  # who the helper ran as: the grader, in the image
     if cli is None:
         raise CorrectionError(f"{arm}: the wiki-studio command line is not available")
     mode = curator.SCRIPTED if path == SCRIPTED else curator.ORACLE
@@ -115,6 +117,24 @@ def _deliver(
     if imported.get("import_error"):
         raise CorrectionError(f"governed import failed: {imported['import_error']}")
     return {"path": path, **curated, "imported": imported}
+
+
+def _read_no_link(target: Path) -> str:
+    """The file's text, or "" when there is none; a link is refused: the agent wrote this folder, and the harness
+    that writes the curator's note must never be led through a link to a file outside it (the #166 review)."""
+    if target.is_symlink():
+        raise CorrectionError(f"{target.name} is a link; the curator does not follow it")
+    return target.read_text(encoding="utf-8") if target.is_file() else ""
+
+
+def _write_no_link(target: Path, text: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW  # a link planted since the read fails here too
+    try:
+        handle = os.open(target, flags, 0o644)
+    except OSError as exc:
+        raise CorrectionError(f"{target.name} could not be written without following a link: {exc}") from exc
+    with open(handle, "w", encoding="utf-8") as sink:
+        sink.write(text)
 
 
 def _brief_json(correction: dict[str, Any]) -> str:

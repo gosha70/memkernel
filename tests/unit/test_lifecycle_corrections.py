@@ -802,6 +802,7 @@ def test_an_agent_process_surviving_its_session_makes_the_session_invalid(
     cfg.agent_uid = cfg.agent_gid = 54321  # type: ignore[attr-defined]
     monkeypatch.setattr(runner.os, "geteuid", lambda: 0)  # as the image's root harness
     monkeypatch.setattr(runner, "_own", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.os, "chown", lambda *args, **kwargs: None)  # the ledger's handover to the agent
     monkeypatch.setattr(runner, "kill_user_processes", lambda uid, gid: [4242])
     receipts_path = runner.run(cfg, ["demo-correct"], ["bare"], runs=1)
     (first,) = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]
@@ -968,3 +969,61 @@ def test_the_report_and_qualify_count_other_answers_by_reason() -> None:
     ]
     result = qualify.qualify(calibration, ["t"], runs=1)
     assert result["chains"][0]["bare"] == {"other: unreadable": 1} and result["qualified"] == ["t"]
+
+
+# ── the helpers run as the grader; the ledger lives outside the session folder (the #166 review) ─
+
+
+def test_the_helpers_run_as_the_grader_when_the_image_names_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "grader_ids", lambda: None)
+    assert runner._as_grader(["wiki-studio", "read"]) == ["wiki-studio", "read"]  # outside the image: the caller
+    monkeypatch.setattr(runner, "grader_ids", lambda: (1002, 1002))
+    assert runner._as_grader(["wiki-studio", "read"]) == [
+        "setpriv", "--reuid=1002", "--regid=1002", "--clear-groups", "--", "wiki-studio", "read",
+    ]  # fmt: skip
+
+
+def test_the_helpers_ownership_is_handed_back_and_survivors_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owned: list[tuple[str, int]] = []
+    monkeypatch.setattr(runner, "grader_ids", lambda: (1002, 1002))
+    monkeypatch.setattr(runner, "_own", lambda path, uid, gid, mode=None: owned.append((path.name, uid)))
+    monkeypatch.setattr(runner, "kill_user_processes", lambda uid, gid: [])
+    with runner._helpers_own([tmp_path]):
+        assert owned == [(tmp_path.name, 1002)]
+    assert owned[-1] == (tmp_path.name, runner.os.geteuid())
+    monkeypatch.setattr(runner, "kill_user_processes", lambda uid, gid: [77])
+    with (
+        pytest.raises(runner.corrections.CorrectionError, match="survived the helpers"),
+        runner._helpers_own([tmp_path]),
+    ):
+        pass
+
+
+def test_the_hook_ledger_is_kept_outside_the_session_folder(tmp_path: Path) -> None:
+    receipts_path = runner.run(_cfg(tmp_path, "demo"), ["demo-retain"], ["memkernel"], runs=1)
+    run_dir = receipts_path.parent
+    assert list((run_dir / "ledgers").iterdir()) == []  # each moved into its chain once the session ended
+    ledger = run_dir / "demo-retain.memkernel.r0" / "s0" / runner.LEDGER_FILE
+    assert ledger.is_file() and json.loads(ledger.read_text().splitlines()[0])["event"] == "SessionStart"
+    settings = json.loads((run_dir / "demo-retain.memkernel.r0" / "s0" / "settings.json").read_text())
+    command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert "/ledgers/" in command and "/sessions/" not in command.split("--ledger")[1].split()[0]
+
+
+def test_the_curator_never_writes_through_a_link(tmp_path: Path) -> None:
+    correction = _spec("lc-correct-deploy-window")["correction"]
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "CLAUDE.md").symlink_to(outside)
+    with pytest.raises(corrections.CorrectionError, match="is a link"):
+        corrections.deliver("claude_md", correction, workspace, None, None, None)
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    (memory / corrections.GREP_NOTE_FILE).symlink_to(outside)
+    with pytest.raises(corrections.CorrectionError, match="without following a link"):
+        corrections.deliver("fs_grep", correction, tmp_path, memory, None, None)
+    assert outside.read_text(encoding="utf-8") == "keep\n"

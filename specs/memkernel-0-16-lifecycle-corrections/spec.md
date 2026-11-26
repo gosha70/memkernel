@@ -229,6 +229,21 @@ between the options put to them; the rest are fixes within the spec.
     up).
   - **Grading:** in the image the candidate's code runs as a second unprivileged user, `grader`, from a copy of the
     oracle driver, and its processes are killed afterwards. The demo's grading probe must report that uid.
+  - **Helpers (the owner, 2026-11-26):** memkernel_ops (the memkernel arm's correction, the oracle's search, the
+    governed import), the wiki-studio CLI (the curators) and the gate check open files the agent wrote, among them a
+    Chroma store holding a pickle. So in the image they run as `grader`, never root.
+    - The files they touch are the grader's only while they run; then every grader process is killed and the files
+      return to root. A survivor fails the correction or the gate check.
+    - The gate check reads a copy of the fixture wiki, since the task itself is root's alone.
+    - The demo reports the uid every memkernel_ops call and a gate-command probe ran as, and fails unless it is the
+      grader's.
+    - The wiki-studio CLI runs through the same wrapper. The governed arms do not run in the image yet (wiki-studio
+      0.4.1), so no in-image run shows its uid; a unit test pins the wrapper.
+  - **The hook ledger** is written outside the session folder, in the run folder's `ledgers/` (mode 0711), and
+    belongs to the agent only while its session runs. Afterwards it joins the chain's copy of the session.
+  - **The curator's notes** for `claude_md` and `fs_grep` are written without following a link
+    (`O_NOFOLLOW`). The agent controlled those folders in session 0, and the harness writing as root must not be
+    led through a link it planted.
   - **Hooks:** in the image the demo runs the memkernel arm's real hook scripts as the agent user, against the
     pinned model cache, and fails unless every hook exits 0 and all three ran. This is the owner's ready gate for
     PR #166, with the probe.

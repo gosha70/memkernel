@@ -81,7 +81,8 @@ agent_args=()
 if [ -n "${LC_AGENT_UID:-}" ]; then
   agent_args=(--agent-cmd "setpriv --reuid=$LC_AGENT_UID --regid=${LC_AGENT_GID:-$LC_AGENT_UID} --clear-groups -- claude"
               --agent-uid "$LC_AGENT_UID" --agent-gid "${LC_AGENT_GID:-$LC_AGENT_UID}"
-              --hooks-dir "$LC_AGENT_TOOLS" --ledger-script "$LC_AGENT_TOOLS/hook_ledger.py")
+              --hooks-dir "$LC_AGENT_TOOLS" --ledger-script "$LC_AGENT_TOOLS/hook_ledger.py"
+              --ops-script "$LC_AGENT_TOOLS/memkernel_ops.py")
 fi
 
 finish() {  # $1 = the runner's exit status; scans the run (partial output after a failure too) and exits

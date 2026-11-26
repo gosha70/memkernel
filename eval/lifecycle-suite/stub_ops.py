@@ -35,6 +35,7 @@ def main(argv: list[str]) -> int:
     else:
         print(f"unknown command {command!r}", file=sys.stderr)
         return 2
+    result["uid"] = os.geteuid()  # who the helper ran as: the demo checks it is the grader in the image
     print(json.dumps(result, sort_keys=True))
     return 0
 

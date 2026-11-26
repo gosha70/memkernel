@@ -19,7 +19,9 @@
 # unprivileged `agent` user through setpriv, with the hook scripts, the hook ledger and
 # the demo's stub agent taken from the world-readable /opt/agent-tools. The runner gives
 # a session's files to `agent` only while that session runs, and kills every `agent`
-# process when it ends. Grading runs the candidate's code as the separate `grader` user.
+# process when it ends. Grading runs the candidate's code as the separate `grader` user,
+# and so do the correction helpers and the gate check (memkernel_ops, the wiki-studio CLI),
+# which open files the agent wrote; their copies are in /opt/agent-tools too.
 # `run.sh demo` checks all of it: the probe, the real memkernel hooks as `agent`, the
 # grader's uid, and that no process the probe left behind survives its session.
 ARG PYTHON_IMAGE=python:3.11-slim@sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce
@@ -90,7 +92,8 @@ RUN useradd --system --no-create-home --uid 1001 --user-group --shell /usr/sbin/
  && command -v setpriv && test -x /usr/bin/kill \
  && mkdir -p /opt/agent-tools /runs \
  && cp /opt/memkernel/templates/hooks/*.py /opt/memkernel/eval/lifecycle-suite/hook_ledger.py \
-      /opt/memkernel/eval/lifecycle-suite/stub_agent.py /opt/agent-tools/ \
+      /opt/memkernel/eval/lifecycle-suite/stub_agent.py /opt/memkernel/eval/lifecycle-suite/memkernel_ops.py \
+      /opt/memkernel/eval/lifecycle-suite/stub_ops.py /opt/agent-tools/ \
  && chmod -R a+rX /opt/agent-tools /opt/cache /opt/mk-venv /opt/ws-venv \
  && chown -R root:root /opt/memkernel && chmod -R go-rwx /opt/memkernel \
  && setpriv --reuid=1001 --regid=1001 --clear-groups -- sh -c '! ls /opt/memkernel >/dev/null 2>&1' \

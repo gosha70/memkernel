@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import corrections
-from checker_support import kill_user_processes
+from checker_support import grader_ids, kill_user_processes
 from diagnostics import WIKI_DIR, read_paths, session_diagnostics
 from records import (
     CONNECTED_STATUSES,
@@ -58,6 +58,8 @@ from records import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     import curator
 
 SUITE_DIR = Path(__file__).resolve().parent
@@ -315,12 +317,47 @@ class RunConfig:
     # agent only while it runs, and everything else under the run stays the harness's.
     hooks_dir: Path = REPO_ROOT / "templates" / "hooks"
     ledger_script: Path = SUITE_DIR / "hook_ledger.py"
+    ops_script: Path = SUITE_DIR / "memkernel_ops.py"  # in the image, the grader-readable copy in the agent tools
     agent_uid: int | None = None
     agent_gid: int | None = None
 
 
 def _ops_command(cfg: RunConfig) -> tuple[str, ...]:
-    return cfg.ops_command or (cfg.memkernel_python, str(SUITE_DIR / "memkernel_ops.py"))
+    return cfg.ops_command or (cfg.memkernel_python, str(cfg.ops_script))
+
+
+def _as_grader(cmd: list[str]) -> list[str]:
+    """``cmd`` run as the image's unprivileged grader, when there is one: the helpers open files the agent wrote
+    (its store holds a pickle; its wiki is parsed), so they never run as root (the #166 review)."""
+    grader = grader_ids()
+    if grader is None:
+        return cmd
+    uid, gid = grader
+    return ["setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups", "--", *cmd]
+
+
+@contextlib.contextmanager
+def _helpers_own(roots: list[Path], traverse: tuple[Path, ...] = ()) -> Iterator[None]:
+    """While the helpers run, ``roots`` belong to the grader (and ``traverse`` lets it pass); afterwards every grader
+    process is killed and ``roots`` return to the harness. A survivor is a failed correction or gate check."""
+    grader = grader_ids()
+    if grader is None:
+        yield
+        return
+    for directory in traverse:
+        os.chmod(directory, 0o711)
+    for root in roots:
+        _own(root, *grader)
+    try:
+        yield
+    finally:
+        survivors = kill_user_processes(*grader)
+        for root in roots:
+            _own(root, os.geteuid(), os.getegid(), 0o700)
+        for directory in traverse:
+            os.chmod(directory, 0o700)
+    if survivors:
+        raise corrections.CorrectionError(f"the grader's processes {survivors} survived the helpers")
 
 
 def _instruction_file(arm: Arm, dirs: SessionDirs, brief: str | None = None) -> Path | None:
@@ -427,7 +464,7 @@ def _ops(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.
     def call(*args: str) -> dict[str, Any]:
         try:
             completed = subprocess.run(
-                [*_ops_command(cfg), *args],
+                _as_grader([*_ops_command(cfg), *args]),
                 cwd=dirs.workspace,
                 env=env,
                 capture_output=True,
@@ -465,7 +502,7 @@ def _cli(arm: Arm, dirs: SessionDirs, chain_id: str, cfg: RunConfig) -> curator.
     def call(verb: str, *args: str) -> tuple[int, str]:
         try:
             completed = subprocess.run(
-                [base[0], verb, *base[1:], *args],
+                _as_grader([base[0], verb, *base[1:], *args]),
                 cwd=dirs.workspace,
                 env=env,
                 capture_output=True,
@@ -484,6 +521,22 @@ SESSIONS_DIR = "sessions"  # under the run directory: where a session runs, unde
 
 def _sessions_area(cfg: RunConfig) -> Path:
     return cfg.run_root / cfg.run_id / SESSIONS_DIR
+
+
+LEDGERS_DIR = "ledgers"  # under the run directory: each session's hook ledger, outside the session's own folder
+LEDGER_FILE = "hook-ledger.jsonl"  # its name once it joins the chain's copy of the session
+
+
+def _ledger_path(dirs: SessionDirs, cfg: RunConfig) -> Path:
+    """The hook ledger for the session staged at ``dirs``: outside its folder, in a directory the agent may pass
+    through but not list, and the agent's to append to only while its session runs."""
+    area = cfg.run_root / cfg.run_id / LEDGERS_DIR
+    area.mkdir(mode=0o711, exist_ok=True)
+    ledger = area / f"{dirs.root.name}.jsonl"
+    ledger.touch(mode=0o600)
+    if cfg.agent_uid is not None:
+        os.chown(ledger, cfg.agent_uid, cfg.agent_gid if cfg.agent_gid is not None else cfg.agent_uid)
+    return ledger
 
 
 def stage_session(dirs: SessionDirs, cfg: RunConfig) -> SessionDirs:
@@ -682,24 +735,26 @@ def run_session(
     if invalid is None:
         dirs = stage_session(home, cfg)
     staged = dirs
+    ledger: Path | None = None
     try:
         if observe is not None and invalid is None:
             observe(task, arm, position, dirs)  # before any correction: what the shared copy alone carries
         correction: dict[str, Any] | None = None
         if invalid is None and task.correction is not None and position == int(task.correction["after_session"]) + 1:
             try:
-                correction = corrections.deliver(
-                    arm.name,
-                    task.correction,
-                    dirs.workspace,
-                    dirs.memory_dir,
-                    _ops(arm, dirs, chain_id, cfg) if arm.persist_store else None,
-                    _cli(arm, dirs, chain_id, cfg) if arm.wiki_governed else None,
-                )
+                with _helpers_own([dirs.root]):  # the session's files are the grader's while the helpers run
+                    correction = corrections.deliver(
+                        arm.name,
+                        task.correction,
+                        dirs.workspace,
+                        dirs.memory_dir,
+                        _ops(arm, dirs, chain_id, cfg) if arm.persist_store else None,
+                        _cli(arm, dirs, chain_id, cfg) if arm.wiki_governed else None,
+                    )
             except corrections.CorrectionError as exc:
                 correction = {"path": corrections.PATHS[arm.name], "delivered": False, "error": str(exc)}
                 invalid = "correction_failed"
-        ledger = dirs.root / "hook-ledger.jsonl"
+        ledger = _ledger_path(dirs, cfg)  # outside the session folder; it joins the chain's copy afterwards
         if invalid is None:
             wiring = _write_wiring(arm, dirs, chain_id, cfg, ledger, task.brief_for(position))
             if cfg.agent_uid is not None:  # the session's files are the agent's while it runs, and only then
@@ -759,6 +814,10 @@ def run_session(
                 invalid = "session_state_missing"
     ran_in = staged.workspace  # the path the agent saw: tool calls in the stream name it
     dirs = home
+    if ledger is not None and ledger.exists():  # the ledger joins the chain's copy of the session, the harness's
+        if cfg.agent_uid is not None:
+            os.chown(ledger, os.geteuid(), os.getegid())
+        shutil.move(str(ledger), home.root / LEDGER_FILE)
     compacted = any(
         exposure_at is not None and evaluation_at is not None and exposure_at < ts < evaluation_at
         for ts in summary.compactions
@@ -911,21 +970,25 @@ def run_chain(task: Task, arm: Arm, run_index: int, cfg: RunConfig, observe: Any
 def check_gate(task: Task, arm: Arm, final: SessionOutcome, chain_id: str, cfg: RunConfig) -> None:
     """#90 section 3.4 on the governed arms' end state: breaches are counted in the receipt, never hidden."""
     workspace = final.dirs.workspace
-    try:
-        final.receipt["gate"] = _ops(arm, final.dirs, chain_id, cfg)(
-            "gate",
-            "--root",
-            str(workspace),
-            "--wiki",
-            str(workspace / WIKI_DIR),
-            "--proposals",
-            str(workspace / GOVERNED_PROPOSALS_DIR),
-            "--fixture-wiki",
-            str(task.tree / WIKI_DIR),
-        )
-    except corrections.CorrectionError as exc:  # the check could not run: a harness failure, not the arm's
-        final.receipt["gate"] = {**GATE_UNCHECKED, "error": str(exc)}
-        final.receipt["valid"], final.receipt["invalid_reason"] = False, "gate_check_failed"
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp) / "fixture-wiki"  # a copy the grader can read: the task itself is the harness's only
+        shutil.copytree(task.tree / WIKI_DIR, fixture, symlinks=True)
+        try:
+            with _helpers_own([final.dirs.root, Path(tmp)], traverse=(final.dirs.root.parent,)):
+                final.receipt["gate"] = _ops(arm, final.dirs, chain_id, cfg)(
+                    "gate",
+                    "--root",
+                    str(workspace),
+                    "--wiki",
+                    str(workspace / WIKI_DIR),
+                    "--proposals",
+                    str(workspace / GOVERNED_PROPOSALS_DIR),
+                    "--fixture-wiki",
+                    str(fixture),
+                )
+        except corrections.CorrectionError as exc:  # the check could not run: a harness failure, not the arm's
+            final.receipt["gate"] = {**GATE_UNCHECKED, "error": str(exc)}
+            final.receipt["valid"], final.receipt["invalid_reason"] = False, "gate_check_failed"
 
 
 def chain_dir_for(task: Task, arm: Arm, run_index: int, cfg: RunConfig) -> Path:
@@ -1225,7 +1288,7 @@ def demo() -> int:
             hook_command_override=None if hooks_python else (sys.executable, "-c", "import sys; sys.stdin.read()"),
             hooks_dir=hooks_dir,
             shared_cache=shared_cache,
-            ops_command=(sys.executable, str(SUITE_DIR / "stub_ops.py")),
+            ops_command=(sys.executable, str(tools / "stub_ops.py")),
             wiki_studio_cmd=_wiki_studio_beside_python(),
         )
         receipts_path = run(cfg, list(DEMO_TASKS), arms, runs=1, observe=observe)
@@ -1233,14 +1296,19 @@ def demo() -> int:
         delivered = _delivered_files(Path(tmp) / "demo")
         probes = _probes(Path(tmp) / "demo", arms)
         grading = _grading_probe(Path(tmp))
+        helper_uids = _helper_uids(receipts) + [_helper_probe(Path(tmp), cfg)]
 
     # the evidence first: check_lingering kills what survived, which would hide it
     seen_lines = evidence(probes, grading, receipts, separated=uid is not None, real_hooks=bool(hooks_python))
     failures = check_demo(seen, receipts, delivered, arms) + check_probes(probes, separated=uid is not None)
     failures += check_lingering(probes, separated=uid is not None)
     failures += check_grading(grading, separated=uid is not None)
+    failures += check_helpers(helper_uids, separated=uid is not None)
     if hooks_python:
         failures += check_real_hooks(receipts)
+    seen_lines.append(
+        f"evidence: helpers (memkernel_ops, the gate check) ran as uid {sorted(set(map(str, helper_uids)))}"
+    )
     for line in seen_lines:
         print(line)
     for line in failures:
@@ -1404,6 +1472,49 @@ def evidence(
     ]
 
 
+def _helper_uids(receipts: list[dict[str, Any]]) -> list[int | None]:
+    """The uid each correction helper reported (memkernel_ops for the memkernel arm, the import for the governed
+    arms) and each gate check, from the receipts."""
+    found: list[int | None] = []
+    for r in receipts:
+        record = r.get("correction") or {}
+        if record.get("path") == corrections.MEMKERNEL:
+            found.append(record.get("helper_uid"))
+        elif record.get("path") in (corrections.SCRIPTED, corrections.ORACLE):
+            found.append((record.get("imported") or {}).get("uid"))
+        if isinstance(r.get("gate"), dict):
+            found.append(r["gate"].get("uid"))
+    return found
+
+
+def _helper_probe(tmp: Path, cfg: RunConfig) -> int | None:
+    """Run the gate check's command as the runner runs it, on an empty folder: the uid it reports."""
+    root = tmp / "helper-probe"
+    root.mkdir()
+    with _helpers_own([root]):
+        done = subprocess.run(
+            _as_grader([*_ops_command(cfg), "gate"]), cwd=root, capture_output=True, text=True, timeout=60
+        )
+    try:
+        uid: int | None = json.loads(done.stdout.strip().splitlines()[-1])["uid"]
+    except (IndexError, KeyError, json.JSONDecodeError):
+        uid = None
+    return uid
+
+
+def check_helpers(uids: list[int | None], separated: bool) -> list[str]:
+    """memkernel_ops and the gate check never run as root in the image: each reports the grader's uid (the #166
+    review); outside the image they run as the caller."""
+    expected = grader_ids()[0] if separated and grader_ids() is not None else os.geteuid()  # type: ignore[index]
+    wrong = [u for u in uids if u != expected]
+    failures = [f"helpers ran as uid {sorted(set(map(str, wrong)))}, expected {expected}"] if wrong else []
+    if separated and 0 in uids:
+        failures.append("a helper ran as root")
+    if not uids:
+        failures.append("no helper reported its uid")
+    return failures
+
+
 def check_real_hooks(receipts: list[dict[str, Any]]) -> list[str]:
     """With the real hook scripts, every hook the agent user ran exited 0, and the memkernel arm ran them all."""
     failures = [
@@ -1532,6 +1643,7 @@ def main(argv: list[str]) -> int:
     p_run.add_argument("--agent-gid", type=int)
     p_run.add_argument("--hooks-dir", type=Path, default=REPO_ROOT / "templates" / "hooks")
     p_run.add_argument("--ledger-script", type=Path, default=SUITE_DIR / "hook_ledger.py")
+    p_run.add_argument("--ops-script", type=Path, default=SUITE_DIR / "memkernel_ops.py")
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo()
@@ -1556,6 +1668,7 @@ def main(argv: list[str]) -> int:
         wiki_studio_cmd=args.wiki_studio_cmd,
         hooks_dir=args.hooks_dir,
         ledger_script=args.ledger_script,
+        ops_script=args.ops_script,
         agent_uid=args.agent_uid,
         agent_gid=args.agent_gid,
     )
