@@ -94,6 +94,15 @@ whether to run or to extend first.
 - **Timeouts:** a timeout is a valid failure (`other`).
 - **Truncated runs:** truncation follows the 0.5 rule (FR-015a).
 
+## Known limit: the hook ledger
+
+The hooks run as the agent user, so the ledger they append to (`hook_ledger.py`, in the run folder's `ledgers/`,
+outside the session folder) belongs to that user while its session runs. The agent can find the ledger's path in its
+session's `settings.json` and edit its own ledger: add, change or remove entries. Hook records (`hooks` in the
+receipts, the `hooks_succeeded` diagnostic) are therefore the agent's own report, not evidence it cannot alter. No
+primary or secondary comparison here uses them. Once the session ends, the ledger becomes root's and moves into the
+chain, so a later session cannot change an earlier one's ledger.
+
 ## Report
 
 `report.py` has an lc-correct section with each arm's informed, obsolete and other counts, the obsolete-answer
