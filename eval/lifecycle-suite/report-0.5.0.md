@@ -347,3 +347,32 @@ tasks were run as frozen; the chains, the trials and the analysis are unaffected
 computed per chain from the calibration, whose only `lc-retain` task was a two-session chain, so it understated
 these 60 sessions by about $2.07 before its 20 percent allowance (60 sessions at the `lc-retain` estimate of
 $10.33 for 150 two-session chains); the run cost $63.85 against the estimate of $80.74 and the $150 limit.
+
+### 10. Tool calls that reached outside the session's workspace (audit after the run)
+
+After the release, an external reviewer's `find_reads.py` (sha256 `159f636bfe5d9395…`) was run on the run's 1,160
+raw streams **[run record]**, as step 3 of gosha70/memkernel#168. It lists each tool call whose input names a path
+outside the session's workspace. As written it reports 0, because the runner writes each event inside a
+`{"ts", "event"}` envelope and the script reads no tool call; `find_reads_envelope.py`, committed beside the
+receipts, differs only in unwrapping it. Over 7,170 tool calls it reports 5,345 hits, 5,337 of them on `/runs/`,
+the folder every session's workspace sits in. The counts below are in `find_reads-grouped.md` beside the receipts.
+
+- **No tool call in any arm names `/opt/memkernel`, `oracles`, `task.json` or `reference/`** (0 of 7,170).
+- **1,233 tool calls name a path under `/runs/` outside the session's own workspace.** 947 are in the session's own
+  Claude Code configuration folder, where Claude Code keeps its automatic memory; it is per session, and no case of
+  it carrying to a later session was found. 227 are `fs_grep`'s folder of rendered transcripts of earlier sessions,
+  that arm's designed channel. The other 59 are listed by kind in `find_reads-grouped.md`; those that matter are
+  below.
+- **`memkernel` and `claude_md`:** apart from tool calls on their own configuration folder (18 and 143, mostly
+  writes), no tool call names a path outside the workspace, except two `memkernel` reads of a path that did not
+  exist (both failed).
+- **`fs_grep` reached earlier sessions' raw folders.** In 22 tool calls, from 18 later sessions of 18 chains in 5
+  `lc-retain` and 3 `lc-reval` tasks, a search of the whole chain folder returned paths or matching lines from an
+  earlier session's folder: its raw `stream.jsonl` in all 22, its configuration folder in 20, its workspace in 10.
+  The arm's design gives a later session rendered transcripts only (`persist`: transcripts, not the workspace).
+  Whether this changed any outcome was not measured; no result was rescored.
+- **Other:** one `placebo` session wrote to a mistyped folder at the run's top level, removed it, and listed the top
+  level, which showed it the other chains' folder names, not their contents.
+
+This adds two files to the run's committed folder (section 2): `find_reads_envelope.py` and `find_reads-grouped.md`.
+The raw streams stay on the operator's machine.
