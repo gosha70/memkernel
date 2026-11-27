@@ -361,6 +361,23 @@ def test_a_line_that_does_not_fit_leaves_room_for_a_shorter_one_after_it() -> No
     assert lines[-1] == "… and 1 more (use recall() for the rest)"
 
 
+def test_the_left_out_line_counts_the_blocks_empty_slots_not_every_candidate_tried() -> None:
+    """With 30 long memories and room for two lines, the other 28 are each tried and dropped; the block has six
+    slots, so the last line says four were left out."""
+    svc = _service(preview_length=1000)
+    memories = [
+        svc.get(svc.retain(f"Decision {i}: " + "word " * 40, MemoryType.DECISION), touch=False) for i in range(30)
+    ]
+    lifecycle = MemoryLifecycle(svc, svc.settings)
+    two_lines = sum(len(line) + 1 for line in lifecycle._memory_lines(memories[:2]))
+
+    shown, _, lines = lifecycle._context(memories, None, 6, two_lines)
+
+    assert len(shown) == 2 and lines[-1] == "… and 4 more (use recall() for the rest)"
+    full, _, full_lines = lifecycle._context(memories, None, 6, 100_000)
+    assert len(full) == 6 and not full_lines[-1].startswith("…")  # nothing dropped: no line
+
+
 def test_a_promoted_copy_past_the_blocks_limit_hides_nothing() -> None:
     """The 6th-10th case: the copy ranks below the six shown, so its source stays in the block."""
     svc = _service()

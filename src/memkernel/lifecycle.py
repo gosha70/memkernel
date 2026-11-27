@@ -334,7 +334,8 @@ class MemoryLifecycle:
         """A block's context: the memories :meth:`_distinct` selects, what that hid, and their lines within
         ``budget``. A memory whose line the budget drops is taken out of the candidates and the selection runs again
         without it, so it hides nothing and what it would have hidden can show (memkernel-0-18-imported-page-collapse
-        FR-003); a last line counts the memories dropped."""
+        FR-003). A last line counts the block's slots the budget left empty: the memories dropped, at most ``limit``
+        minus those shown, since every candidate after a full budget is tried and dropped too."""
         pool = list(candidates)
         dropped = 0
         while True:
@@ -342,7 +343,8 @@ class MemoryLifecycle:
             lines = self._memory_lines(context)
             fitting = _fitting(lines, budget)
             if fitting == len(context):
-                return context, collapsed, [*lines, _left_out(dropped)] if dropped else lines
+                empty = min(dropped, limit - len(context))
+                return context, collapsed, [*lines, _left_out(empty)] if empty else lines
             cut = context[fitting].ref_id  # the first line that does not fit; a shorter one after it may
             pool = [m for m in pool if m.ref_id != cut]
             dropped += 1

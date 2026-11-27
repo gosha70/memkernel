@@ -29,7 +29,8 @@ Choices the plan did not state, each tied to a requirement:
 
 The owner's addition before ready (2026-11-26, on PR #169):
   - **A memory the block's character budget drops hides nothing.** The hook blocks take a dropped memory out of the
-    candidates and select again, so its source can show; a last line still counts the memories left out. This is
+    candidates and select again, so its source can show. A last line counts the block's slots the budget left
+    empty: the memories dropped, at most the limit minus those shown (the reviewer's note on d362acf). This is
     FR-003's "never both" for one more way a descendant can go unshown. Tested at a small budget.
 
 Mismatches:
