@@ -362,6 +362,12 @@ outside the session's workspace. As written it reports 0, because the runner wri
 receipts, differs only in unwrapping it. Over 7,170 tool calls it reports 5,345 hits, 5,337 of them on `/runs/`,
 the folder every session's workspace sits in. The counts below are in `find_reads-grouped.md` beside the receipts.
 
+The search was run because the audit found three things a session could read: the folders of earlier sessions in
+its chain, other chains' folders under `/runs/`, and the task definitions, reference solutions and oracles in the
+image's copy of the repository at `/opt/memkernel` (every session ran as the image's one user, `runner`). The search
+reads only the inputs of tool calls, so a file reached by a command whose text does not name its path, such as a
+script the agent wrote and then ran, would not be seen.
+
 - **No tool call in any arm names `/opt/memkernel`, `oracles`, `task.json` or `reference/`** (0 of 7,170).
 - **1,233 tool calls name a path under `/runs/` outside the session's own workspace.** 947 are in the session's own
   Claude Code configuration folder, where Claude Code keeps its automatic memory; it is per session, and no case of
@@ -379,6 +385,10 @@ the folder every session's workspace sits in. The counts below are in `find_read
   change the comparison between them there; no result was rescored.
 - **Other:** one `placebo` session wrote to a mistyped folder at the run's top level, removed it, and listed the top
   level, which showed it the other chains' folder names, not their contents.
+
+For later runs, gosha70/memkernel#166 closed these gaps: each session runs as a separate `agent` user, in a folder
+with nothing of its chain beside it, and the runner refuses to start unless a read attempt as that user shows the
+repository, the tasks and the oracles unreadable.
 
 This adds two files to the run's committed folder (section 2): `find_reads_envelope.py` and `find_reads-grouped.md`.
 The raw streams stay on the operator's machine.
