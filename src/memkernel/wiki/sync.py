@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from memkernel.core.models import (
+    EVERYONE,
+    HASH_SCHEME_RAW,
     PAGE_KEY_TAG,
     PAGE_SHA_TAG,
     SCOPE_PROJECT,
@@ -46,6 +48,7 @@ from memkernel.core.models import (
     MemoryType,
     has_wiki_identity,
 )
+from memkernel.memory.dedup import HASH_SCHEMES, compute_content_hash
 from memkernel.wiki.ledger import (
     ACTION_IMPORT,
     ACTION_SUPERSEDE,
@@ -142,8 +145,19 @@ UNGOVERNED_INDEX_REFUSAL = (
 # The commit a page's ``path:`` source is grounded at (G4): wiki-studio's citation rule, read-only git, optional.
 GIT_TIMEOUT_SECONDS = 2.0  # per call; after one timeout the export stops asking git
 SOURCE_SHA_KEY = "sha"
+MEMKERNEL_REF_KEY = "memkernel_ref"
 MEMKERNEL_SHA256_KEY = "memkernel_sha256"
 MEMKERNEL_HASH_SCHEME_KEY = "memkernel_hash_scheme"
+# Why an approved page's memory is not linked to the memory its memkernel_ref names (memkernel-0-18 FR-001, FR-005):
+# the first check that fails, in this order.
+UNLINKED_HAS_CORRECTS = "has_corrects"
+UNLINKED_NOT_IN_STORE = "not_in_store"
+UNLINKED_WIKI_MEMORY = "wiki_memory"
+UNLINKED_RETIRED = "retired"
+UNLINKED_NOT_PROJECT_SCOPE = "not_project_scope"
+UNLINKED_NO_HASH = "no_hash"
+UNLINKED_UNKNOWN_SCHEME = "unknown_scheme"
+UNLINKED_HASH_MISMATCH = "hash_mismatch"
 
 
 def _today() -> str:
@@ -208,6 +222,10 @@ class ImportReport:
     ambiguous: list[dict[str, Any]] = field(default_factory=list)
     mode: str = PATH_UNGATED  # the path that ran: gated (wiki-studio's review state) or ungated (G1)
     configured_mode: str = ""  # MEMKERNEL_WIKI_MODE
+    # memkernel-0-18-imported-page-collapse FR-005 (governed import only): each approved page with memkernel_ref, its
+    # memory linked to the named memory ({"page", "ref_id"}) or not, with the first check that failed.
+    linked: list[dict[str, str]] = field(default_factory=list)
+    unlinked: list[dict[str, str]] = field(default_factory=list)  # {"page", "ref_id", "reason"}
 
 
 class WikiExporter:
@@ -373,7 +391,7 @@ class WikiExporter:
 
     @staticmethod
     def _log_line(page: WikiPage, verb: str) -> str:
-        ref = page.extra.get("memkernel_ref", "")
+        ref = page.extra.get(MEMKERNEL_REF_KEY, "")
         return f"- {_today()} — {verb} `{page.slug}` ({page.page_type}): compiled from memkernel {ref}"
 
     def _page_for(self, memory: Memory, page_type: str) -> WikiPage:
@@ -400,7 +418,7 @@ class WikiExporter:
             sources=sources,
             body="\n".join(body_lines),
             extra={
-                "memkernel_ref": memory.ref_id,
+                MEMKERNEL_REF_KEY: memory.ref_id,
                 "memory_type": memory.type.value,
                 MEMKERNEL_SHA256_KEY: memory.content_hash,
                 MEMKERNEL_HASH_SCHEME_KEY: memory.hash_scheme,  # memkernel-0-17 FR-003: which scheme made the hash
@@ -695,6 +713,7 @@ class WikiImporter:
                 ref_id = self._retain_page(review.path, page, review, live, session_id, report)
                 if ref_id is not None and page is not None:
                     self._reconcile(review.path, page, review, ref_id, report)
+                    self._link_source(review.path, page, ref_id, report)
             except Exception as exc:  # one page's failure is recorded and retried; the run goes on
                 self._failed(ledger, entry, prior, exc, report)
                 continue
@@ -868,6 +887,45 @@ class WikiImporter:
                 except ValueError as exc:
                     reason = str(exc)
             report.unresolved.append({"page": rel, "token": token, "reason": reason})
+
+    def _link_source(self, rel: str, page: WikiPage, ref_id: str, report: ImportReport) -> None:
+        """memkernel-0-18-imported-page-collapse FR-001, FR-002: set the page memory's ``wiki-source:`` link to the
+        memory the page's ``memkernel_ref`` names when every check holds, else remove it; report the outcome (FR-005).
+        A page without ``memkernel_ref`` gets no link and no report entry. Runs on every import of an approved page,
+        so a page imported before the link existed gains it, and one whose frontmatter changed is checked again."""
+        named = page.extra.get(MEMKERNEL_REF_KEY, "").strip()
+        source = None
+        if named:
+            reason = self._link_refusal(page, named)
+            if reason is None:
+                source = named
+                report.linked.append({"page": rel, "ref_id": named})
+            else:
+                report.unlinked.append({"page": rel, "ref_id": named, "reason": reason})
+        self._service.set_wiki_source(ref_id, source)
+
+    def _link_refusal(self, page: WikiPage, named: str) -> str | None:
+        """The first FR-001 check the link fails, or None when the page's memory may be linked to ``named``."""
+        if CORRECTS_KEY in page.extra:  # a correction: what it replaces is decided by corrects alone (O4)
+            return UNLINKED_HAS_CORRECTS
+        target = self._service.get(named, touch=False, caller=EVERYONE)  # scope is checked below, with its reason
+        if target is None:
+            return UNLINKED_NOT_IN_STORE
+        if WIKI_TAG in target.tags:
+            return UNLINKED_WIKI_MEMORY
+        if target.retired():
+            return UNLINKED_RETIRED
+        if target.scope != SCOPE_PROJECT:
+            return UNLINKED_NOT_PROJECT_SCOPE
+        expected = page.extra.get(MEMKERNEL_SHA256_KEY, "").strip()
+        if not expected:
+            return UNLINKED_NO_HASH
+        scheme = page.extra.get(MEMKERNEL_HASH_SCHEME_KEY, "").strip() or HASH_SCHEME_RAW  # pages before 0.17
+        if scheme not in HASH_SCHEMES:
+            return UNLINKED_UNKNOWN_SCHEME
+        if compute_content_hash(target.content, scheme) != expected:
+            return UNLINKED_HASH_MISMATCH
+        return None
 
     def _retain_page(
         self,

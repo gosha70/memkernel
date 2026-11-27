@@ -76,12 +76,14 @@ def append(
     latency_ms: float | None = None,
     excluded: dict[str, int] | None = None,
     empty_reason: str | None = None,
+    collapsed: Sequence[dict[str, Any]] = (),
 ) -> None:
     """Append one record; nothing when the log is off. Never raises: a failure is logged once per process.
 
     ``memories`` are the returned records in ``ref_ids`` order; ``ids`` default to the process's settings.
     ``latency_ms`` and ``excluded`` are left out of the record when None (a hook block, or ``order="newest"``);
-    ``empty_reason`` (memkernel-0-15-harness-foundations B11) is written only for an empty recall.
+    ``empty_reason`` (memkernel-0-15-harness-foundations B11) is written only for an empty recall; ``collapsed``
+    (memkernel-0-18-imported-page-collapse FR-003), the candidates the selection hid, only when there are any.
     """
     path = log_path(settings)
     if path is None:
@@ -109,6 +111,8 @@ def append(
         record["excluded"] = dict(excluded)
     if empty_reason is not None:
         record["empty_reason"] = empty_reason
+    if collapsed:
+        record["collapsed"] = [dict(entry) for entry in collapsed]
     line = _fit(record, settings.recall_log_max_bytes)
     if line is None:
         _warn_once(path, "a record does not fit in recall_log_max_bytes")

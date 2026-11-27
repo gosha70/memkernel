@@ -173,6 +173,7 @@ def register_memory_tools(server: MCPServer[Any]) -> None:
             latency_ms=latency_ms,
             excluded=receipt.excluded,
             empty_reason=receipt.empty_reason,
+            collapsed=receipt.collapsed,
         )
         return response
 

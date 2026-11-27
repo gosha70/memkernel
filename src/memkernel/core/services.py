@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from memkernel.core import collapse as chains
 from memkernel.core.models import (
     ASK_MODES,
     CAPTURE_ANSWER_CANDIDATES,
@@ -33,6 +34,7 @@ from memkernel.core.models import (
     EMPTY_OUT_OF_SCOPE,
     EVERYONE,
     EXCLUDED_CAPPED,
+    EXCLUDED_COLLAPSED,
     EXCLUDED_EXPIRED,
     EXCLUDED_FLAGGED,
     EXCLUDED_OUT_OF_SCOPE,
@@ -49,6 +51,7 @@ from memkernel.core.models import (
     HEALTH_ORPHANS,
     HEALTH_STALE_SOURCES,
     HEALTH_UNMARKED_SUPERSESSIONS,
+    IMPORT_ONLY_TAGS,
     LONG_TERM_TYPE_VALUES,
     NEEDS_REVIEW_KEY,
     PARENT_REF_KEY,
@@ -64,9 +67,9 @@ from memkernel.core.models import (
     SUGGEST_TYPES,
     SUPERSEDED_BY_KEY,
     WIKI_ID_TAG,
-    WIKI_IDENTITY_TAGS,
     WIKI_IMPORT_TAG_PREFIXES,
     WIKI_PATH_TAG,
+    WIKI_SOURCE_TAG,
     WIKI_TAG,
     WITHDRAWN_AT_KEY,
     WITHDRAWN_REASON_KEY,
@@ -420,9 +423,9 @@ class MemoryService:
         supersede: for a new ``decision``, ``convention``, ``fact`` or ``procedure`` record only, never on a dedup hit
         or when ``supersedes`` is passed. Nothing is superseded because of them (D4).
         """
-        reserved = [tag for tag in tags or [] if tag.startswith(WIKI_IDENTITY_TAGS)]
+        reserved = [tag for tag in tags or [] if tag.startswith(IMPORT_ONLY_TAGS)]
         if reserved:
-            raise ValueError(f"tags {reserved} are reserved for the wiki import ({', '.join(WIKI_IDENTITY_TAGS)})")
+            raise ValueError(f"tags {reserved} are reserved for the wiki import ({', '.join(IMPORT_ONLY_TAGS)})")
         who = self._caller(caller)
         record_scope = (
             who.resolve(scope) if scope is not None else (who.effective_scope if checkpoint else SCOPE_PROJECT)
@@ -734,6 +737,22 @@ class MemoryService:
         add = [path_tag, *([id_tag] if id_tag is not None and not ids else [])]
         return self._vector_store.merge_tags(ref_id, add=add, remove=stale)
 
+    def set_wiki_source(self, ref_id: str, source_ref: str | None) -> bool:
+        """Set a wiki memory's ``wiki-source:`` link to ``source_ref``, or remove it for None; nothing else changes
+        (memkernel-0-18-imported-page-collapse FR-002).
+
+        Returns False when nothing changed. Raises ``ValueError`` for a record that is not in this store or is not a
+        wiki memory. Only the wiki import calls it, after deciding the link (FR-001).
+        """
+        memory = self._vector_store.get_by_id(ref_id)
+        if memory is None:
+            raise ValueError(f"{ref_id} is not a memory in this store")
+        if WIKI_TAG not in memory.tags:
+            raise ValueError(f"{ref_id} is not a wiki memory")
+        tag = f"{WIKI_SOURCE_TAG}{source_ref}" if source_ref else None
+        stale = [t for t in memory.tags if t.startswith(WIKI_SOURCE_TAG) and t != tag]
+        return self._vector_store.merge_tags(ref_id, add=[tag] if tag is not None else [], remove=stale)
+
     def exclusive(self, name: str) -> AbstractContextManager[None]:
         """Hold the store's lock ``name`` for a block (memkernel-0-7-store-locks L2); the wiki import holds one."""
         return self._vector_store.exclusive(name)
@@ -1029,6 +1048,7 @@ class MemoryService:
         order: str = ORDER_RELEVANCE,
         receipt: RecallReceipt | None = None,
         caller: Caller | None = None,
+        collapse: bool = True,
     ) -> list[ArtifactRef]:
         """Search for memories matching the query.
 
@@ -1050,6 +1070,13 @@ class MemoryService:
         ``caller`` (memkernel-0-15-harness-foundations FR-001, B7; default: the settings' ids) sees ``project`` records
         and its own agent's and task's; ``order="newest"`` reads only the caller's effective scope (B4). An empty
         result's reason goes into the receipt (B11).
+
+        A relevance recall shows no memory beside one that descends from it (memkernel-0-18-imported-page-collapse
+        FR-003, D2): the filtered window's first ``top_k`` are chosen by :func:`memkernel.core.collapse.collapse`,
+        following ``promoted_from`` and ``wiki-source:`` links through records ``caller`` can see. The receipt counts
+        each hidden candidate under ``collapsed`` and lists it in ``receipt.collapsed``. ``collapse=False`` returns the
+        filtered window's first ``top_k`` unselected: for a hook block, which selects from a larger pool itself, so a
+        descendant it does not show never hides an ancestor it could.
         """
         if order not in (ORDER_RELEVANCE, ORDER_NEWEST):
             raise ValueError(f"order must be {ORDER_RELEVANCE!r} or {ORDER_NEWEST!r}, got {order!r}")
@@ -1073,6 +1100,7 @@ class MemoryService:
         live: list[ArtifactRef] = []
         excluded: dict[str, int] = {}
         kept: dict[str, Memory] = {}
+        collapsed: list[dict[str, Any]] = []
 
         while True:
             search_query = SearchQuery(
@@ -1087,6 +1115,9 @@ class MemoryService:
             excluded = dict.fromkeys(EXCLUSION_REASONS, 0)  # the last window's, as A4 says
             kept = {}
             live = self._filter_live(results, search_query, include_needs_review, excluded, kept, who)
+            if collapse:  # each window is selected from its first candidate (FR-003)
+                live, collapsed = self._collapse(live, desired_k, kept, who)
+                excluded[EXCLUDED_COLLAPSED] = len(collapsed)
 
             store_exhausted = len(results) < fetch_k
             if len(live) >= desired_k or store_exhausted:
@@ -1102,8 +1133,21 @@ class MemoryService:
             receipt.memories = [kept[ref.ref_id] for ref in live if ref.ref_id in kept]  # never fails a recall
             receipt.excluded = excluded
             receipt.empty_reason = None if live else _empty_reason(excluded)
+            receipt.collapsed = collapsed
         self._last_recall_ms = (time.perf_counter() - _start) * 1000
         return live
+
+    def _collapse(
+        self, live: list[ArtifactRef], limit: int, kept: dict[str, Memory], who: Caller
+    ) -> tuple[list[ArtifactRef], list[dict[str, Any]]]:
+        """FR-003's selection over a filtered window: the refs shown, in rank order, and the hidden candidates."""
+        by_id = {ref.ref_id: ref for ref in live}
+        shown, hidden = chains.collapse(
+            [ref.ref_id for ref in live],
+            limit,
+            lambda ref_id: chains.ancestor_paths(kept[ref_id], self._vector_store.get_by_id, who.can_see),
+        )
+        return [by_id[ref_id] for ref_id in shown], hidden
 
     def _filter_live(
         self,
@@ -1556,6 +1600,10 @@ class MemoryService:
         # A source counts as promoted only through a copy the caller can see: another agent's private promotion of a
         # shared record does not take it off this caller's candidates (B8).
         promoted_sources = {m.promoted_from for m in all_memories if m.promoted_from and who.can_see(m)}
+        # memkernel-0-18 FR-004 (D3): nor is a source a live wiki page memory links to; the page is its reviewed copy
+        promoted_sources |= {
+            m.wiki_source for m in all_memories if m.wiki_source and not m.retired() and who.can_see(m)
+        }
         eligible = [
             m
             for m in all_memories

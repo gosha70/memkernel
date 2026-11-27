@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from memkernel import capture, recall_log, session_spool
 from memkernel.config import MemKernelSettings
+from memkernel.core import collapse as chains
 from memkernel.core.models import EVERYONE, Caller, MemoryTier, MemoryType
 from memkernel.transcripts.claude_code import ClaudeCodeTranscriptReader
 from memkernel.wiki.curation import curation_debt_lines
@@ -160,7 +161,7 @@ class MemoryLifecycle:
         captured = self._capture(drained) if capturing else None
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
-        context = _distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
+        context, collapsed = self._distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
         debt = curation_debt_lines(self._settings, self._service.settings, self._service.project_id)
         lines = [
             HEADING_SESSION_START,
@@ -195,7 +196,7 @@ class MemoryLifecycle:
         shown = [m.ref_id for m in (latest, *context) if m is not None]
         shown += [c["ref_id"] for c in report["candidates"]]
         shown += [f["ref_id"] for f in report.get("revalidated", {}).get("flagged", []) if f.get("ref_id")]
-        return self._logged(_finish(lines), BLOCK_SESSION_START, shown, session_id or "")
+        return self._logged(_finish(lines), BLOCK_SESSION_START, shown, session_id or "", collapsed)
 
     def on_pre_compact(self, summary: str) -> str:
         """Retain a non-empty ``summary`` as a checkpoint episode, consolidate, and return a one-line status.
@@ -234,9 +235,11 @@ class MemoryLifecycle:
         latest = self._latest_checkpoint_memory()
         # FR-002 (D2): the latest checkpoint is the query when there is one; without one, the fixed query.
         query = latest.content if latest is not None else POST_COMPACT_FIXED_QUERY
-        refs = self._service.recall(query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False)
+        refs = self._service.recall(
+            query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False, collapse=False
+        )
         found = [self._service.get(r.ref_id, touch=False) for r in refs]
-        context = _distinct([m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K)
+        context, collapsed = self._distinct([m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K)
         for memory in context:  # an access counts only for a memory the block shows, not for every candidate
             self._service.get(memory.ref_id)
         candidates = self._service.consolidate(limit=CANDIDATE_LIMIT, purge=False)["candidates"]
@@ -258,7 +261,7 @@ class MemoryLifecycle:
         shown = [latest.ref_id] if latest is not None else []
         shown += [m.ref_id for m in context] + [c["ref_id"] for c in candidates]
         text = _finish(lines)
-        return self._logged(text, BLOCK_POST_COMPACT, shown, session_id) if session_id else text
+        return self._logged(text, BLOCK_POST_COMPACT, shown, session_id, collapsed) if session_id else text
 
     def on_session_end(self, summary: str) -> str:
         """Retain ``summary`` as a session checkpoint (if given), consolidate, and report what is worth promoting."""
@@ -278,9 +281,12 @@ class MemoryLifecycle:
     # Internals
     # ------------------------------------------------------------------
 
-    def _logged(self, text: str, block: str, candidates: list[str], session_id: str) -> str:
+    def _logged(
+        self, text: str, block: str, candidates: list[str], session_id: str, collapsed: list[dict[str, Any]]
+    ) -> str:
         """Log the memories whose ref_id ``text`` shows, in order of appearance (A1), with their receipt details and the
-        block's length (memkernel-0-15-harness-foundations A3); return ``text``."""
+        block's length (memkernel-0-15-harness-foundations A3), and what the block's selection hid
+        (memkernel-0-18-imported-page-collapse FR-003); return ``text``."""
         settings = self._service.settings
         if recall_log.log_path(settings) is None:
             return text  # the log is off: no record, and no lookups for one
@@ -294,8 +300,29 @@ class MemoryLifecycle:
             block=block,
             memories=[memory for memory in found if memory is not None],
             returned_chars=len(text),
+            collapsed=collapsed,
         )
         return text
+
+    def _distinct(
+        self, candidates: list[Memory], checkpoint: Memory | None, limit: int
+    ) -> tuple[list[Memory], list[dict[str, Any]]]:
+        """FR-004: no item equal to the checkpoint or an earlier item (ref_id or content hash); then, of the rest, the
+        first ``limit`` with no memory beside one that descends from it, and the candidates that hid
+        (memkernel-0-18-imported-page-collapse FR-003). Links are followed through records the process's caller,
+        from the settings, can see."""
+        settings = self._service.settings
+        who = Caller(settings.agent_id, settings.task_id)
+        distinct = _without_repeats(candidates, checkpoint)
+        by_id = {memory.ref_id: memory for memory in distinct}
+
+        def lookup(ref_id: str) -> Memory | None:
+            return self._service.get(ref_id, touch=False, caller=EVERYONE)
+
+        shown, collapsed = chains.collapse(
+            list(by_id), limit, lambda ref_id: chains.ancestor_paths(by_id[ref_id], lookup, who.can_see)
+        )
+        return [by_id[ref_id] for ref_id in shown], collapsed
 
     def _recovery_scope(self) -> str:
         """The only scope latest-checkpoint recovery reads (B4): the process's task, otherwise its agent, otherwise
@@ -327,18 +354,20 @@ class MemoryLifecycle:
         checkpoint = self._service.get(chosen.ref_id, touch=False) if chosen is not None else None
         if checkpoint is not None:  # H1: the work in progress is the query
             refs = self._service.recall(
-                checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False
+                checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False, collapse=False
             )
             found = [self._service.get(r.ref_id, touch=False) for r in refs]
-            context = _distinct([m for m in found if m is not None], checkpoint, POST_COMPACT_CONTEXT_TOP_K)
+            context, collapsed = self._distinct(
+                [m for m in found if m is not None], checkpoint, POST_COMPACT_CONTEXT_TOP_K
+            )
         else:
-            context = _distinct(self._startup_context(), checkpoint, POST_COMPACT_CONTEXT_TOP_K)
+            context, collapsed = self._distinct(self._startup_context(), checkpoint, POST_COMPACT_CONTEXT_TOP_K)
         lines = [HEADING_POST_COMPACT, "", HEADING_CHECKPOINT]
         lines.extend(self._checkpoint_lines(checkpoint) if checkpoint is not None else ["No checkpoint found."])
         lines.extend(["", HEADING_CONTEXT, *(self._memory_lines(context) or ["No prior memories found."])])
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         shown = [m.ref_id for m in (checkpoint, *context) if m is not None]
-        return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id)
+        return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id, collapsed)
 
     def _capture(self, drained: DrainResult) -> CaptureReport | None:
         """Run capture; a failure is logged and the block renders without it. Nothing is lost: a session leaves the
@@ -471,9 +500,8 @@ def _previous_sessions_block(drained: DrainResult, captured: CaptureReport | Non
     return ["", HEADING_PREVIOUS_SESSIONS, *lines]
 
 
-def _distinct(candidates: list[Memory], checkpoint: Memory | None, limit: int) -> list[Memory]:
-    """FR-004: no item equal to the checkpoint or an earlier item (ref_id or content hash), and no live source of
-    a promoted memory that is also shown; then the first ``limit``."""
+def _without_repeats(candidates: list[Memory], checkpoint: Memory | None) -> list[Memory]:
+    """``candidates`` without any item equal to the checkpoint or an earlier item (ref_id or content hash)."""
     seen_refs = {checkpoint.ref_id} if checkpoint is not None else set()
     seen_hashes = {checkpoint.content_hash} if checkpoint is not None and checkpoint.content_hash else set()
     kept: list[Memory] = []
@@ -484,8 +512,7 @@ def _distinct(candidates: list[Memory], checkpoint: Memory | None, limit: int) -
         if memory.content_hash:
             seen_hashes.add(memory.content_hash)
         kept.append(memory)
-    promoted_sources = {m.promoted_from for m in kept if m.promoted_from}
-    return [m for m in kept if m.ref_id not in promoted_sources][:limit]
+    return kept
 
 
 def _fit(lines: list[str], budget: int) -> list[str]:

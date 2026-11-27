@@ -142,12 +142,15 @@ EXCLUDED_SUPERSEDED = "superseded"
 EXCLUDED_FLAGGED = "flagged"
 EXCLUDED_EXPIRED = "expired"
 EXCLUDED_CAPPED = "capped"  # the limit of captured records per session in one result
+# memkernel-0-18 FR-003: an ancestor (promoted source, or a wiki page's source) of a memory the result shows
+EXCLUDED_COLLAPSED = "collapsed"
 EXCLUSION_REASONS = (
     EXCLUDED_OUT_OF_SCOPE,
     EXCLUDED_SUPERSEDED,
     EXCLUDED_FLAGGED,
     EXCLUDED_EXPIRED,
     EXCLUDED_CAPPED,
+    EXCLUDED_COLLAPSED,
 )
 # Why an empty recall is empty (FR-005, B11).
 EMPTY_NO_MATCH = "no_match"
@@ -172,7 +175,17 @@ PAGE_SHA_TAG = "page_sha:"
 WIKI_PATH_TAG = "wiki-path:"
 WIKI_ID_TAG = "wiki-id:"
 WIKI_IDENTITY_TAGS = (WIKI_PATH_TAG, WIKI_ID_TAG)
-WIKI_IMPORT_TAG_PREFIXES = (WIKI_PAGE_TAG, WIKI_PAGE_TYPE_TAG, PAGE_KEY_TAG, PAGE_SHA_TAG, *WIKI_IDENTITY_TAGS)
+# memkernel-0-18 FR-002: a wiki page's memory names the memory the page was exported from; only the import writes it
+WIKI_SOURCE_TAG = "wiki-source:"
+WIKI_IMPORT_TAG_PREFIXES = (
+    WIKI_PAGE_TAG,
+    WIKI_PAGE_TYPE_TAG,
+    PAGE_KEY_TAG,
+    PAGE_SHA_TAG,
+    *WIKI_IDENTITY_TAGS,
+    WIKI_SOURCE_TAG,
+)
+IMPORT_ONLY_TAGS = (*WIKI_IDENTITY_TAGS, WIKI_SOURCE_TAG)  # retain refuses them from any caller
 # Captured records (memkernel-0-12-capture-core FR-003): what capture writes on each record, and its source. Their
 # key is (session, call, extractor); the version is a tag only (D1).
 CAPTURE_SOURCE = "capture"
@@ -264,6 +277,15 @@ class Memory(BaseModel):
     def retired(self) -> bool:
         """True for history: superseded by another record or withdrawn (memkernel-0-7 FR-002)."""
         return self.superseded_by is not None or self.withdrawn_reason is not None
+
+    @property
+    def wiki_source(self) -> str | None:
+        """The memory this wiki page's memory was exported from (memkernel-0-18 FR-002), or None."""
+        return next((tag[len(WIKI_SOURCE_TAG) :] for tag in self.tags if tag.startswith(WIKI_SOURCE_TAG)), None)
+
+    def ancestor_links(self) -> list[str]:
+        """The records this one descends from, one link each: its promoted source and its wiki page source."""
+        return [ref for ref in (self.promoted_from, self.wiki_source) if ref]
 
 
 class HealthItem(BaseModel):
@@ -373,6 +395,8 @@ class RecallReceipt(BaseModel):
     memories: list[Memory] = []
     excluded: dict[str, int] | None = None
     empty_reason: str | None = None  # B11: set only when nothing was returned
+    # memkernel-0-18 FR-003: each hidden candidate as {"ref_id", "by", "path"}, in the order hidden; [] when none
+    collapsed: list[dict[str, Any]] = []
 
 
 @dataclass(frozen=True)

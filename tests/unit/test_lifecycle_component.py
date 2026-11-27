@@ -452,8 +452,6 @@ def test_each_block_stays_under_the_budget_and_names_what_to_get(monkeypatch: py
 
 def test_an_item_equal_to_the_checkpoint_or_a_shown_promotions_source_appears_once() -> None:
     """SC-4 (D8): de-duplication inside one block."""
-    from memkernel.lifecycle import _distinct
-
     lifecycle, svc = _lifecycle()
     a = svc.retain("Use Postgres", MemoryType.DECISION)
     twin = svc.retain("Use Postgres", MemoryType.FACT)  # same content, another record
@@ -462,11 +460,12 @@ def test_an_item_equal_to_the_checkpoint_or_a_shown_promotions_source_appears_on
     memories = [svc.get(r, touch=False) for r in (a, twin, source, promoted)]
     assert all(m is not None for m in memories)
 
-    kept = _distinct([m for m in memories if m is not None], None, 10)
+    kept, _ = lifecycle._distinct([m for m in memories if m is not None], None, 10)
 
     assert [m.ref_id for m in kept] == [a, promoted]
     checkpoint = svc.get(a, touch=False)
-    assert [m.ref_id for m in _distinct([m for m in memories if m is not None], checkpoint, 10)] == [promoted]
+    kept, _ = lifecycle._distinct([m for m in memories if m is not None], checkpoint, 10)
+    assert [m.ref_id for m in kept] == [promoted]
 
 
 # ── memkernel-0-7-hooks phase 2: D9, the session spool ────────────────────────
