@@ -325,6 +325,42 @@ def test_the_startup_block_shows_the_page_and_not_its_source() -> None:
     assert f"({page})" in text and f"({source})" not in text
 
 
+def test_a_page_the_budget_drops_hides_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The page ranks first but its line does not fit a small budget: the selection runs again without it, so the
+    source shows, and the last line counts the page as left out."""
+    from memkernel import lifecycle as module
+
+    svc = _service(preview_length=1000)
+    source = svc.retain(SOURCE, MemoryType.DECISION, importance=0.5)
+    page = svc.retain(PAGE + " " + "detail " * 60, MemoryType.DECISION, tags=[WIKI_TAG], importance=0.9)
+    svc.set_wiki_source(page, source)
+    lifecycle = MemoryLifecycle(svc, svc.settings)
+    assert f"({source})" not in lifecycle.on_session_start("startup")  # at the full budget the page hides it
+
+    monkeypatch.setattr(module, "CONTEXT_BUDGET", 300)
+    text = lifecycle.on_session_start("startup")
+
+    assert f"({page})" not in text and f"({source})" in text
+    assert "… and 1 more (use recall() for the rest)" in text
+    shown, collapsed, lines = lifecycle._context(
+        [svc.get(page, touch=False), svc.get(source, touch=False)], None, 6, 300
+    )
+    assert [m.ref_id for m in shown] == [source] and collapsed == [] and len(lines) == 2
+
+
+def test_a_line_that_does_not_fit_leaves_room_for_a_shorter_one_after_it() -> None:
+    svc = _service(preview_length=1000)
+    first = svc.retain("Short decision one.", MemoryType.DECISION)
+    long = svc.retain("Long decision " + "word " * 80, MemoryType.DECISION)
+    short = svc.retain("Short decision two.", MemoryType.DECISION)
+    memories = [svc.get(ref, touch=False) for ref in (first, long, short)]
+
+    shown, _, lines = MemoryLifecycle(svc, svc.settings)._context(memories, None, 6, 250)
+
+    assert [m.ref_id for m in shown] == [first, short]
+    assert lines[-1] == "… and 1 more (use recall() for the rest)"
+
+
 def test_a_promoted_copy_past_the_blocks_limit_hides_nothing() -> None:
     """The 6th-10th case: the copy ranks below the six shown, so its source stays in the block."""
     svc = _service()

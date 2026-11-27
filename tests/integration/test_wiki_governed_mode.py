@@ -527,15 +527,15 @@ def _failed_entry(w: Wiki) -> None:
 
 
 def _record_budgets(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Every budget ``lifecycle._fit`` is called with, in order; the first is the context share's."""
+    """Every budget ``lifecycle._fitting`` is called with, in order; the first is the context share's."""
     budgets: list[int] = []
-    real_fit = module._fit
+    real_fitting = module._fitting
 
-    def fit(lines: list[str], budget: int) -> list[str]:
+    def fitting(lines: list[str], budget: int) -> int:
         budgets.append(budget)
-        return list(real_fit(lines, budget))
+        return int(real_fitting(lines, budget))
 
-    monkeypatch.setattr(module, "_fit", fit)
+    monkeypatch.setattr(module, "_fitting", fitting)
     return budgets
 
 

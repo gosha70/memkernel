@@ -161,8 +161,10 @@ class MemoryLifecycle:
         captured = self._capture(drained) if capturing else None
         report = self._service.consolidate(limit=CANDIDATE_LIMIT, revalidate=True)
         latest = self._latest_checkpoint_memory()
-        context, collapsed = self._distinct(self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K)
         debt = curation_debt_lines(self._settings, self._service.settings, self._service.project_id)
+        context, collapsed, context_lines = self._context(
+            self._startup_context(), latest, SESSION_START_CONTEXT_TOP_K, CONTEXT_BUDGET - len("\n".join(debt))
+        )
         lines = [
             HEADING_SESSION_START,
             "",
@@ -171,7 +173,7 @@ class MemoryLifecycle:
             *_previous_sessions_block(drained, captured),
             "",
             HEADING_CONTEXT,
-            *(self._memory_lines(context, CONTEXT_BUDGET - len("\n".join(debt))) or ["No prior memories found."]),
+            *(context_lines or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(report["candidates"]))
         lines.extend(_needs_review_block(self._flagged(report.get("revalidated", {}).get("flagged", []))))
@@ -239,7 +241,9 @@ class MemoryLifecycle:
             query, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False, collapse=False
         )
         found = [self._service.get(r.ref_id, touch=False) for r in refs]
-        context, collapsed = self._distinct([m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K)
+        context, collapsed, context_lines = self._context(
+            [m for m in found if m is not None], latest, POST_COMPACT_CONTEXT_TOP_K, CONTEXT_BUDGET
+        )
         for memory in context:  # an access counts only for a memory the block shows, not for every candidate
             self._service.get(memory.ref_id)
         candidates = self._service.consolidate(limit=CANDIDATE_LIMIT, purge=False)["candidates"]
@@ -254,7 +258,7 @@ class MemoryLifecycle:
             ),
             "",
             HEADING_CONTEXT,
-            *(self._memory_lines(context) or ["No prior memories found."]),
+            *(context_lines or ["No prior memories found."]),
         ]
         lines.extend(_candidates_block(candidates))
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
@@ -324,6 +328,25 @@ class MemoryLifecycle:
         )
         return [by_id[ref_id] for ref_id in shown], collapsed
 
+    def _context(
+        self, candidates: list[Memory], checkpoint: Memory | None, limit: int, budget: int
+    ) -> tuple[list[Memory], list[dict[str, Any]], list[str]]:
+        """A block's context: the memories :meth:`_distinct` selects, what that hid, and their lines within
+        ``budget``. A memory whose line the budget drops is taken out of the candidates and the selection runs again
+        without it, so it hides nothing and what it would have hidden can show (memkernel-0-18-imported-page-collapse
+        FR-003); a last line counts the memories dropped."""
+        pool = list(candidates)
+        dropped = 0
+        while True:
+            context, collapsed = self._distinct(pool, checkpoint, limit)
+            lines = self._memory_lines(context)
+            fitting = _fitting(lines, budget)
+            if fitting == len(context):
+                return context, collapsed, [*lines, _left_out(dropped)] if dropped else lines
+            cut = context[fitting].ref_id  # the first line that does not fit; a shorter one after it may
+            pool = [m for m in pool if m.ref_id != cut]
+            dropped += 1
+
     def _recovery_scope(self) -> str:
         """The only scope latest-checkpoint recovery reads (B4): the process's task, otherwise its agent, otherwise
         ``project``. The hooks' own checkpoints are saved there too, by ``retain(checkpoint=True)``."""
@@ -357,14 +380,15 @@ class MemoryLifecycle:
                 checkpoint.content, tier=MemoryTier.LONG_TERM, top_k=HOOK_CANDIDATES, touch=False, collapse=False
             )
             found = [self._service.get(r.ref_id, touch=False) for r in refs]
-            context, collapsed = self._distinct(
-                [m for m in found if m is not None], checkpoint, POST_COMPACT_CONTEXT_TOP_K
-            )
+            candidates = [m for m in found if m is not None]
         else:
-            context, collapsed = self._distinct(self._startup_context(), checkpoint, POST_COMPACT_CONTEXT_TOP_K)
+            candidates = self._startup_context()
+        context, collapsed, context_lines = self._context(
+            candidates, checkpoint, POST_COMPACT_CONTEXT_TOP_K, CONTEXT_BUDGET
+        )
         lines = [HEADING_POST_COMPACT, "", HEADING_CHECKPOINT]
         lines.extend(self._checkpoint_lines(checkpoint) if checkpoint is not None else ["No checkpoint found."])
-        lines.extend(["", HEADING_CONTEXT, *(self._memory_lines(context) or ["No prior memories found."])])
+        lines.extend(["", HEADING_CONTEXT, *(context_lines or ["No prior memories found."])])
         lines.extend(["", SEPARATOR, "Use recall() / get(ref_id) for full content of any memory shown above."])
         shown = [m.ref_id for m in (checkpoint, *context) if m is not None]
         return self._logged(_finish(lines), BLOCK_COMPACT_RECOVERY, shown, session_id, collapsed)
@@ -441,14 +465,13 @@ class MemoryLifecycle:
         )
         return [age, *_stored_block(checkpoint.content, CHECKPOINT_BUDGET, checkpoint.ref_id)]
 
-    def _memory_lines(self, memories: list[Memory], budget: int = CONTEXT_BUDGET) -> list[str]:
+    def _memory_lines(self, memories: list[Memory]) -> list[str]:
         preview = self._service.settings.preview_length
-        lines = [
+        return [
             f"- [{_label(m.type, m.needs_review, m.review_reason)}] "
             f"{stored(' '.join(m.content.split())[:preview], STORED_KIND_CONTEXT)} ({m.ref_id})"
             for m in memories
         ]
-        return _fit(lines, budget)
 
 
 def _age(delta: timedelta) -> str:
@@ -515,16 +538,24 @@ def _without_repeats(candidates: list[Memory], checkpoint: Memory | None) -> lis
     return kept
 
 
+def _fitting(lines: list[str], budget: int) -> int:
+    """How many leading ``lines`` fit in ``budget`` characters, each with its newline."""
+    used = 0
+    for count, line in enumerate(lines):
+        if used + len(line) + 1 > budget:
+            return count
+        used += len(line) + 1
+    return len(lines)
+
+
+def _left_out(count: int) -> str:
+    return f"… and {count} more (use recall() for the rest)"
+
+
 def _fit(lines: list[str], budget: int) -> list[str]:
     """The leading ``lines`` that fit in ``budget`` characters, then one line saying how many were left out."""
-    kept: list[str] = []
-    used = 0
-    for line in lines:
-        if used + len(line) + 1 > budget:
-            return [*kept, f"… and {len(lines) - len(kept)} more (use recall() for the rest)"]
-        kept.append(line)
-        used += len(line) + 1
-    return kept
+    count = _fitting(lines, budget)
+    return lines if count == len(lines) else [*lines[:count], _left_out(len(lines) - count)]
 
 
 def neutralise(text: str) -> str:

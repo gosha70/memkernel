@@ -27,8 +27,8 @@ All notable changes to this project are documented here. The format follows
   is hidden, never superseded or edited. Links are followed only through memories the caller can see. A source
   linked from a live page is not a promotion candidate. `wiki_import` reports `linked` and `unlinked` (with a
   reason); `recall`'s receipt gains the `collapsed` exclusion reason and a `collapsed` list (`ref_id`, `by`, `path`),
-  which recall and hook log records carry when it is not empty. A promoted copy ranked past a hook block's limit no
-  longer hides its source from the block. Python: `MemoryService.set_wiki_source` (import only) and
+  which recall and hook log records carry when it is not empty. A promoted copy ranked past a hook block's limit, or a
+  memory the block's character budget drops, no longer hides its source from the block. Python: `MemoryService.set_wiki_source` (import only) and
   `recall(..., collapse=False)` for a caller that selects from a larger pool itself, as the hook blocks do.
 
 - **The lifecycle suite's `lc-correct` group and a governed-composition arm** (#90; specs/memkernel-0-16-lifecycle-corrections).

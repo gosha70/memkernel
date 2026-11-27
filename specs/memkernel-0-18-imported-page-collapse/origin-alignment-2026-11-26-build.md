@@ -17,15 +17,20 @@ Choices the plan did not state, each tied to a requirement:
     ancestor the block could show, which the owner's invariant forbids ("If a descendant is ranked sixth and only five
     results are shown, it must not suppress an otherwise visible ancestor"). So these blocks ask `recall` for the
     filtered window unselected and select once, at their own limit. The MCP `recall` tool always selects.
-  - **The link is written by `set_wiki_source` on every import, new records included.** FR-002 says a new record
-    gets the tag through `retain`; the build sets it after `retain` for new and existing records alike, through the
-    one import-only method. The outcome FR-002 requires holds: only the import writes the tag, `retain` refuses it
+  - **The link is written by `set_wiki_source` on every import, new records included.** The draft FR-002 gave a new
+    record the tag through `retain`; the build sets it after `retain` for new and existing records alike, through the
+    one import-only method. The owner approved amending FR-002 to say so (2026-11-26, on PR #169). The outcome FR-002 requires holds: only the import writes the tag, `retain` refuses it
     from callers, and each import sets it to what FR-001 decides now. A failure between the two writes leaves the page
     unlinked until the next import, which links it (the page is then `unchanged` and still checked).
   - **`ancestor_paths` returns each ancestor with its path** rather than the set the plan names, since the receipts'
     `path` needs it.
   - **`eval/anti-rot-128/calibrate.py`** calls the hook selection; it now calls the lifecycle's `_distinct` and asks
     `recall` for the unselected window, as the hook does.
+
+The owner's addition before ready (2026-11-26, on PR #169):
+  - **A memory the block's character budget drops hides nothing.** The hook blocks take a dropped memory out of the
+    candidates and select again, so its source can show; a last line still counts the memories left out. This is
+    FR-003's "never both" for one more way a descendant can go unshown. Tested at a small budget.
 
 Mismatches:
   - none against the origin.
