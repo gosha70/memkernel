@@ -291,7 +291,14 @@ def test_each_exclusion_is_counted_once_in_order_and_capped_is_counted(svc: Any)
     receipt = RecallReceipt()
     results = svc.recall("disk quota", top_k=20, caller=B, receipt=receipt)
     assert hidden not in _ids(results) and old not in _ids(results)
-    assert receipt.excluded == {"out_of_scope": 3, "superseded": 0, "flagged": 0, "expired": 0, "capped": 1}
+    assert receipt.excluded == {
+        "out_of_scope": 3,
+        "superseded": 0,
+        "flagged": 0,
+        "expired": 0,
+        "capped": 1,
+        "collapsed": 0,
+    }
 
 
 def test_an_empty_recall_says_why(svc: Any) -> None:

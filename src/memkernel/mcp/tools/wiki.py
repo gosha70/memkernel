@@ -140,6 +140,11 @@ def register_wiki_tools(server: MCPServer[Any]) -> None:
         is the same wiki. "mode" is the path that ran (gated or ungated) and "configured_mode" the
         MEMKERNEL_WIKI_MODE setting: governed refuses, importing nothing, unless wiki-studio and a
         governed wiki pass its checks; ungated never loads wiki-studio and reads the files.
+        A governed import links an approved page's memory to the memory its memkernel_ref names, so
+        recall and the hook blocks show the page and not that memory beside it: "linked" lists them
+        ({"page", "ref_id"}), "unlinked" the pages not linked with the first check that failed
+        ({"page", "ref_id", "reason"}: has_corrects, not_in_store, wiki_memory, retired,
+        not_project_scope, no_hash, unknown_scheme, hash_mismatch).
         """
         app_ctx = _context(ctx)
         importer = WikiImporter(
@@ -172,6 +177,8 @@ def register_wiki_tools(server: MCPServer[Any]) -> None:
             "pending",
             "sync_failed",
             "ambiguous",
+            "linked",
+            "unlinked",
         ):
             value = getattr(report, key)
             if value:

@@ -377,7 +377,13 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
     server = create_server(settings=settings, embedding=MockEmbedding(dimension=384))
 
     async with Client(server) as client:
-        await client.call_tool("retain", arguments={"content": "Use arq for background jobs", "type": "decision"})
+        decision = json.loads(
+            _text(
+                await client.call_tool(
+                    "retain", arguments={"content": "Use arq for background jobs", "type": "decision"}
+                )
+            )
+        )["ref_id"]
         await client.call_tool("retain", arguments={"content": "ran tests", "type": "episode"})
 
         result = await client.call_tool("wiki_export", arguments={})
@@ -411,9 +417,16 @@ async def test_wiki_export_import_roundtrip(tmp_path: object) -> None:
         assert imported["imported"] == ["decisions/use-arq-for-background-jobs.md"]
         assert imported["governed"] is (export["lint"] is not None)  # approved-only with the extra (FR-011)
         assert "import_error" not in imported
+        if imported["governed"]:  # memkernel-0-18 FR-005: the approved page's memory is linked to its source
+            assert imported["linked"] == [{"page": "decisions/use-arq-for-background-jobs.md", "ref_id": decision}]
+        else:  # D6: only the governed import links
+            assert "linked" not in imported
+        assert "unlinked" not in imported
 
         result = await client.call_tool("recall", arguments={"query": "arq background jobs", "tier": "long_term"})
         refs = json.loads(_text(result))
+        if imported["governed"]:  # the page is shown, not its source beside it
+            assert decision not in [r["ref_id"] for r in refs]
         result = await client.call_tool("get", arguments={"ref_id": refs[0]["ref_id"]})
         top = json.loads(_text(result))
         assert "wiki" in top["tags"]

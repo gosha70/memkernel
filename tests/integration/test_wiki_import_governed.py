@@ -597,3 +597,59 @@ def test_a_correction_made_while_two_pages_shared_a_record_stays_in_effect_after
     corrected = w.svc.get(wrong, touch=False)
     assert corrected is not None and corrected.superseded_by == shared.ref_id  # not moved to B's own record
     assert wrong not in {m.ref_id for m in w.svc.list_memories()}  # still not a current answer
+
+
+# ── memkernel-0-18-imported-page-collapse: the link and the governed loop ─────
+
+
+def test_an_approved_page_is_linked_and_shown_instead_of_its_source(tmp_path: Path) -> None:
+    """SC-1: export, approve unchanged, import; the startup block and recall show the page, not the source."""
+    from memkernel.lifecycle import MemoryLifecycle
+
+    w = Wiki(tmp_path)
+    rel, source = w.publish(DECISION)
+
+    report = w.import_pages()
+
+    (page,) = w.wiki_memories()
+    assert report.linked == [{"page": rel, "ref_id": source}] and report.unlinked == []
+    assert page.wiki_source == source
+    text = MemoryLifecycle(w.svc, w.svc.settings).on_session_start("startup")
+    assert f"({page.ref_id})" in text and f"({source})" not in text
+    shown = [r.ref_id for r in w.svc.recall("Postgres user DB concurrent writes", touch=False)]
+    assert page.ref_id in shown and source not in shown
+    stored = w.svc.get(source, touch=False)
+    assert stored is not None and stored.content == DECISION and not stored.retired()
+
+
+def test_a_page_imported_before_the_link_gains_it_and_a_revision_can_drop_it(tmp_path: Path) -> None:
+    """SC-5: the next import links an already current page; a frontmatter-only revision adding corrects, or
+    removing memkernel_ref, drops the link."""
+    w = Wiki(tmp_path)
+    rel, source = w.publish(DECISION)
+    w.import_pages()
+    (page,) = w.wiki_memories()
+    w.svc.set_wiki_source(page.ref_id, None)  # as a page imported before S5 is stored
+
+    again = w.import_pages()
+    assert again.unchanged == [rel] and again.linked == [{"page": rel, "ref_id": source}]
+    assert w.svc.get(page.ref_id, touch=False).wiki_source == source
+
+    w.update(rel, lambda text: text.replace("status: stable", "status: stable\ncorrects: nosuchmemory", 1))
+    w.approve(rel)
+    corrected = w.import_pages()
+    assert corrected.unlinked == [{"page": rel, "ref_id": source, "reason": "has_corrects"}]
+    (revised,) = w.wiki_memories()
+    assert revised.ref_id == page.ref_id and revised.wiki_source is None  # retain merged the frontmatter-only revision
+
+    w.update(rel, lambda text: text.replace("\ncorrects: nosuchmemory", "", 1))
+    w.approve(rel)
+    assert w.import_pages().linked == [{"page": rel, "ref_id": source}]
+    assert w.svc.get(page.ref_id, touch=False).wiki_source == source
+
+    w.update(rel, lambda text: re.sub(r"\nmemkernel_ref: [^\n]*", "", text))
+    w.approve(rel)
+    unreferenced = w.import_pages()
+    assert unreferenced.linked == [] and unreferenced.unlinked == []
+    (current,) = w.wiki_memories()
+    assert current.wiki_source is None

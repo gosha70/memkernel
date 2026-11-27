@@ -17,6 +17,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **An approved wiki page is shown instead of the memory it was exported from** (#164;
+  specs/memkernel-0-18-imported-page-collapse). A governed `wiki_import` links an approved page's memory to the
+  memory its `memkernel_ref` names (the reserved tag `wiki-source:<ref_id>`, which `retain` refuses and `promote`
+  drops), only when the page has no `corrects` key and the named memory is in the store, not a wiki memory, live, in
+  the `project` scope, and matches the page's `memkernel_sha256` under `memkernel_hash_scheme` (`sha256-raw` when
+  absent). `recall` and the hook blocks then show no memory beside one that descends from it, through these links or
+  `promoted_from`: the highest-ranked descendant within the limit is shown at its own rank and score, and the source
+  is hidden, never superseded or edited. Links are followed only through memories the caller can see. A source
+  linked from a live page is not a promotion candidate. `wiki_import` reports `linked` and `unlinked` (with a
+  reason); `recall`'s receipt gains the `collapsed` exclusion reason and a `collapsed` list (`ref_id`, `by`, `path`),
+  which recall and hook log records carry when it is not empty. A promoted copy ranked past a hook block's limit, or a
+  memory the block's character budget drops, no longer hides its source from the block. Python: `MemoryService.set_wiki_source` (import only) and
+  `recall(..., collapse=False)` for a caller that selects from a larger pool itself, as the hook blocks do.
+
 - **The lifecycle suite's `lc-correct` group and a governed-composition arm** (#90; specs/memkernel-0-16-lifecycle-corrections).
   Twelve chains in which a project rule changes between sessions (six replacements, six withdrawals). Each fixture
   wiki carries a competing page with the obsolete rule. The answer is an `Answer:` line in a neutral form per chain,

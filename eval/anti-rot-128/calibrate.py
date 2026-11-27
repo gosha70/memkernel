@@ -83,10 +83,12 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b, strict=True)) / norm if norm else 0.0
 
 
-def simulated(cand: list[Any], sims: list[float], checkpoint: Any, floor: float | None) -> list[Any]:
+def simulated(
+    life: MemoryLifecycle, cand: list[Any], sims: list[float], checkpoint: Any, floor: float | None
+) -> list[Any]:
     """The five memories a block would show at ``floor``: the window filtered, then the real ``_distinct()``."""
     kept = [m for m, s in zip(cand, sims, strict=True) if floor is None or s >= floor]
-    return lifecycle_module._distinct(kept, checkpoint, lifecycle_module.POST_COMPACT_CONTEXT_TOP_K)
+    return life._distinct(kept, checkpoint, lifecycle_module.POST_COMPACT_CONTEXT_TOP_K)[0]
 
 
 def targets(record: dict[str, Any], successors: dict[str, str]) -> list[str]:
@@ -127,7 +129,9 @@ def run_block(lifecycle: MemoryLifecycle, path: str) -> str:
 
 
 def window(svc: Any, query: str) -> list[Any]:
-    refs = svc.recall(query, tier=MemoryTier.LONG_TERM, top_k=lifecycle_module.HOOK_CANDIDATES, touch=False)
+    refs = svc.recall(
+        query, tier=MemoryTier.LONG_TERM, top_k=lifecycle_module.HOOK_CANDIDATES, touch=False, collapse=False
+    )
     return [m for m in (svc.get(r.ref_id, touch=False) for r in refs) if m is not None]
 
 
@@ -199,14 +203,14 @@ def main() -> int:
         for case in cases:
             record = case.pop("_record")
             checkpoint, cand, sims = case.pop("_probe")
-            shown = [names.get(m.ref_id, m.ref_id) for m in simulated(cand, sims, checkpoint, floor)]
+            shown = [names.get(m.ref_id, m.ref_id) for m in simulated(life, cand, sims, checkpoint, floor)]
             case["removed_by_floor"] = [
                 n for n in case["targets"] if floor is not None and n in case["window"] and case["window"][n] < floor
             ]
             case["distractors_passing"] = sum(
                 1 for n, s in case["window"].items() if n not in case["targets"] and floor is not None and s >= floor
             )
-            no_floor = [names.get(m.ref_id, m.ref_id) for m in simulated(cand, sims, checkpoint, None)]
+            no_floor = [names.get(m.ref_id, m.ref_id) for m in simulated(life, cand, sims, checkpoint, None)]
             case["at_floor"] = {
                 "displayed": shown,
                 "judged": judge(record, shown, r57.SUCCESSORS),

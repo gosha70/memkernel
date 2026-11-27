@@ -134,7 +134,14 @@ def test_a_recall_receipt_counts_each_exclusion_and_lists_what_it_returned(tmp_p
     receipt = RecallReceipt()
     results = svc.recall("user store", top_k=10, receipt=receipt)
 
-    assert receipt.excluded == {"out_of_scope": 0, "superseded": 1, "flagged": 1, "expired": 1, "capped": 0}
+    assert receipt.excluded == {
+        "out_of_scope": 0,
+        "superseded": 1,
+        "flagged": 1,
+        "expired": 1,
+        "capped": 0,
+        "collapsed": 0,
+    }
     assert [m.ref_id for m in receipt.memories] == [r.ref_id for r in results]
     assert {old, flagged, expired}.isdisjoint(r.ref_id for r in results)
 
@@ -148,7 +155,14 @@ def test_exclusions_are_the_last_windows_not_a_sum_over_windows(tmp_path: Path) 
         svc._vector_store.update_metadata(ref, {NEEDS_REVIEW_KEY: True, REVIEW_REASON_KEY: "changed"})
     receipt = RecallReceipt()
     assert svc.recall("user store", top_k=1, receipt=receipt) == []
-    assert receipt.excluded == {"out_of_scope": 0, "superseded": 0, "flagged": 3, "expired": 0, "capped": 0}
+    assert receipt.excluded == {
+        "out_of_scope": 0,
+        "superseded": 0,
+        "flagged": 3,
+        "expired": 0,
+        "capped": 0,
+        "collapsed": 0,
+    }
     assert receipt.memories == [] and receipt.empty_reason == "excluded"
 
 
@@ -260,3 +274,52 @@ def test_a_hook_record_lists_what_the_block_showed_with_the_process_ids(tmp_path
     assert decision in record["ref_ids"] and [m["ref_id"] for m in record["memories"]] == record["ref_ids"]
     assert record["returned_chars"] == len(text) and (record["run_id"], record["agent_id"]) == ("run-9", "planner")
     assert "latency_ms" not in record and "excluded" not in record
+
+
+# --- memkernel-0-18-imported-page-collapse FR-003: what a selection hid ------------------------------------------
+
+
+def test_a_hook_record_lists_what_the_block_hid_with_its_path(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    svc = _service(settings)
+    source = svc.retain("Use Postgres for the user store.", MemoryType.DECISION)
+    page = svc.retain(
+        "Use Postgres for the user store\n\nBecause of concurrent writes.", MemoryType.DECISION, tags=["wiki"]
+    )
+    svc.set_wiki_source(page, source)
+    copy = svc.promote(page, MemoryType.DECISION, content="Postgres holds the user store.", importance=1.0)
+
+    MemoryLifecycle(svc, settings).on_session_start("startup", session_id="s1")
+
+    (record,) = _records(settings)
+    assert copy in record["ref_ids"] and page not in record["ref_ids"] and source not in record["ref_ids"]
+    assert record["collapsed"] == [
+        {"ref_id": page, "by": copy, "path": [copy, page]},
+        {"ref_id": source, "by": copy, "path": [copy, page, source]},
+    ]
+
+
+def test_a_hook_record_leaves_collapsed_out_when_nothing_was_hidden(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    svc = _service(settings)
+    svc.retain("Use Postgres for the user store.", MemoryType.DECISION)
+    MemoryLifecycle(svc, settings).on_session_start("startup", session_id="s1")
+    (record,) = _records(settings)
+    assert "collapsed" not in record
+
+
+def test_a_recall_receipts_collapsed_list_is_empty_when_nothing_was_hidden(tmp_path: Path) -> None:
+    svc = _service(_settings(tmp_path))
+    svc.retain("Use Postgres for the user store.", MemoryType.DECISION)
+    receipt = RecallReceipt()
+    svc.recall("user store", receipt=receipt)
+    assert receipt.collapsed == [] and RecallReceipt().collapsed == []
+
+
+def test_a_recall_record_carries_the_collapsed_list_only_when_there_is_one(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    entry = {"ref_id": "src", "by": "page", "path": ["page", "src"]}
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, ["page"], collapsed=[entry])
+    recall_log.append(settings, recall_log.ORIGIN_TOOL, ["page"])
+    first, second = _records(settings)
+    assert first["collapsed"] == [entry] and "collapsed" not in second

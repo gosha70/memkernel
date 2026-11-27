@@ -1,7 +1,8 @@
 # Spec: hide a wiki page's source memory while the page's memory is shown (#164, #59 S5)
 
 Status: in review on PR #165. The owner's decisions of 2026-11-25 are fixed (O1–O7), and the owner approved D1–D6
-the same day, D2 as option (c), and settled Q1; their invariants are in FR-003.
+the same day, D2 as option (c), and settled Q1; their invariants are in FR-003. Amended during the build (PR #169),
+approved by the owner on 2026-11-26: FR-002 (new records get the tag through `set_wiki_source`).
 S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's build, then S5's build.
 
 ## What memkernel does today (`main` at `3ba5c72`)
@@ -35,9 +36,11 @@ S5 leaves #59 open: the owner closes it. Order (O7): this spec's PR, then #90's 
      `memkernel_hash_scheme`, or `sha256-raw` when the key is absent (pages exported before 0.17). A page without
      `memkernel_sha256`, or with a scheme memkernel doesn't know, gets no link.
 - **FR-002 Where the link lives (D1).** The link is a reserved tag `wiki-source:<ref_id>` on the page's memory, written
-  only by the import. A new record gets it through `retain`; an existing record (a page imported before S5, or a
-  revision that changed only frontmatter, which `retain` deduplicates) through an import-only service method, as
-  `set_wiki_identity` does for the identity tags. Each import sets the tag to what FR-001 decides now: it adds it,
+  only by the import. Every page memory gets it through one import-only service method, `set_wiki_source`, which the
+  import calls after `retain` returns the page's ref_id: a new record, and an existing one (a page imported before
+  S5, or a revision that changed only frontmatter, which `retain` deduplicates), as `set_wiki_identity` does for the
+  identity tags (amended 2026-11-26, approved by the owner: the draft gave a new record the tag through `retain`). A
+  failure between the two writes leaves the page unlinked until the next import links it. Each import sets the tag to what FR-001 decides now: it adds it,
   replaces a stale one, or removes it. `retain` raises `ValueError` for a caller-supplied tag with this prefix, as it
   does for `wiki-path:` and `wiki-id:`, so no caller can hide another memory. `promote` leaves it off the promoted copy, as it
   does the other import tags (`services.py:1502`); the page memory keeps its own, so a promoted copy of a page still
