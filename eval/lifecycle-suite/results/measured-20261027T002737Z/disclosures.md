@@ -12,12 +12,17 @@ SC-8 of `specs/memkernel-0-5/spec.md` asks that the report step reproduce this f
 receipts". The frozen `report.py` has no input for written disclosures, and the preregistration requires them
 in the report. This file is therefore assembled from three committed inputs, not from the receipts alone: the
 receipts, the report parameters (`report-params.json`: title, SHAs, tag, the calibration's live-compaction
-finding) and this reviewed section. The generated part is not edited. From `eval/lifecycle-suite/`:
+finding) and this reviewed section. The generated part is not edited. The command runs `report.py` as frozen at
+`641a508`: `main`'s `report.py` gained a table of tokens by group in gosha70/memkernel#166, so its output no longer
+matches the generated part. From `eval/lifecycle-suite/` in a clone of the repository:
 
 ```bash
 set -euo pipefail
 run=results/measured-20261027T002737Z
-python3 report.py --receipts "$run/receipts.jsonl" \
+frozen=$(mktemp -d)
+git -C "$(git rev-parse --show-toplevel)" archive 641a508a2289b2d20775e6d149a0bb47678d1621:eval/lifecycle-suite \
+  | tar -x -C "$frozen"
+python3 "$frozen/report.py" --receipts "$run/receipts.jsonl" \
   --receipts calibration/receipts-20261024T033046Z.jsonl \
   --params "$run/report-params.json" --preregistration preregistration.md > /tmp/generated.md \
   && { cat /tmp/generated.md; printf '\n'; cat "$run/disclosures.md"; } | cmp - report-0.5.0.md
@@ -163,7 +168,8 @@ the folder every session's workspace sits in. The counts below are in `find_read
   `lc-retain` and 3 `lc-reval` tasks, a search of the whole chain folder returned paths or matching lines from an
   earlier session's folder: its raw `stream.jsonl` in all 22, its configuration folder in 20, its workspace in 10.
   The arm's design gives a later session rendered transcripts only (`persist`: transcripts, not the workspace).
-  Whether this changed any outcome was not measured; no result was rescored.
+  On all 8 tasks, `fs_grep` and `memkernel` both passed 5 of 5 graded trials **[receipts]**, so these calls did not
+  change the comparison between them there; no result was rescored.
 - **Other:** one `placebo` session wrote to a mistyped folder at the run's top level, removed it, and listed the top
   level, which showed it the other chains' folder names, not their contents.
 
